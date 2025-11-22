@@ -20,6 +20,12 @@ importers:
 
   apps/admin:
     dependencies:
+      '@repo/backend':
+        specifier: workspace:*
+        version: link:../../packages/backend
+      convex:
+        specifier: ^1.29.3
+        version: 1.29.3(react@19.2.0)
       next:
         specifier: 16.0.3
         version: 16.0.3(@babel/core@7.28.5)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
@@ -69,6 +75,12 @@ importers:
       '@react-navigation/native':
         specifier: ^7.1.8
         version: 7.1.21(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
+      '@repo/backend':
+        specifier: workspace:*
+        version: link:../../packages/backend
+      convex:
+        specifier: ^1.29.3
+        version: 1.29.3(react@19.1.0)
       expo:
         specifier: ~54.0.25
         version: 54.0.25(@babel/core@7.28.5)(@expo/metro-runtime@6.1.2)(expo-router@6.0.15)(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
@@ -148,9 +160,15 @@ importers:
 
   apps/web:
     dependencies:
+      '@repo/backend':
+        specifier: workspace:*
+        version: link:../../packages/backend
       '@repo/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      convex:
+        specifier: ^1.29.3
+        version: 1.29.3(react@19.2.0)
       next:
         specifier: ^16.0.1
         version: 16.0.1(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
@@ -8025,6 +8043,13 @@ snapshots:
       - supports-color
 
   convert-source-map@2.0.0: {}
+
+  convex@1.29.3(react@19.1.0):
+    dependencies:
+      esbuild: 0.25.4
+      prettier: 3.6.2
+    optionalDependencies:
+      react: 19.1.0
 
   convex@1.29.3(react@19.2.0):
     dependencies:

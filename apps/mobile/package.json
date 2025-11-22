@@ -12,6 +12,8 @@
     "lint": "expo lint"
   },
   "dependencies": {
+    "@repo/backend": "workspace:*",
+    "convex": "^1.29.3",
     "@expo/vector-icons": "^15.0.3",
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/elements": "^2.6.3",
