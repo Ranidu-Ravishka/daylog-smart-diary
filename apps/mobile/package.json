@@ -7,11 +7,13 @@
     "dev": "expo start --ios",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
-    "ios": "expo start --ios",
+    "ios": "expo start --web",
     "web": "expo start --web",
     "lint": "expo lint"
   },
   "dependencies": {
+    "@repo/backend": "workspace:*",
+    "convex": "^1.29.3",
     "@expo/vector-icons": "^15.0.3",
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/elements": "^2.6.3",
