@@ -85,7 +85,7 @@ jobs:
       - run: pnpm typecheck
 
   build:
-    name: Turbo Filtered Build (Changed Only)
+    name: Build Changed Packages
     runs-on: ubuntu-latest
     needs: [format, lint, typecheck]
 
@@ -103,52 +103,3 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build affected apps/packages
         run: pnpm turbo run build --filter=...[HEAD^1]
-
-  # UNCOMMENTED: per-app build jobs for clearer logs
-  build-web:
-    name: Build Web App
-    runs-on: ubuntu-latest
-    needs: [format, lint, typecheck]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: "pnpm"
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build:web
-
-  build-admin:
-    name: Build Admin App
-    runs-on: ubuntu-latest
-    needs: [format, lint, typecheck]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: "pnpm"
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build:admin
-
-  build-mobile:
-    name: Build Mobile App
-    runs-on: ubuntu-latest
-    needs: [format, lint, typecheck]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: "pnpm"
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build:mobile
