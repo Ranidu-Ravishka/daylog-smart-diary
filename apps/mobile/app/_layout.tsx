@@ -12,7 +12,14 @@ import { ConvexReactClient, ConvexProviderWithAuth } from "convex/react";
 import { ClerkProvider, useAuth } from "@clerk/clerk-expo";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 
-const convex = new ConvexReactClient(process.env.EXPO_PUBLIC_CONVEX_URL!);
+const defaultConvexUrl = "http://localhost:4334";
+const configuredConvexUrl = process.env.EXPO_PUBLIC_CONVEX_URL;
+
+if (!configuredConvexUrl && !__DEV__) {
+  console.error("Missing EXPO_PUBLIC_CONVEX_URL in production build.");
+}
+
+const convex = new ConvexReactClient(configuredConvexUrl ?? defaultConvexUrl);
 
 export const unstable_settings = {
   anchor: "(tabs)",
@@ -53,6 +60,8 @@ export default function RootLayout() {
         >
           <Stack>
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="sign-in" options={{ headerShown: false }} />
+            <Stack.Screen name="sign-up" options={{ headerShown: false }} />
             <Stack.Screen
               name="modal"
               options={{ presentation: "modal", title: "Modal" }}

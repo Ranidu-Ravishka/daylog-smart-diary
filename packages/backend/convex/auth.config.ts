@@ -10,5 +10,5 @@ export default {
       domain: "https://awaited-crab-26.clerk.accounts.dev",
       applicationID: "convex",
     },
-  ]
+  ],
 } satisfies AuthConfig;
