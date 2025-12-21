@@ -33,6 +33,15 @@ export default function TabLayout() {
       }}
     >
       <Tabs.Screen
+        name="quick-setup"
+        options={{
+          title: "Quick Setup",
+          headerShown: false,
+          tabBarStyle: { display: "none" },
+          tabBarButton: () => null,
+        }}
+      />
+      <Tabs.Screen
         name="index"
         options={{
           title: "Home",
@@ -41,15 +50,7 @@ export default function TabLayout() {
           ),
         }}
       />
-      <Tabs.Screen
-        name="explore"
-        options={{
-          title: "Explore",
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="paperplane.fill" color={color} />
-          ),
-        }}
-      />
+      {/* Explore tab removed per request to avoid navbar showing Explore */}
     </Tabs>
   );
 }

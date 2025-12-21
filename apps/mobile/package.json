@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "scripts": {
     "start": "expo start",
-    "dev": "expo start --web",
+    "dev": "expo start --ios",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
@@ -14,6 +14,7 @@
   "dependencies": {
     "@clerk/clerk-expo": "^2.19.11",
     "@expo/vector-icons": "^15.0.3",
+    "@react-native-community/datetimepicker": "^8.5.1",
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/elements": "^2.6.3",
     "@react-navigation/native": "^7.1.8",
