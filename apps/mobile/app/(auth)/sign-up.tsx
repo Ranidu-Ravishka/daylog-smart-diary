@@ -61,7 +61,7 @@ export default function SignUpScreen() {
   ]);
 
   const handleOAuthSignIn = async (
-    strategy: "oauth_google" | "oauth_apple"
+    strategy: "oauth_google" | "oauth_apple",
   ) => {
     const startOAuthFlow =
       strategy === "oauth_google" ? startGoogleOAuth : startAppleOAuth;
@@ -119,7 +119,7 @@ export default function SignUpScreen() {
       if (typeof error === "object" && error !== null && "errors" in error) {
         const clerkError = error as { errors?: { message?: string }[] };
         setErrorMessage(
-          clerkError.errors?.[0]?.message ?? "Unable to sign up."
+          clerkError.errors?.[0]?.message ?? "Unable to sign up.",
         );
       } else {
         setErrorMessage("Unable to sign up.");
@@ -152,7 +152,7 @@ export default function SignUpScreen() {
       if (typeof error === "object" && error !== null && "errors" in error) {
         const clerkError = error as { errors?: { message?: string }[] };
         setErrorMessage(
-          clerkError.errors?.[0]?.message ?? "Invalid verification code."
+          clerkError.errors?.[0]?.message ?? "Invalid verification code.",
         );
       } else {
         setErrorMessage("Invalid verification code.");

@@ -48,7 +48,7 @@ export default function SignInScreen() {
   }, [emailAddress, password, isLoaded, isPending]);
 
   const handleOAuthSignIn = async (
-    strategy: "oauth_google" | "oauth_apple"
+    strategy: "oauth_google" | "oauth_apple",
   ) => {
     const startOAuthFlow =
       strategy === "oauth_google" ? startGoogleOAuth : startAppleOAuth;
@@ -101,14 +101,14 @@ export default function SignInScreen() {
         router.replace("/quick-setup" as unknown as any);
       } else {
         setErrorMessage(
-          "Additional verification required. Please check your email."
+          "Additional verification required. Please check your email.",
         );
       }
     } catch (error: unknown) {
       if (typeof error === "object" && error !== null && "errors" in error) {
         const clerkError = error as { errors?: { message?: string }[] };
         setErrorMessage(
-          clerkError.errors?.[0]?.message ?? "Unable to sign in."
+          clerkError.errors?.[0]?.message ?? "Unable to sign in.",
         );
       } else {
         setErrorMessage("Unable to sign in.");
