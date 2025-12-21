@@ -39,7 +39,7 @@ export default function SignUpScreen() {
 
   useEffect(() => {
     if (authLoaded && isSignedIn) {
-      router.replace("/quick-setup");
+      router.replace("/quick-setup" as unknown as any);
     }
   }, [authLoaded, isSignedIn, router]);
 
@@ -61,7 +61,7 @@ export default function SignUpScreen() {
   ]);
 
   const handleOAuthSignIn = async (
-    strategy: "oauth_google" | "oauth_apple",
+    strategy: "oauth_google" | "oauth_apple"
   ) => {
     const startOAuthFlow =
       strategy === "oauth_google" ? startGoogleOAuth : startAppleOAuth;
@@ -72,10 +72,12 @@ export default function SignUpScreen() {
     setErrorMessage(null);
 
     try {
-      const { createdSessionId, setActive } = await startOAuthFlow();
+      const { createdSessionId, setActive: oauthSetActive } =
+        await startOAuthFlow();
 
       if (createdSessionId) {
-        await setActive({ session: createdSessionId });
+        // prefer oauthSetActive if provided, otherwise fall back to the sign-up setActive
+        await (oauthSetActive ?? setActive)?.({ session: createdSessionId });
         router.replace("/");
       }
     } catch (err) {
@@ -117,7 +119,7 @@ export default function SignUpScreen() {
       if (typeof error === "object" && error !== null && "errors" in error) {
         const clerkError = error as { errors?: { message?: string }[] };
         setErrorMessage(
-          clerkError.errors?.[0]?.message ?? "Unable to sign up.",
+          clerkError.errors?.[0]?.message ?? "Unable to sign up."
         );
       } else {
         setErrorMessage("Unable to sign up.");
@@ -150,7 +152,7 @@ export default function SignUpScreen() {
       if (typeof error === "object" && error !== null && "errors" in error) {
         const clerkError = error as { errors?: { message?: string }[] };
         setErrorMessage(
-          clerkError.errors?.[0]?.message ?? "Invalid verification code.",
+          clerkError.errors?.[0]?.message ?? "Invalid verification code."
         );
       } else {
         setErrorMessage("Invalid verification code.");

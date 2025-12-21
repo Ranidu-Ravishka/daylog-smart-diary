@@ -37,7 +37,7 @@ export default function SignInScreen() {
 
   useEffect(() => {
     if (authLoaded && isSignedIn) {
-      router.replace("/quick-setup");
+      router.replace("/quick-setup" as unknown as any);
     }
   }, [authLoaded, isSignedIn, router]);
 
@@ -66,7 +66,7 @@ export default function SignInScreen() {
         if (setActive) {
           await setActive({ session: createdSessionId });
         }
-        router.replace("/quick-setup");
+        router.replace("/quick-setup" as unknown as any);
       }
     } catch (err) {
       console.error("OAuth error:", err);
@@ -98,7 +98,7 @@ export default function SignInScreen() {
         if (setActive) {
           await setActive({ session: result.createdSessionId });
         }
-        router.replace("/quick-setup");
+        router.replace("/quick-setup" as unknown as any);
       } else {
         setErrorMessage(
           "Additional verification required. Please check your email."
