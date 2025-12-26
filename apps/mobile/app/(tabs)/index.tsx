@@ -1,77 +1,318 @@
-import { Image } from "expo-image";
-import { Platform, StyleSheet } from "react-native";
+import React from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Platform,
+  StatusBar,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 
-import { HelloWave } from "@/components/hello-wave";
-import ParallaxScrollView from "@/components/parallax-scroll-view";
-import { ThemedText } from "@/components/themed-text";
-import { ThemedView } from "@/components/themed-view";
+const HomeScreen = () => {
+  // Mock data
+  const userName = "John";
+  const placesCount = 3;
+  const stepsCount = "5,420";
+  const eventsCount = 2;
 
-export default function HomeScreen() {
+  const dailySummary =
+    "Yesterday, you had a productive workday followed by an evening walk in Central Park. You slept 7.5 hours and caught up with friends over dinner.";
+
+  const timelineEvents = [
+    { location: "Home", time: "7.30 AM (45 min)" },
+    { location: "Work", time: "9 AM - 5 PM" },
+    { location: "Gym", time: "3:30 PM (15 min)" },
+    { location: "Central park", time: "8 PM" },
+  ];
+
+  const quickActions = [
+    { icon: "add-circle-outline", label: "Add Memory" },
+    { icon: "target-outline", label: "Today's Focus" },
+    { icon: "analytics-outline", label: "Insights" },
+    { icon: "settings-outline", label: "Settings" },
+  ];
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: "#A1CEDC", dark: "#1D3D47" }}
-      headerImage={
-        <Image
-          source={require("@/assets/images/partial-react-logo.png")}
-          style={styles.reactLogo}
-        />
-      }
-    >
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit{" "}
-          <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText>{" "}
-          to see changes. Press{" "}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: "cmd + d",
-              android: "cmd + m",
-              web: "F12",
-            })}
-          </ThemedText>{" "}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        {/* Explore section removed per user request */}
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">
-            npm run reset-project
-          </ThemedText>{" "}
-          to get a fresh <ThemedText type="defaultSemiBold">app</ThemedText>{" "}
-          directory. This will move the current{" "}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{" "}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+
+      <ScrollView
+        style={styles.container}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* Greeting */}
+        <View style={styles.greetingContainer}>
+          <Text style={styles.greetingText}>Good Morning, {userName}</Text>
+        </View>
+
+        {/* Stats Row */}
+        <View style={styles.statsContainer}>
+          <View style={styles.statItem}>
+            <Ionicons name="location-outline" size={15} color="black" />
+            <Text style={styles.statText}>{placesCount} Places</Text>
+          </View>
+
+          <View style={styles.statItem}>
+            <Ionicons name="walk-outline" size={15} color="black" />
+            <Text style={styles.statText}>{stepsCount} Steps</Text>
+          </View>
+
+          <View style={styles.statItem}>
+            <Ionicons name="calendar-outline" size={15} color="black" />
+            <Text style={styles.statText}>{eventsCount} Events</Text>
+          </View>
+        </View>
+
+        {/* Main Content */}
+        <View style={styles.contentContainer}>
+          {/* Daily Summary Card */}
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.cardTitle}>Daily Summary</Text>
+            </View>
+            <View style={styles.cardContent}>
+              <Text style={styles.summaryText}>{dailySummary}</Text>
+              <TouchableOpacity style={styles.exploreButton}>
+                <Text style={styles.exploreText}>
+                  Tap facts to explore details →
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Quick Actions Grid */}
+          <View style={styles.quickActionsContainer}>
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
+            <View style={styles.actionsGrid}>
+              {quickActions.map((action, index) => (
+                <TouchableOpacity key={index} style={styles.actionCard}>
+                  <View style={styles.actionIconContainer}>
+                    <Ionicons
+                      name={action.icon as any}
+                      size={30}
+                      color="#6366f1"
+                    />
+                  </View>
+                  <Text style={styles.actionLabel}>{action.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </View>
+
+        {/* Today's Timeline Card */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.cardTitle}>Today&apos;s Timeline</Text>
+          </View>
+          <View style={styles.timelineContainer}>
+            {timelineEvents.map((event, index) => (
+              <View key={index} style={styles.timelineItem}>
+                <View style={styles.timelineLeft}>
+                  <Text style={styles.locationText}>{event.location}</Text>
+                </View>
+                <View style={styles.timelineRight}>
+                  <Text style={styles.timeTextSmall}>{event.time}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
+        {/* Bottom Navigation Spacer */}
+        <View style={styles.bottomSpacer} />
+      </ScrollView>
+    </SafeAreaView>
   );
-}
+};
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#f8fafc",
+    paddingTop: Platform.OS === "android" ? StatusBar.currentHeight : 0,
+  },
+  container: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingTop: 24,
+    paddingBottom: 20,
+  },
+  greetingContainer: {
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 16,
+  },
+  greetingText: {
+    textAlign: "center",
+    color: "black",
+    fontSize: 19,
+    fontFamily: "Inter",
+    fontWeight: "700",
+    lineHeight: 22,
+  },
+  statsContainer: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+  },
+  statItem: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 6,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  statText: {
+    textAlign: "center",
+    color: "black",
+    fontSize: 11,
+    fontFamily: "Inter",
+    fontWeight: "500",
+    lineHeight: 22,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: "absolute",
+  contentContainer: {
+    paddingHorizontal: 24,
+    gap: 20,
+  },
+  card: {
+    backgroundColor: "white",
+    borderRadius: 18,
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 4,
+    overflow: "hidden",
+  },
+  cardHeader: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+  },
+  cardTitle: {
+    textAlign: "center",
+    color: "black",
+    fontSize: 16,
+    fontFamily: "Inter",
+    fontWeight: "600",
+    lineHeight: 22,
+  },
+  cardContent: {
+    padding: 20,
+  },
+  summaryText: {
+    width: "100%",
+    color: "black",
+    fontSize: 13,
+    fontFamily: "Inter",
+    fontWeight: "400",
+    lineHeight: 22,
+    marginBottom: 12,
+  },
+  exploreButton: {
+    alignSelf: "flex-start",
+  },
+  exploreText: {
+    color: "#0D00FF",
+    fontSize: 12,
+    fontFamily: "Inter",
+    fontWeight: "500",
+    lineHeight: 22,
+  },
+  timelineContainer: {
+    padding: 20,
+    gap: 16,
+  },
+  timelineItem: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  timelineLeft: {
+    flex: 1,
+  },
+  timelineRight: {
+    flex: 1,
+    alignItems: "flex-end",
+  },
+  locationText: {
+    textAlign: "left",
+    color: "black",
+    fontSize: 14,
+    fontFamily: "Inter",
+    fontWeight: "400",
+    lineHeight: 22,
+  },
+  timeTextSmall: {
+    textAlign: "right",
+    color: "rgba(0, 0, 0, 0.60)",
+    fontSize: 12,
+    fontFamily: "Inter",
+    fontWeight: "400",
+    lineHeight: 22,
+  },
+  quickActionsContainer: {
+    marginTop: 8,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#0f172a",
+    marginBottom: 16,
+    fontFamily: "Inter",
+  },
+  actionsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+    justifyContent: "space-between",
+  },
+  actionCard: {
+    width: "48%",
+    backgroundColor: "white",
+    borderRadius: 18,
+    padding: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 4,
+    marginBottom: 12,
+  },
+  actionIconContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 15,
+    backgroundColor: "rgba(99, 102, 241, 0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  actionLabel: {
+    textAlign: "center",
+    color: "black",
+    fontSize: 13,
+    fontFamily: "Inter",
+    fontWeight: "400",
+    lineHeight: 22,
+  },
+  bottomSpacer: {
+    height: 80,
   },
 });
+
+export default HomeScreen;

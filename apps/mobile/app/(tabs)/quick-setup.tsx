@@ -12,7 +12,9 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import DateTimePicker from "@react-native-community/datetimepicker";
+import DateTimePicker, {
+  DateTimePickerEvent,
+} from "@react-native-community/datetimepicker";
 import { ThemedView } from "@/components/themed-view";
 import { ThemedText } from "@/components/themed-text";
 import { useAuth } from "@clerk/clerk-expo";
@@ -20,8 +22,8 @@ import { useAuth } from "@clerk/clerk-expo";
 export default function QuickSetupScreen() {
   const router = useRouter();
   const { isSignedIn } = useAuth();
-  const [selectedFocus, setSelectedFocus] = useState([]);
-  const [reminderType, setReminderType] = useState(null);
+  const [selectedFocus, setSelectedFocus] = useState<number[]>([]);
+  const [reminderType, setReminderType] = useState<string | null>(null);
   const [dailyTime, setDailyTime] = useState(new Date());
   const [weeklyDay, setWeeklyDay] = useState("Sunday");
   const [showTimePicker, setShowTimePicker] = useState(false);
@@ -58,7 +60,7 @@ export default function QuickSetupScreen() {
 
   const daysOfWeek = [
     "Sunday",
-    "Monday", 
+    "Monday",
     "Tuesday",
     "Wednesday",
     "Thursday",
@@ -66,7 +68,7 @@ export default function QuickSetupScreen() {
     "Saturday",
   ];
 
-  const handleFocusSelect = (id) => {
+  const handleFocusSelect = (id: number) => {
     if (selectedFocus.includes(id)) {
       setSelectedFocus(selectedFocus.filter((item) => item !== id));
     } else {
@@ -74,31 +76,34 @@ export default function QuickSetupScreen() {
     }
   };
 
-  const handleTimeChange = (event, selectedDate) => {
+  const handleTimeChange = (
+    event: DateTimePickerEvent,
+    selectedDate?: Date,
+  ) => {
     if (Platform.OS === "android") {
       setShowTimePicker(false);
     }
-    
+
     if (selectedDate) {
       setDailyTime(selectedDate);
     }
   };
 
-  const handleDaySelect = (day) => {
+  const handleDaySelect = (day: string) => {
     setWeeklyDay(day);
     setShowDayPicker(false);
   };
 
-  const formatTime = (date) => {
+  const formatTime = (date: Date) => {
     let hours = date.getHours();
-    let minutes = date.getMinutes();
+    const minutes = date.getMinutes();
     const ampm = hours >= 12 ? "PM" : "AM";
-    
+
     hours = hours % 12;
     hours = hours ? hours : 12; // Convert 0 to 12
-    minutes = minutes < 10 ? "0" + minutes : minutes;
-    
-    return `${hours}:${minutes} ${ampm}`;
+    const minutesStr = String(minutes).padStart(2, "0");
+
+    return `${hours}:${minutesStr} ${ampm}`;
   };
 
   const openTimePicker = () => {
@@ -127,22 +132,23 @@ export default function QuickSetupScreen() {
       weeklyDay: weeklyDay,
       formattedTime: formatTime(dailyTime),
     };
-    
+
     console.log("User preferences:", preferences);
-    
+
     // Navigate to home tab
     router.replace("/(tabs)");
   };
 
-  const getIconName = (icon) => {
-    const iconMap = {
-      time: "time-outline",
-      fitness: "fitness-outline",
-      people: "people-outline",
-      "trending-up": "trending-up-outline",
-      compass: "compass-outline",
-    };
-    return iconMap[icon] || "help-outline";
+  const iconMap = {
+    time: "time-outline",
+    fitness: "fitness-outline",
+    people: "people-outline",
+    "trending-up": "trending-up-outline",
+    compass: "compass-outline",
+  } as const;
+
+  const getIconName = (icon: string): keyof typeof Ionicons.glyphMap => {
+    return iconMap[icon as keyof typeof iconMap] ?? "help-outline";
   };
 
   const isContinueEnabled = selectedFocus.length > 0 && reminderType !== null;
@@ -172,37 +178,48 @@ export default function QuickSetupScreen() {
             <ThemedText type="default" style={styles.sectionSubtitle}>
               Choose one or more areas to personalize your experience
             </ThemedText>
-            
+
             <View style={styles.optionsContainer}>
               {focusOptions.map((option) => (
                 <TouchableOpacity
                   key={option.id}
                   style={[
                     styles.optionCard,
-                    selectedFocus.includes(option.id) && styles.optionCardSelected,
+                    selectedFocus.includes(option.id) &&
+                      styles.optionCardSelected,
                   ]}
                   onPress={() => handleFocusSelect(option.id)}
                   activeOpacity={0.7}
                 >
                   <View style={styles.optionContent}>
-                    <View style={[
-                      styles.iconContainer,
-                      selectedFocus.includes(option.id) && styles.iconContainerSelected,
-                    ]}>
+                    <View
+                      style={[
+                        styles.iconContainer,
+                        selectedFocus.includes(option.id) &&
+                          styles.iconContainerSelected,
+                      ]}
+                    >
                       <Ionicons
                         name={getIconName(option.icon)}
                         size={20}
-                        color={selectedFocus.includes(option.id) ? "#6366f1" : "#94a3b8"}
+                        color={
+                          selectedFocus.includes(option.id)
+                            ? "#6366f1"
+                            : "#94a3b8"
+                        }
                       />
                     </View>
-                    <ThemedText style={[
-                      styles.optionText,
-                      selectedFocus.includes(option.id) && styles.optionTextSelected,
-                    ]}>
+                    <ThemedText
+                      style={[
+                        styles.optionText,
+                        selectedFocus.includes(option.id) &&
+                          styles.optionTextSelected,
+                      ]}
+                    >
                       {option.label}
                     </ThemedText>
                   </View>
-                  
+
                   {selectedFocus.includes(option.id) && (
                     <Ionicons
                       name="checkmark-circle"
@@ -224,7 +241,7 @@ export default function QuickSetupScreen() {
             <ThemedText type="default" style={styles.sectionSubtitle}>
               How would you like to be reminded?
             </ThemedText>
-            
+
             <View style={styles.optionsContainer}>
               {reminderOptions.map((option) => (
                 <TouchableOpacity
@@ -238,39 +255,51 @@ export default function QuickSetupScreen() {
                 >
                   <View style={styles.reminderContent}>
                     <View style={styles.reminderTextContainer}>
-                      <ThemedText style={[
-                        styles.reminderLabel,
-                        reminderType === option.id && styles.reminderLabelSelected,
-                      ]}>
+                      <ThemedText
+                        style={[
+                          styles.reminderLabel,
+                          reminderType === option.id &&
+                            styles.reminderLabelSelected,
+                        ]}
+                      >
                         {option.label}
                       </ThemedText>
-                      
+
                       <TouchableOpacity
                         style={styles.timeDayButton}
-                        onPress={option.id === "daily" ? openTimePicker : openDayPicker}
+                        onPress={
+                          option.id === "daily" ? openTimePicker : openDayPicker
+                        }
                         disabled={reminderType !== option.id}
                       >
-                        <Text style={[
-                          styles.reminderValue,
-                          reminderType !== option.id && styles.reminderValueDisabled,
-                        ]}>
-                          {option.id === "daily" ? formatTime(dailyTime) : weeklyDay}
+                        <Text
+                          style={[
+                            styles.reminderValue,
+                            reminderType !== option.id &&
+                              styles.reminderValueDisabled,
+                          ]}
+                        >
+                          {option.id === "daily"
+                            ? formatTime(dailyTime)
+                            : weeklyDay}
                         </Text>
                         {reminderType === option.id && (
-                          <Ionicons 
-                            name="chevron-down" 
-                            size={16} 
-                            color="#6366f1" 
+                          <Ionicons
+                            name="chevron-down"
+                            size={16}
+                            color="#6366f1"
                             style={styles.chevronIcon}
                           />
                         )}
                       </TouchableOpacity>
                     </View>
-                    
-                    <View style={[
-                      styles.radioOuter,
-                      reminderType === option.id && styles.radioOuterSelected,
-                    ]}>
+
+                    <View
+                      style={[
+                        styles.radioOuter,
+                        reminderType === option.id && styles.radioOuterSelected,
+                      ]}
+                    >
                       {reminderType === option.id && (
                         <View style={styles.radioInner} />
                       )}
@@ -346,11 +375,7 @@ export default function QuickSetupScreen() {
 
       {/* Day Picker Modal */}
       {showDayPicker && (
-        <Modal
-          transparent={true}
-          animationType="fade"
-          visible={showDayPicker}
-        >
+        <Modal transparent={true} animationType="fade" visible={showDayPicker}>
           <TouchableWithoutFeedback onPress={() => setShowDayPicker(false)}>
             <View style={styles.modalOverlay}>
               <View style={styles.dayPickerContainer}>
@@ -363,7 +388,7 @@ export default function QuickSetupScreen() {
                     <Ionicons name="close" size={24} color="#6b7280" />
                   </TouchableOpacity>
                 </View>
-                
+
                 <View style={styles.daysContainer}>
                   {daysOfWeek.map((day) => (
                     <TouchableOpacity
@@ -374,17 +399,19 @@ export default function QuickSetupScreen() {
                       ]}
                       onPress={() => handleDaySelect(day)}
                     >
-                      <Text style={[
-                        styles.dayText,
-                        weeklyDay === day && styles.dayTextSelected,
-                      ]}>
+                      <Text
+                        style={[
+                          styles.dayText,
+                          weeklyDay === day && styles.dayTextSelected,
+                        ]}
+                      >
                         {day}
                       </Text>
                       {weeklyDay === day && (
-                        <Ionicons 
-                          name="checkmark" 
-                          size={20} 
-                          color="#6366f1" 
+                        <Ionicons
+                          name="checkmark"
+                          size={20}
+                          color="#6366f1"
                           style={styles.dayCheckIcon}
                         />
                       )}
