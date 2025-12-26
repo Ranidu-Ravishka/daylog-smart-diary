@@ -10,6 +10,7 @@ import {
   View,
   TouchableOpacity,
   Image,
+  ScrollView,
 } from "react-native";
 import { Link, useRouter } from "expo-router";
 import { useAuth, useSignUp, useOAuth } from "@clerk/clerk-expo";
@@ -36,16 +37,27 @@ export default function SignUpScreen() {
   const [pendingVerification, setPendingVerification] = useState(false);
   const [isPending, setIsPending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [resendCooldown, setResendCooldown] = useState(0);
 
   useEffect(() => {
     if (authLoaded && isSignedIn) {
-      router.replace("/quick-setup" as unknown as any);
+      router.replace("/quick-setup");
     }
   }, [authLoaded, isSignedIn, router]);
 
+  // Resend cooldown timer
+  useEffect(() => {
+    if (resendCooldown > 0) {
+      const timer = setTimeout(() => {
+        setResendCooldown(resendCooldown - 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [resendCooldown]);
+
   const isPrimaryActionDisabled = useMemo(() => {
     if (pendingVerification) {
-      return verificationCode.trim().length === 0 || !isLoaded || isPending;
+      return verificationCode.trim().length !== 6 || !isLoaded || isPending;
     }
 
     return (
@@ -72,13 +84,13 @@ export default function SignUpScreen() {
     setErrorMessage(null);
 
     try {
-      const { createdSessionId, setActive: oauthSetActive } =
-        await startOAuthFlow();
+      const oauthResult = await startOAuthFlow();
 
-      if (createdSessionId) {
-        // prefer oauthSetActive if provided, otherwise fall back to the sign-up setActive
-        await (oauthSetActive ?? setActive)?.({ session: createdSessionId });
-        router.replace("/");
+      if (oauthResult?.createdSessionId) {
+        if (setActive) {
+          await setActive({ session: oauthResult.createdSessionId });
+        }
+        router.replace("/quick-setup");
       }
     } catch (err) {
       console.error("OAuth error:", err);
@@ -101,28 +113,67 @@ export default function SignUpScreen() {
     setErrorMessage(null);
 
     try {
-      const result = await signUp.create({
+      // Create the sign-up attempt
+      await signUp.create({
         emailAddress: emailAddress.trim(),
         password,
       });
 
-      await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
+      // Prepare email verification
+      await signUp.prepareEmailAddressVerification({
+        strategy: "email_code",
+      });
 
-      if (result.status && result.status === "complete") {
-        await setActive({ session: result.createdSessionId });
-        router.replace("/");
-        return;
-      }
-
+      // Switch to verification view
       setPendingVerification(true);
+      setErrorMessage(null);
+      setResendCooldown(60); // 60-second cooldown for resend
     } catch (error: unknown) {
-      if (typeof error === "object" && error !== null && "errors" in error) {
-        const clerkError = error as { errors?: { message?: string }[] };
-        setErrorMessage(
-          clerkError.errors?.[0]?.message ?? "Unable to sign up.",
-        );
+      console.error("Sign-up error:", error);
+
+      if (typeof error === "object" && error !== null) {
+        if ("errors" in error) {
+          const clerkError = error as {
+            errors?: {
+              message?: string;
+              code?: string;
+              longMessage?: string;
+            }[];
+          };
+
+          const errorMsg =
+            clerkError.errors?.[0]?.message ?? "Unable to sign up.";
+          const errorCode = clerkError.errors?.[0]?.code;
+
+          // Handle specific error cases
+          if (errorCode === "form_identifier_exists") {
+            setErrorMessage(
+              "An account with this email already exists. Please sign in.",
+            );
+          } else if (errorCode === "form_password_pwned") {
+            setErrorMessage(
+              "This password has been compromised. Please choose a different one.",
+            );
+          } else if (
+            errorMsg.includes("password") &&
+            errorMsg.includes("weak")
+          ) {
+            setErrorMessage(
+              "Password is too weak. Please use a stronger password.",
+            );
+          } else if (
+            errorMsg.includes("email") &&
+            errorMsg.includes("invalid")
+          ) {
+            setErrorMessage("Please enter a valid email address.");
+          } else {
+            setErrorMessage(errorMsg);
+          }
+        } else if ("message" in error) {
+          setErrorMessage((error as { message: string }).message);
+        }
       } else {
-        setErrorMessage("Unable to sign up.");
+        setErrorMessage("Unable to sign up. Please try again.");
       }
     } finally {
       setIsPending(false);
@@ -143,23 +194,85 @@ export default function SignUpScreen() {
       });
 
       if (result.status === "complete") {
-        await setActive({ session: result.createdSessionId });
-        router.replace("/");
+        if (setActive) {
+          await setActive({ session: result.createdSessionId });
+        }
+        router.replace("/quick-setup");
+      } else if (result.status === "missing_requirements") {
+        setErrorMessage(
+          "Additional information is required to complete sign-up.",
+        );
       } else {
-        setErrorMessage("Verification requires additional steps in Clerk.");
+        setErrorMessage("Unable to complete verification. Please try again.");
       }
     } catch (error: unknown) {
-      if (typeof error === "object" && error !== null && "errors" in error) {
-        const clerkError = error as { errors?: { message?: string }[] };
-        setErrorMessage(
-          clerkError.errors?.[0]?.message ?? "Invalid verification code.",
-        );
+      console.error("Verification error:", error);
+
+      if (typeof error === "object" && error !== null) {
+        if ("errors" in error) {
+          const clerkError = error as {
+            errors?: {
+              message?: string;
+              code?: string;
+            }[];
+          };
+
+          const errorMsg =
+            clerkError.errors?.[0]?.message ?? "Invalid verification code.";
+          const errorCode = clerkError.errors?.[0]?.code;
+
+          if (errorCode === "form_code_incorrect") {
+            setErrorMessage("Incorrect verification code. Please try again.");
+          } else if (errorCode === "form_param_format_invalid") {
+            setErrorMessage(
+              "Invalid code format. Please enter a 6-digit code.",
+            );
+          } else if (errorMsg.includes("expired")) {
+            setErrorMessage(
+              "Verification code has expired. Please request a new one.",
+            );
+          } else {
+            setErrorMessage(errorMsg);
+          }
+        }
       } else {
         setErrorMessage("Invalid verification code.");
       }
     } finally {
       setIsPending(false);
     }
+  };
+
+  const handleResendCode = async () => {
+    if (!isLoaded || resendCooldown > 0) return;
+
+    setIsPending(true);
+    setErrorMessage(null);
+
+    try {
+      await signUp.prepareEmailAddressVerification({
+        strategy: "email_code",
+      });
+
+      setResendCooldown(60); // Reset cooldown to 60 seconds
+      setErrorMessage(
+        "✅ New verification code sent! Please check your email.",
+      );
+    } catch (error: any) {
+      console.error("Resend error:", error);
+      setErrorMessage(
+        error.errors?.[0]?.message ||
+          "Failed to resend code. Please try again.",
+      );
+    } finally {
+      setIsPending(false);
+    }
+  };
+
+  const goBackToSignUp = () => {
+    setPendingVerification(false);
+    setVerificationCode("");
+    setErrorMessage(null);
   };
 
   if (!authLoaded || (authLoaded && isSignedIn)) {
@@ -175,136 +288,218 @@ export default function SignUpScreen() {
       style={styles.flex}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Image
-            source={require("@/assets/images/logo.png")}
-            style={styles.logo}
-            resizeMode="contain"
-          />
-          <Text style={styles.title}>Join our community</Text>
-          <Text style={styles.subtitle}>
-            Create your account to get started
-          </Text>
-        </View>
+      <ScrollView
+        contentContainerStyle={styles.scrollContainer}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.container}>
+          <View style={styles.header}>
+            <Image
+              source={require("@/assets/images/logo.png")}
+              style={styles.logo}
+              resizeMode="contain"
+            />
+            <Text style={styles.title}>
+              {pendingVerification ? "Verify Your Email" : "Join our community"}
+            </Text>
+            <Text style={styles.subtitle}>
+              {pendingVerification
+                ? `Enter the 6-digit code sent to ${emailAddress}`
+                : "Create your account to get started"}
+            </Text>
+          </View>
 
-        {!pendingVerification && (
-          <View style={styles.socialButtonsContainer}>
-            <TouchableOpacity
-              style={[styles.socialButton, styles.googleButton]}
-              onPress={() => handleOAuthSignIn("oauth_google")}
-              disabled={isPending}
+          {!pendingVerification && (
+            <>
+              <View style={styles.socialButtonsContainer}>
+                <TouchableOpacity
+                  style={[styles.socialButton, styles.googleButton]}
+                  onPress={() => handleOAuthSignIn("oauth_google")}
+                  disabled={isPending}
+                >
+                  <Ionicons name="logo-google" size={20} color="#ffffff" />
+                  <Text style={styles.socialButtonText}>
+                    Continue with Google
+                  </Text>
+                </TouchableOpacity>
+
+                {Platform.OS === "ios" && (
+                  <TouchableOpacity
+                    style={[styles.socialButton, styles.appleButton]}
+                    onPress={() => handleOAuthSignIn("oauth_apple")}
+                    disabled={isPending}
+                  >
+                    <Ionicons name="logo-apple" size={20} color="#ffffff" />
+                    <Text style={styles.socialButtonText}>
+                      Continue with Apple
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              <View style={styles.divider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>OR</Text>
+                <View style={styles.dividerLine} />
+              </View>
+            </>
+          )}
+
+          {pendingVerification ? (
+            <View style={styles.card}>
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>Verification Code</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter 6-digit code"
+                  keyboardType="number-pad"
+                  value={verificationCode}
+                  onChangeText={(text) => {
+                    setVerificationCode(
+                      text.replace(/[^0-9]/g, "").slice(0, 6),
+                    );
+                    setErrorMessage(null);
+                  }}
+                  textContentType="oneTimeCode"
+                  maxLength={6}
+                  autoFocus
+                  editable={!isPending}
+                />
+
+                <View style={styles.resendContainer}>
+                  <TouchableOpacity
+                    onPress={handleResendCode}
+                    disabled={isPending || resendCooldown > 0}
+                    style={styles.resendButton}
+                  >
+                    <Text
+                      style={[
+                        styles.resendText,
+                        (isPending || resendCooldown > 0) &&
+                          styles.resendTextDisabled,
+                      ]}
+                    >
+                      {resendCooldown > 0
+                        ? `Resend in ${resendCooldown}s`
+                        : "Resend code"}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={goBackToSignUp}
+                    disabled={isPending}
+                    style={styles.backButton}
+                  >
+                    <Text style={styles.backText}>Back to sign up</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.card}>
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>Email Address</Text>
+                <TextInput
+                  style={styles.input}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="email-address"
+                  placeholder="name@example.com"
+                  value={emailAddress}
+                  onChangeText={(text) => {
+                    setEmailAddress(text);
+                    setErrorMessage(null);
+                  }}
+                  textContentType="emailAddress"
+                  autoFocus
+                  editable={!isPending}
+                />
+              </View>
+
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>Password</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Minimum 8 characters"
+                  secureTextEntry
+                  value={password}
+                  onChangeText={(text) => {
+                    setPassword(text);
+                    setErrorMessage(null);
+                  }}
+                  textContentType="newPassword"
+                  editable={!isPending}
+                />
+                <Text style={styles.passwordHint}>
+                  • At least 8 characters
+                  {"\n"}• Include uppercase and lowercase letters
+                  {"\n"}• Include numbers or special characters
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {errorMessage && (
+            <View
+              style={[
+                styles.errorContainer,
+                errorMessage.includes("✅") && styles.successContainer,
+              ]}
             >
-              <Ionicons name="logo-google" size={20} color="#ffffff" />
-              <Text style={styles.socialButtonText}>Continue with Google</Text>
-            </TouchableOpacity>
-
-            {Platform.OS === "ios" && (
-              <TouchableOpacity
-                style={[styles.socialButton, styles.appleButton]}
-                onPress={() => handleOAuthSignIn("oauth_apple")}
-                disabled={isPending}
+              <Text
+                style={[
+                  styles.errorText,
+                  errorMessage.includes("✅") && styles.successText,
+                ]}
               >
-                <Ionicons name="logo-apple" size={20} color="#ffffff" />
-                <Text style={styles.socialButtonText}>Continue with Apple</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-
-        {!pendingVerification && (
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>OR</Text>
-            <View style={styles.dividerLine} />
-          </View>
-        )}
-
-        {pendingVerification ? (
-          <View style={styles.card}>
-            <View style={styles.fieldGroup}>
-              <Text style={styles.label}>Verification Code</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter 6-digit code"
-                keyboardType="number-pad"
-                value={verificationCode}
-                onChangeText={setVerificationCode}
-                textContentType="oneTimeCode"
-                maxLength={6}
-                autoFocus
-              />
-              <Text style={styles.hint}>
-                Check your email for the verification code
+                {errorMessage.includes("✅") ? "✅ " : "⚠️ "}
+                {errorMessage.replace("✅ ", "")}
               </Text>
             </View>
-          </View>
-        ) : (
-          <View style={styles.card}>
-            <View style={styles.fieldGroup}>
-              <Text style={styles.label}>Email Address</Text>
-              <TextInput
-                style={styles.input}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="email-address"
-                placeholder="name@example.com"
-                value={emailAddress}
-                onChangeText={setEmailAddress}
-                textContentType="emailAddress"
-                autoFocus
-              />
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <Text style={styles.label}>Password</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Minimum 8 characters"
-                secureTextEntry
-                value={password}
-                onChangeText={setPassword}
-                textContentType="password"
-              />
-            </View>
-          </View>
-        )}
-
-        {errorMessage ? (
-          <View style={styles.errorContainer}>
-            <Text style={styles.errorText}>⚠️ {errorMessage}</Text>
-          </View>
-        ) : null}
-
-        <Pressable
-          style={({ pressed }) => [
-            styles.ctaButton,
-            isPrimaryActionDisabled && styles.ctaButtonDisabled,
-            pressed && styles.ctaButtonPressed,
-          ]}
-          onPress={pendingVerification ? handleVerification : handleSignUp}
-          disabled={isPrimaryActionDisabled}
-        >
-          {isPending ? (
-            <ActivityIndicator color="#ffffff" />
-          ) : (
-            <Text style={styles.ctaLabel}>
-              {pendingVerification ? "Verify Email" : "Create Account"}
-            </Text>
           )}
-        </Pressable>
 
-        {!pendingVerification && (
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>Already have an account?</Text>
-            <Link href="/sign-in" asChild>
-              <Pressable style={styles.linkButton}>
-                <Text style={styles.linkText}>Sign In</Text>
-              </Pressable>
-            </Link>
-          </View>
-        )}
-      </View>
+          <Pressable
+            style={({ pressed }) => [
+              styles.ctaButton,
+              isPrimaryActionDisabled && styles.ctaButtonDisabled,
+              pressed && styles.ctaButtonPressed,
+            ]}
+            onPress={pendingVerification ? handleVerification : handleSignUp}
+            disabled={isPrimaryActionDisabled || isPending}
+          >
+            {isPending ? (
+              <ActivityIndicator color="#ffffff" />
+            ) : (
+              <Text style={styles.ctaLabel}>
+                {pendingVerification ? "Verify Email" : "Create Account"}
+              </Text>
+            )}
+          </Pressable>
+
+          {!pendingVerification ? (
+            <View style={styles.footer}>
+              <Text style={styles.footerText}>Already have an account?</Text>
+              <Link href="/sign-in" asChild>
+                <Pressable style={styles.linkButton} disabled={isPending}>
+                  <Text style={styles.linkText}>Sign In</Text>
+                </Pressable>
+              </Link>
+            </View>
+          ) : (
+            <View style={styles.verificationFooter}>
+              <Text style={styles.verificationFooterText}>
+                <Ionicons
+                  name="information-circle-outline"
+                  size={16}
+                  color="#64748b"
+                />{" "}
+                Check your spam folder if you don{"'"}t see the email
+              </Text>
+            </View>
+          )}
+        </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
@@ -314,6 +509,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#f8fafc",
   },
+  scrollContainer: {
+    flexGrow: 1,
+  },
   container: {
     flex: 1,
     padding: 24,
@@ -322,6 +520,7 @@ const styles = StyleSheet.create({
     maxWidth: 400,
     alignSelf: "center",
     width: "100%",
+    minHeight: "100%",
   },
   loaderContainer: {
     flex: 1,
@@ -345,6 +544,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#0f172a",
     letterSpacing: -0.5,
+    textAlign: "center",
   },
   subtitle: {
     fontSize: 15,
@@ -422,22 +622,57 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
     color: "#0f172a",
   },
-  hint: {
-    fontSize: 13,
-    color: "#94a3b8",
+  passwordHint: {
+    fontSize: 12,
+    color: "#64748b",
+    lineHeight: 18,
     marginTop: 4,
+  },
+  resendContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 8,
+  },
+  resendButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  resendText: {
+    color: "#6366f1",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  resendTextDisabled: {
+    color: "#94a3b8",
+  },
+  backButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  backText: {
+    color: "#64748b",
+    fontSize: 14,
+    fontWeight: "500",
   },
   errorContainer: {
     backgroundColor: "#fef2f2",
     borderRadius: 12,
-    padding: 12,
+    padding: 16,
     borderLeftWidth: 4,
     borderLeftColor: "#dc2626",
+  },
+  successContainer: {
+    backgroundColor: "#f0fdf4",
+    borderLeftColor: "#22c55e",
   },
   errorText: {
     color: "#dc2626",
     fontSize: 14,
     lineHeight: 20,
+  },
+  successText: {
+    color: "#15803d",
   },
   ctaButton: {
     borderRadius: 14,
@@ -485,5 +720,17 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "600",
     color: "#6366f1",
+  },
+  verificationFooter: {
+    backgroundColor: "#f1f5f9",
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 8,
+  },
+  verificationFooterText: {
+    color: "#64748b",
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
   },
 });
