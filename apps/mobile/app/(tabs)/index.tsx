@@ -94,7 +94,7 @@ const HomeScreen = () => {
                     <Ionicons
                       name={action.icon as any}
                       size={30}
-                      color="#6366f1"
+                      color="#000000"
                     />
                   </View>
                   <Text style={styles.actionLabel}>{action.label}</Text>
