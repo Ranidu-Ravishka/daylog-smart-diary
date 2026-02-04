@@ -118,9 +118,6 @@ jobs:
       - name: Type check
         run: pnpm typecheck
 
-      - name: Build packages
-        run: pnpm build:packages
-
       - name: Build web app
         if: needs.changes.outputs.web == 'true'
         run: pnpm --filter=web run build
