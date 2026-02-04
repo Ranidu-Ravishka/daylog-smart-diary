@@ -14,8 +14,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #000000;
+    --background: #f7f9fc;
+    --foreground: #171717;
   }
 }
 
@@ -25,13 +25,8 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-.app-container {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 32px 16px;
-  background: linear-gradient(180deg, #f7f9fc 0%, #ffffff 100%);
+.container {
+  @apply max-w-7xl mx-auto;
 }
 
 .main-card-wrapper {

@@ -26,7 +26,7 @@ export default function Profile() {
   }
 
   return (
-    <div className="profile-card action-card">
+    <div className="container profile-card action-card">
       <Image
         src={imgSrc}
         alt={user.name || "User profile"}
