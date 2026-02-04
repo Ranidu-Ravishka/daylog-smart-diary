@@ -17,9 +17,12 @@ export default defineSchema(
     user: defineTable({
       clerkUserId: v.string(),
       email: v.string(),
-      firstName: v.string(),
-      lastName: v.string(),
-    }).index("by_clerkUserId", ["clerkUserId"]),
+      firstName: v.optional(v.string()),
+      lastName: v.optional(v.string()),
+      imageUrl: v.optional(v.string()),
+    })
+      .index("by_clerkUserId", ["clerkUserId"])
+      .index("by_email", ["email"]),
   },
 
   // If you ever get an error about schema mismatch

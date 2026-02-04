@@ -32,6 +32,8 @@ export default function SignUpScreen() {
   });
 
   const [emailAddress, setEmailAddress] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [password, setPassword] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
   const [pendingVerification, setPendingVerification] = useState(false);
@@ -114,9 +116,14 @@ export default function SignUpScreen() {
 
     try {
       // Create the sign-up attempt
+      const firstNameTrimmed = firstName.trim();
+      const lastNameTrimmed = lastName.trim();
+
       await signUp.create({
         emailAddress: emailAddress.trim(),
         password,
+        firstName: firstNameTrimmed || undefined,
+        lastName: lastNameTrimmed || undefined,
       });
 
       // Prepare email verification
@@ -398,6 +405,40 @@ export default function SignUpScreen() {
             </View>
           ) : (
             <View style={styles.card}>
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>First Name</Text>
+                <TextInput
+                  style={styles.input}
+                  autoCapitalize="words"
+                  autoCorrect={false}
+                  placeholder="John"
+                  value={firstName}
+                  onChangeText={(text) => {
+                    setFirstName(text);
+                    setErrorMessage(null);
+                  }}
+                  textContentType="givenName"
+                  editable={!isPending}
+                />
+              </View>
+
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>Last Name</Text>
+                <TextInput
+                  style={styles.input}
+                  autoCapitalize="words"
+                  autoCorrect={false}
+                  placeholder="Doe"
+                  value={lastName}
+                  onChangeText={(text) => {
+                    setLastName(text);
+                    setErrorMessage(null);
+                  }}
+                  textContentType="familyName"
+                  editable={!isPending}
+                />
+              </View>
+
               <View style={styles.fieldGroup}>
                 <Text style={styles.label}>Email Address</Text>
                 <TextInput
