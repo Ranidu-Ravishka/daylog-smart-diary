@@ -9,6 +9,7 @@
     "dev:web": "turbo run dev --filter=web",
     "dev:mobile": "turbo run dev --filter=mobile",
     "dev:admin": "turbo run dev --filter=admin",
+    "dev:convex": "turbo run dev --filter=@packages/backend",
     "lint": "turbo run lint",
     "lint:web": "turbo run lint --filter=web",
     "lint:mobile": "turbo run lint --filter=mobile",

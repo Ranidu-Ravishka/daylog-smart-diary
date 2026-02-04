@@ -7,13 +7,24 @@ import { v } from "convex/values";
 
 export default defineSchema(
   {
-    documents: defineTable({
-      fieldOne: v.string(),
-      fieldTwo: v.object({
-        subFieldOne: v.array(v.number()),
-      }),
-    }),
+    content: defineTable({
+      slug: v.string(),
+      title: v.string(),
+      body: v.string(),
+    }).index("by_slug", ["slug"]),
+
+    // user table
+    user: defineTable({
+      clerkUserId: v.string(),
+      email: v.string(),
+      firstName: v.optional(v.string()),
+      lastName: v.optional(v.string()),
+      imageUrl: v.optional(v.string()),
+    })
+      .index("by_clerkUserId", ["clerkUserId"])
+      .index("by_email", ["email"]),
   },
+
   // If you ever get an error about schema mismatch
   // between your data and your schema, and you cannot
   // change the schema to match the current data in your database,
