@@ -49,6 +49,13 @@ jobs:
             mobile:
               - 'apps/mobile/**'
 
+            shared:
+              - 'packages/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'turbo.json'
+
       - name: Compute build flags
         id: set
         shell: bash
@@ -56,6 +63,7 @@ jobs:
           WEB_CHANGED: ${{ steps.filter.outputs.web }}
           ADMIN_CHANGED: ${{ steps.filter.outputs.admin }}
           MOBILE_CHANGED: ${{ steps.filter.outputs.mobile }}
+          SHARED_CHANGED: ${{ steps.filter.outputs.shared }}
 
         run: |
           bool_or() {
@@ -75,7 +83,6 @@ jobs:
           echo "web=$WEB" >> "$GITHUB_OUTPUT"
           echo "admin=$ADMIN" >> "$GITHUB_OUTPUT"
           echo "mobile=$MOBILE" >> "$GITHUB_OUTPUT"
-
 
   # ==================================================
   # Main CI checks
@@ -120,8 +127,8 @@ jobs:
 
       - name: Build web app
         if: needs.changes.outputs.web == 'true'
-        run: pnpm --filter=web run build
+        run: pnpm run build:web
 
       - name: Build admin app
         if: needs.changes.outputs.admin == 'true'
-        run: pnpm --filter=admin run build
+        run: pnpm run build:admin
