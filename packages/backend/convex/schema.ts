@@ -23,6 +23,17 @@ export default defineSchema(
     })
       .index("by_clerkUserId", ["clerkUserId"])
       .index("by_email", ["email"]),
+
+    userPreferences: defineTable({
+      clerkUserId: v.string(),
+      focusAreas: v.array(v.number()),
+      reminderType: v.union(v.literal("daily"), v.literal("weekly")),
+      dailyTime: v.string(),
+      weeklyDay: v.string(),
+      formattedTime: v.string(),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_clerkUserId", ["clerkUserId"]),
   },
 
   // If you ever get an error about schema mismatch

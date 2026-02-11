@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -17,13 +17,26 @@ import DateTimePicker, {
 } from "@react-native-community/datetimepicker";
 import { ThemedView } from "@/components/themed-view";
 import { ThemedText } from "@/components/themed-text";
-import { useAuth } from "@clerk/clerk-expo";
+import { useAuth, useUser } from "@clerk/clerk-expo";
+import { useMutation, useQuery } from "convex/react";
+import { api } from "@repo/backend/convex";
 
 export default function QuickSetupScreen() {
   const router = useRouter();
   const { isSignedIn } = useAuth();
+  const { user } = useUser();
+  const syncUserPreferences = useMutation(
+    api.userPreferences.syncMyUserPreferences,
+  );
+  const savedPreferences = useQuery(api.userPreferences.getMyUserPreferences);
+  const didPrefill = useRef(false);
+
+  const [isSaving, setIsSaving] = useState(false);
+  const [loadedFromSaved, setLoadedFromSaved] = useState(false);
   const [selectedFocus, setSelectedFocus] = useState<number[]>([]);
-  const [reminderType, setReminderType] = useState<string | null>(null);
+  const [reminderType, setReminderType] = useState<"daily" | "weekly" | null>(
+    null,
+  );
   const [dailyTime, setDailyTime] = useState(new Date());
   const [weeklyDay, setWeeklyDay] = useState("Sunday");
   const [showTimePicker, setShowTimePicker] = useState(false);
@@ -44,6 +57,35 @@ export default function QuickSetupScreen() {
       router.replace("/sign-in");
     }
   }, [isSignedIn, router]);
+
+  useEffect(() => {
+    if (didPrefill.current) return;
+    if (!savedPreferences) return;
+
+    setSelectedFocus(savedPreferences.focusAreas ?? []);
+    setReminderType(savedPreferences.reminderType ?? null);
+    setWeeklyDay(savedPreferences.weeklyDay ?? "Sunday");
+
+    const parsed = new Date(savedPreferences.dailyTime);
+    if (!Number.isNaN(parsed.getTime())) {
+      setDailyTime(parsed);
+    }
+
+    setLoadedFromSaved(true);
+    didPrefill.current = true;
+  }, [savedPreferences]);
+
+  const resetToDefaults = () => {
+    setSelectedFocus([]);
+    setReminderType(null);
+    setWeeklyDay("Sunday");
+
+    const initialDailyTime = new Date();
+    initialDailyTime.setHours(20, 0, 0, 0);
+    setDailyTime(initialDailyTime);
+
+    setLoadedFromSaved(false);
+  };
 
   const focusOptions = [
     { id: 1, label: "Daily productivity", icon: "time" },
@@ -123,20 +165,25 @@ export default function QuickSetupScreen() {
     }
   };
 
-  const handleContinue = () => {
-    // Save user preferences
-    const preferences = {
-      focusAreas: selectedFocus,
-      reminderType: reminderType,
-      dailyTime: dailyTime.toISOString(),
-      weeklyDay: weeklyDay,
-      formattedTime: formatTime(dailyTime),
-    };
+  const handleContinue = async () => {
+    if (!user) return;
+    if (selectedFocus.length === 0 || reminderType === null) return;
 
-    console.log("User preferences:", preferences);
+    setIsSaving(true);
+    try {
+      await syncUserPreferences({
+        focusAreas: selectedFocus,
+        reminderType,
+        dailyTime: dailyTime.toISOString(),
+        weeklyDay,
+        formattedTime: formatTime(dailyTime),
+      });
 
-    // Navigate to home tab
-    router.replace("/(tabs)");
+      router.replace("/(tabs)");
+    } catch (error) {
+      console.error("Failed to save user preferences", error);
+      setIsSaving(false);
+    }
   };
 
   const iconMap = {
@@ -151,7 +198,8 @@ export default function QuickSetupScreen() {
     return iconMap[icon as keyof typeof iconMap] ?? "help-outline";
   };
 
-  const isContinueEnabled = selectedFocus.length > 0 && reminderType !== null;
+  const isContinueEnabled =
+    !isSaving && selectedFocus.length > 0 && reminderType !== null;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -168,6 +216,22 @@ export default function QuickSetupScreen() {
             <ThemedText type="default" style={styles.headerSubtitle}>
               What would you like to focus on?
             </ThemedText>
+
+            {loadedFromSaved && (
+              <View style={styles.savedHintRow}>
+                <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
+                <ThemedText style={styles.savedHintText}>
+                  Loaded your saved setup
+                </ThemedText>
+                <TouchableOpacity
+                  onPress={resetToDefaults}
+                  disabled={isSaving}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.resetText}>Reset</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </ThemedView>
 
           {/* Focus Options */}
@@ -250,7 +314,9 @@ export default function QuickSetupScreen() {
                     styles.reminderCard,
                     reminderType === option.id && styles.reminderCardSelected,
                   ]}
-                  onPress={() => setReminderType(option.id)}
+                  onPress={() =>
+                    setReminderType(option.id as "daily" | "weekly")
+                  }
                   activeOpacity={0.7}
                 >
                   <View style={styles.reminderContent}>
@@ -320,7 +386,9 @@ export default function QuickSetupScreen() {
             disabled={!isContinueEnabled}
             activeOpacity={0.8}
           >
-            <Text style={styles.continueButtonText}>Continue</Text>
+            <Text style={styles.continueButtonText}>
+              {isSaving ? "Saving..." : "Continue"}
+            </Text>
             <Ionicons name="arrow-forward" size={20} color="#ffffff" />
           </TouchableOpacity>
 
@@ -472,6 +540,21 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 22,
     opacity: 0.8,
+  },
+  savedHintRow: {
+    marginTop: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  savedHintText: {
+    fontSize: 13,
+    opacity: 0.75,
+  },
+  resetText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#6366f1",
   },
   section: {
     marginBottom: 32,
