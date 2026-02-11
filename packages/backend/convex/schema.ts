@@ -20,6 +20,7 @@ export default defineSchema(
       firstName: v.optional(v.string()),
       lastName: v.optional(v.string()),
       imageUrl: v.optional(v.string()),
+      isAdmin: v.optional(v.boolean()),
     })
       .index("by_clerkUserId", ["clerkUserId"])
       .index("by_email", ["email"]),

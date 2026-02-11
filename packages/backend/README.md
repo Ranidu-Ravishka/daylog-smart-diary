@@ -17,3 +17,13 @@ See Convex docs at https://docs.convex.dev/home
 ```
 npm create convex@latest -t bare
 ```
+
+## Admin bootstrap (Clerk)
+
+To create your first admin user (so you can access the admin app), set this
+Convex environment variable (in the Convex Dashboard) to a comma-separated list
+of Clerk user IDs allowed to self-promote:
+
+- `ADMIN_BOOTSTRAP_CLERK_USER_IDS=clerk_user_id_1,clerk_user_id_2`
+
+Then call the mutation `users:bootstrapMakeMeAdmin` while signed in.

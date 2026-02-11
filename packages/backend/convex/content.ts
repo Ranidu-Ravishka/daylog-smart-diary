@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { requireAdmin } from "./authz";
 
 export const writeContent = mutation({
   args: {
@@ -8,6 +9,7 @@ export const writeContent = mutation({
     body: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireAdmin(ctx);
     const existing = await ctx.db
       .query("content")
       .withIndex("by_slug", (q) => q.eq("slug", args.slug))
@@ -63,6 +65,7 @@ export const updateContent = mutation({
     body: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireAdmin(ctx);
     const existing = await ctx.db
       .query("content")
       .withIndex("by_slug", (q) => q.eq("slug", args.slug))
@@ -86,6 +89,7 @@ export const deleteContent = mutation({
     slug: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireAdmin(ctx);
     const existing = await ctx.db
       .query("content")
       .withIndex("by_slug", (q) => q.eq("slug", args.slug))
