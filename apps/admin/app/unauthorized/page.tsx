@@ -2,7 +2,22 @@
 
 import { SignOutButton, useAuth } from "@clerk/nextjs";
 
-export default function UnauthorizedPage() {
+const hasClerk = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+function NoAuthUnauthorized() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
+      <div className="max-w-lg w-full rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
+        <h1 className="text-2xl font-semibold text-gray-900">Unauthorized</h1>
+        <p className="mt-2 text-sm text-gray-600">
+          Auth is not configured for this deployment.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ClerkUnauthorized() {
   const { userId } = useAuth();
 
   return (
@@ -35,4 +50,8 @@ export default function UnauthorizedPage() {
       </div>
     </div>
   );
+}
+
+export default function UnauthorizedPage() {
+  return hasClerk ? <ClerkUnauthorized /> : <NoAuthUnauthorized />;
 }

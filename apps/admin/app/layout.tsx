@@ -25,17 +25,27 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+  const app = (
+    <ConvexClientProvider>
+      <Navigations />
+      {children}
+    </ConvexClientProvider>
+  );
+
   return (
     <html lang="en">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <ClerkProvider>
-          <ConvexClientProvider>
-            <Navigations />
-            {children}
-          </ConvexClientProvider>
-        </ClerkProvider>
+        {clerkPublishableKey ? (
+          <ClerkProvider publishableKey={clerkPublishableKey}>
+            {app}
+          </ClerkProvider>
+        ) : (
+          app
+        )}
       </body>
     </html>
   );
