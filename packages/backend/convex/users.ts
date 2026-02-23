@@ -1,11 +1,18 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { requireAdmin } from "./authz";
+import {
+  getCurrentUser,
+  requireUser,
+  requireAdmin,
+  requireIdentityMatch,
+} from "./authz";
 
 declare const process: {
   env: Record<string, string | undefined>;
 };
 
+// ── Sync a user row from Clerk (called by the client after sign-in
+//    AND by the Clerk webhook). Identity must match the clerkUserId arg.
 export const syncUserFromClerk = mutation({
   args: {
     clerkUserId: v.string(),
@@ -15,10 +22,7 @@ export const syncUserFromClerk = mutation({
     imageUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity || identity.subject !== args.clerkUserId) {
-      throw new Error("Unauthorized");
-    }
+    await requireIdentityMatch(ctx, args.clerkUserId);
 
     const existing = await ctx.db
       .query("user")
@@ -49,26 +53,23 @@ export const syncUserFromClerk = mutation({
   },
 });
 
+// ── Check whether the currently signed-in user is an admin
 export const isCurrentUserAdmin = query({
   args: {},
   handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return false;
-
-    const user = await ctx.db
-      .query("user")
-      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", identity.subject))
-      .unique();
-
+    const user = await getCurrentUser(ctx);
     return user?.isAdmin === true;
   },
 });
 
+// ── Get a user by Clerk ID (admin-only)
 export const getUserByClerkId = query({
   args: {
     clerkUserId: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+
     return await ctx.db
       .query("user")
       .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", args.clerkUserId))
@@ -76,13 +77,16 @@ export const getUserByClerkId = query({
   },
 });
 
+// ── List all users (admin-only)
 export const listUsers = query({
   args: {},
   handler: async (ctx) => {
+    await requireAdmin(ctx);
     return await ctx.db.query("user").collect();
   },
 });
 
+// ── Bootstrap: first-time admin setup via env-allowed Clerk IDs
 function getBootstrapAdminIds(): string[] {
   return (process.env.ADMIN_BOOTSTRAP_CLERK_USER_IDS ?? "")
     .split(",")
@@ -93,23 +97,12 @@ function getBootstrapAdminIds(): string[] {
 export const bootstrapMakeMeAdmin = mutation({
   args: {},
   handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      throw new Error("Unauthorized");
-    }
+    // requireUser validates identity + user row existence
+    const user = await requireUser(ctx);
 
     const bootstrapIds = getBootstrapAdminIds();
-    if (bootstrapIds.length === 0 || !bootstrapIds.includes(identity.subject)) {
-      throw new Error("Forbidden");
-    }
-
-    const user = await ctx.db
-      .query("user")
-      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", identity.subject))
-      .unique();
-
-    if (!user) {
-      throw new Error("User not found. Sign in once to create it.");
+    if (bootstrapIds.length === 0 || !bootstrapIds.includes(user.clerkUserId)) {
+      throw new Error("Forbidden: not in bootstrap admin list");
     }
 
     await ctx.db.patch(user._id, { isAdmin: true });
@@ -117,6 +110,7 @@ export const bootstrapMakeMeAdmin = mutation({
   },
 });
 
+// ── Set admin status for any user (admin-only)
 export const setUserAdminStatus = mutation({
   args: {
     clerkUserId: v.string(),
@@ -125,16 +119,16 @@ export const setUserAdminStatus = mutation({
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
 
-    const user = await ctx.db
+    const targetUser = await ctx.db
       .query("user")
       .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", args.clerkUserId))
       .unique();
 
-    if (!user) {
+    if (!targetUser) {
       throw new Error("User not found");
     }
 
-    await ctx.db.patch(user._id, { isAdmin: args.isAdmin });
+    await ctx.db.patch(targetUser._id, { isAdmin: args.isAdmin });
     return { success: true };
   },
 });

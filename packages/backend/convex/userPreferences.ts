@@ -1,6 +1,14 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import {
+  getCurrentUser,
+  requireUser,
+  requireAdmin,
+  requireIdentityMatch,
+} from "./authz";
 
+// ── Sync preferences using an explicit clerkUserId arg.
+//    Identity must match the arg (prevents horizontal escalation).
 export const syncUserPreferencesFromClerk = mutation({
   args: {
     clerkUserId: v.string(),
@@ -11,6 +19,8 @@ export const syncUserPreferencesFromClerk = mutation({
     formattedTime: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireIdentityMatch(ctx, args.clerkUserId);
+
     const existing = await ctx.db
       .query("userPreferences")
       .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", args.clerkUserId))
@@ -46,11 +56,15 @@ export const syncUserPreferencesFromClerk = mutation({
   },
 });
 
+// ── Get preferences by Clerk ID (admin-only — prevents
+//    one user from reading another user's preferences).
 export const getUserPreferencesByClerkId = query({
   args: {
     clerkUserId: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+
     return await ctx.db
       .query("userPreferences")
       .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", args.clerkUserId))
@@ -58,26 +72,31 @@ export const getUserPreferencesByClerkId = query({
   },
 });
 
+// ── List all user preferences (admin-only).
 export const listUserPreferences = query({
   args: {},
   handler: async (ctx) => {
+    await requireAdmin(ctx);
     return await ctx.db.query("userPreferences").collect();
   },
 });
 
+// ── Get the authenticated user's own preferences.
+//    Returns null if not signed in (safe for pre-auth screens).
 export const getMyUserPreferences = query({
   args: {},
   handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return null;
+    const user = await getCurrentUser(ctx);
+    if (!user) return null;
 
     return await ctx.db
       .query("userPreferences")
-      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", identity.subject))
+      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", user.clerkUserId))
       .unique();
   },
 });
 
+// ── Upsert the authenticated user's own preferences.
 export const syncMyUserPreferences = mutation({
   args: {
     focusAreas: v.array(v.number()),
@@ -87,14 +106,11 @@ export const syncMyUserPreferences = mutation({
     formattedTime: v.string(),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      throw new Error("Not authenticated");
-    }
+    const user = await requireUser(ctx);
 
     const existing = await ctx.db
       .query("userPreferences")
-      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", identity.subject))
+      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", user.clerkUserId))
       .unique();
 
     const now = Date.now();
@@ -113,7 +129,7 @@ export const syncMyUserPreferences = mutation({
     }
 
     const id = await ctx.db.insert("userPreferences", {
-      clerkUserId: identity.subject,
+      clerkUserId: user.clerkUserId,
       focusAreas: args.focusAreas,
       reminderType: args.reminderType,
       dailyTime: args.dailyTime,
