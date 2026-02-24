@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { requireUser, requireOwnership } from "./authz";
+import { validateDayKey, clampLimit } from "./validators";
 
 // ── Get summary for a specific day ──────────────────────────
 export const getSummaryByDay = query({
@@ -38,7 +39,7 @@ export const listRecentSummaries = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
-    const limit = args.limit ?? 7;
+    const limit = clampLimit(args.limit ?? 7);
 
     return await ctx.db
       .query("daySummaries")
@@ -67,6 +68,8 @@ export const upsertSummary = mutation({
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
+
+    validateDayKey(args.dayKey);
 
     const existing = await ctx.db
       .query("daySummaries")

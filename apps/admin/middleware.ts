@@ -48,7 +48,7 @@ const handler = clerkMiddleware(async (auth, req) => {
   return NextResponse.redirect(new URL("/unauthorized", req.url));
 });
 
-export async function proxy(req: NextRequest, event: NextFetchEvent) {
+export async function middleware(req: NextRequest, event: NextFetchEvent) {
   return handler(req, event);
 }
 

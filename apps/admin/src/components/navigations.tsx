@@ -4,6 +4,18 @@ import { SignedIn, SignedOut, SignOutButton, useUser } from "@clerk/nextjs";
 
 const hasClerk = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
+const navLinks = [
+  { href: "/admin/dashboard", label: "Dashboard" },
+  { href: "/content", label: "Content" },
+  { href: "/users", label: "Users" },
+  { href: "/memories", label: "Memories" },
+  { href: "/days", label: "Days" },
+  { href: "/summaries", label: "Summaries" },
+  { href: "/integrations", label: "Integrations" },
+  { href: "/preferences", label: "Preferences" },
+  { href: "/audit-logs", label: "Audit Logs" },
+];
+
 function StaticNavigations() {
   return (
     <nav className="w-full flex h-16 items-center justify-between px-4 border-b border-gray-200 shadow-lg mb-4">
@@ -11,8 +23,11 @@ function StaticNavigations() {
         <span className="font-bold">Admin Panel</span>
       </div>
       <div className="flex gap-3 items-center">
-        <Link href="/admin/dashboard">Dashboard</Link>
-        <Link href="/content">Content</Link>
+        {navLinks.map((link) => (
+          <Link key={link.href} href={link.href}>
+            {link.label}
+          </Link>
+        ))}
       </div>
       <div className="flex items-center gap-3">
         <span className="text-xs text-gray-500">Auth not configured</span>
@@ -29,8 +44,11 @@ function ClerkNavigations() {
         <span className="font-bold">Admin Panel</span>
       </div>
       <div className="flex gap-3 items-center">
-        <Link href="/admin/dashboard">Dashboard</Link>
-        <Link href="/content">Content</Link>
+        {navLinks.map((link) => (
+          <Link key={link.href} href={link.href}>
+            {link.label}
+          </Link>
+        ))}
       </div>
       <div className="flex items-center gap-3">
         <SignedOut>

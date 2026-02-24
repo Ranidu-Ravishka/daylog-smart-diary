@@ -1,14 +1,83 @@
 import { httpAction } from "./_generated/server";
-import { api } from "./_generated/api";
+import { internal } from "./_generated/api";
 
-// Optional: Clerk webhook endpoint to sync users into Convex.
-// You can configure this in the Clerk dashboard, pointing to
+// Clerk webhook endpoint to sync users into Convex.
+// Configure in the Clerk dashboard, pointing to:
 //   POST /clerk/webhook
-// on your Convex deployment.
 //
-// NOTE: For production you should verify the Svix signature
-// using CLERK_WEBHOOK_SECRET. This example skips verification
-// for simplicity and should be hardened before going live.
+// For production, set the CLERK_WEBHOOK_SECRET environment
+// variable on the Convex dashboard so that incoming webhook
+// payloads are verified against the Svix signature headers.
+
+/**
+ * Verify the webhook came from Clerk by checking the Svix
+ * signature headers against CLERK_WEBHOOK_SECRET.
+ * Returns true if verification passes or if no secret is
+ * configured (dev-mode fallback with a console warning).
+ */
+async function verifyWebhookSignature(
+  payloadText: string,
+  headers: Headers,
+): Promise<boolean> {
+  const secret = process.env.CLERK_WEBHOOK_SECRET;
+  if (!secret) {
+    console.warn(
+      "[clerk-webhook] CLERK_WEBHOOK_SECRET is not set — skipping signature verification. Set it for production.",
+    );
+    return true;
+  }
+
+  const svixId = headers.get("svix-id");
+  const svixTimestamp = headers.get("svix-timestamp");
+  const svixSignature = headers.get("svix-signature");
+
+  if (!svixId || !svixTimestamp || !svixSignature) {
+    return false;
+  }
+
+  // Verify timestamp is within 5 minutes to prevent replay attacks
+  const timestampSeconds = parseInt(svixTimestamp, 10);
+  if (isNaN(timestampSeconds)) return false;
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (Math.abs(nowSeconds - timestampSeconds) > 300) {
+    return false;
+  }
+
+  // Build the signed content and verify using HMAC-SHA256
+  const signedContent = `${svixId}.${svixTimestamp}.${payloadText}`;
+  const encoder = new TextEncoder();
+
+  // The secret is base64-encoded with a "whsec_" prefix
+  const secretBytes = Uint8Array.from(
+    atob(secret.replace(/^whsec_/, "")),
+    (c) => c.charCodeAt(0),
+  );
+
+  const key = await crypto.subtle.importKey(
+    "raw",
+    secretBytes,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+
+  const signatureBytes = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    encoder.encode(signedContent),
+  );
+
+  const computedSig = btoa(
+    String.fromCharCode(...new Uint8Array(signatureBytes)),
+  );
+
+  // svix-signature may contain multiple space-separated sigs (v1,xxx)
+  const expectedSignatures = svixSignature.split(" ");
+  return expectedSignatures.some((sig) => {
+    const [, sigValue] = sig.split(",");
+    return sigValue === computedSig;
+  });
+}
 
 export const clerkWebhook = httpAction(async (ctx, request) => {
   if (request.method !== "POST") {
@@ -16,6 +85,13 @@ export const clerkWebhook = httpAction(async (ctx, request) => {
   }
 
   const payloadText = await request.text();
+
+  // Verify webhook signature when CLERK_WEBHOOK_SECRET is set
+  const isValid = await verifyWebhookSignature(payloadText, request.headers);
+  if (!isValid) {
+    console.error("[clerk-webhook] Signature verification failed");
+    return new Response("Unauthorized: invalid signature", { status: 401 });
+  }
 
   let body: any;
   try {
@@ -49,13 +125,22 @@ export const clerkWebhook = httpAction(async (ctx, request) => {
     const imageUrl: string | undefined = user.image_url ?? undefined;
 
     if (clerkUserId && email) {
-      await ctx.runMutation(api.users.syncUserFromClerk, {
-        clerkUserId,
-        email,
-        firstName,
-        lastName,
-        imageUrl,
-      });
+      try {
+        await ctx.runMutation(internal.users.syncUserFromClerkWebhook, {
+          clerkUserId,
+          email,
+          firstName,
+          lastName,
+          imageUrl,
+        });
+      } catch (err) {
+        console.error("[clerk-webhook] Failed to sync user:", err);
+        return new Response("Internal error", { status: 500 });
+      }
+    } else {
+      console.warn(
+        "[clerk-webhook] Missing clerkUserId or email, skipping sync",
+      );
     }
   }
 
