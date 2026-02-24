@@ -1,5 +1,6 @@
 "use client";
 
+import AdminGuard from "@/components/admin-guard";
 import ContentForm from "@/components/form/contentForm";
 import { api } from "@repo/backend/convex";
 import { useMutation, useQuery } from "convex/react";
@@ -28,24 +29,26 @@ export default function EditContentPage() {
   }
 
   return (
-    <ContentForm
-      title="Edit Content"
-      description={`Editing: ${slug}`}
-      initialValues={{
-        slug: existing.slug,
-        title: existing.title,
-        body: existing.body,
-      }}
-      slugDisabled
-      submitLabel="Save Changes"
-      successMessage="Content updated successfully."
-      onSubmit={async (values) => {
-        await updateContent({
-          slug,
-          title: values.title,
-          body: values.body,
-        });
-      }}
-    />
+    <AdminGuard>
+      <ContentForm
+        title="Edit Content"
+        description={`Editing: ${slug}`}
+        initialValues={{
+          slug: existing.slug,
+          title: existing.title,
+          body: existing.body,
+        }}
+        slugDisabled
+        submitLabel="Save Changes"
+        successMessage="Content updated successfully."
+        onSubmit={async (values) => {
+          await updateContent({
+            slug,
+            title: values.title,
+            body: values.body,
+          });
+        }}
+      />
+    </AdminGuard>
   );
 }

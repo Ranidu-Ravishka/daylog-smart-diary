@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { requireUser, requireOwnership } from "./authz";
+import { validateDayKey, clampLimit } from "./validators";
 
 // ── Create a new memory ─────────────────────────────────────
 export const createMemory = mutation({
@@ -13,6 +14,8 @@ export const createMemory = mutation({
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
+
+    validateDayKey(args.dayKey);
 
     const id = await ctx.db.insert("memories", {
       userId: user._id,
@@ -65,7 +68,7 @@ export const listRecentMemories = query({
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
-    const limit = args.limit ?? 20;
+    const limit = clampLimit(args.limit ?? 20);
 
     return await ctx.db
       .query("memories")
@@ -120,13 +123,18 @@ export const deleteMemory = mutation({
 
     requireOwnership(user, memory.userId);
 
-    // Delete associated media rows
+    // Delete associated media rows and storage blobs
     const media = await ctx.db
       .query("memoryMedia")
       .withIndex("by_memory", (q) => q.eq("memoryId", args.memoryId))
       .collect();
 
     for (const m of media) {
+      try {
+        await ctx.storage.delete(m.storageId as any);
+      } catch {
+        // Storage blob may already be gone — continue cleanup
+      }
       await ctx.db.delete(m._id);
     }
 
@@ -199,6 +207,13 @@ export const deleteMemoryMedia = mutation({
     }
 
     requireOwnership(user, media.userId);
+
+    // Delete the storage blob as well
+    try {
+      await ctx.storage.delete(media.storageId as any);
+    } catch {
+      // Storage blob may already be gone — continue cleanup
+    }
 
     await ctx.db.delete(args.mediaId);
     return { success: true };

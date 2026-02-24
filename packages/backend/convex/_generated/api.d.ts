@@ -19,6 +19,7 @@ import type * as myFunctions from "../myFunctions.js";
 import type * as summaries from "../summaries.js";
 import type * as userPreferences from "../userPreferences.js";
 import type * as users from "../users.js";
+import type * as validators from "../validators.js";
 import type * as webhooks from "../webhooks.js";
 
 import type {
@@ -39,6 +40,7 @@ declare const fullApi: ApiFromModules<{
   summaries: typeof summaries;
   userPreferences: typeof userPreferences;
   users: typeof users;
+  validators: typeof validators;
   webhooks: typeof webhooks;
 }>;
 

@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, internalMutation } from "./_generated/server";
 import {
   getCurrentUser,
   requireUser,
@@ -11,8 +11,8 @@ declare const process: {
   env: Record<string, string | undefined>;
 };
 
-// ── Sync a user row from Clerk (called by the client after sign-in
-//    AND by the Clerk webhook). Identity must match the clerkUserId arg.
+// ── Sync a user row from Clerk (called by the client after sign-in).
+//    Identity must match the clerkUserId arg.
 export const syncUserFromClerk = mutation({
   args: {
     clerkUserId: v.string(),
@@ -24,34 +24,65 @@ export const syncUserFromClerk = mutation({
   handler: async (ctx, args) => {
     await requireIdentityMatch(ctx, args.clerkUserId);
 
-    const existing = await ctx.db
-      .query("user")
-      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", args.clerkUserId))
-      .unique();
+    return await syncUserRecord(ctx, args);
+  },
+});
 
-    if (existing) {
-      await ctx.db.patch(existing._id, {
-        email: args.email,
-        firstName: args.firstName,
-        lastName: args.lastName,
-        imageUrl: args.imageUrl,
-      });
+// ── Internal mutation for the Clerk webhook path.
+//    Only callable from server actions (httpAction), never from clients.
+export const syncUserFromClerkWebhook = internalMutation({
+  args: {
+    clerkUserId: v.string(),
+    email: v.string(),
+    firstName: v.optional(v.string()),
+    lastName: v.optional(v.string()),
+    imageUrl: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    return await syncUserRecord(ctx, args);
+  },
+});
 
-      return await ctx.db.get(existing._id);
-    }
+// ── Shared logic for syncing a user record from Clerk data.
+async function syncUserRecord(
+  ctx: { db: any },
+  args: {
+    clerkUserId: string;
+    email: string;
+    firstName?: string;
+    lastName?: string;
+    imageUrl?: string;
+  },
+) {
+  const existing = await ctx.db
+    .query("user")
+    .withIndex("by_clerkUserId", (q: any) =>
+      q.eq("clerkUserId", args.clerkUserId),
+    )
+    .unique();
 
-    const id = await ctx.db.insert("user", {
-      clerkUserId: args.clerkUserId,
+  if (existing) {
+    await ctx.db.patch(existing._id, {
       email: args.email,
       firstName: args.firstName,
       lastName: args.lastName,
       imageUrl: args.imageUrl,
-      isAdmin: false,
     });
 
-    return await ctx.db.get(id);
-  },
-});
+    return await ctx.db.get(existing._id);
+  }
+
+  const id = await ctx.db.insert("user", {
+    clerkUserId: args.clerkUserId,
+    email: args.email,
+    firstName: args.firstName,
+    lastName: args.lastName,
+    imageUrl: args.imageUrl,
+    isAdmin: false,
+  });
+
+  return await ctx.db.get(id);
+}
 
 // ── Check whether the currently signed-in user is an admin
 export const isCurrentUserAdmin = query({
