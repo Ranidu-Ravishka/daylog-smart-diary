@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -6,152 +6,356 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  Dimensions,
-  SafeAreaView,
-  Platform,
-  StatusBar,
+  Alert,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import { useQuery, useMutation, useConvexAuth } from "convex/react";
+import { api } from "@repo/backend/convex";
+import { Colors, Spacing, Typography, Radius } from "@/constants/theme";
+import { AppCard } from "@/components/ui/app-card";
+import { SectionHeader } from "@/components/ui/section-header";
+import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
+import { EmptyState } from "@/components/ui/empty-state";
+import { AppButton } from "@/components/ui/app-button";
 
-const { width } = Dimensions.get("window");
-const CARD_WIDTH = width - 48; // 354px equivalent with margins
+const c = Colors.light;
+
+function getTodayDayKey(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+const MOOD_EMOJI: Record<string, string> = {
+  happy: "😊",
+  sad: "😢",
+  excited: "🎉",
+  peaceful: "😌",
+  loved: "❤️",
+  angry: "😤",
+  anxious: "😰",
+  neutral: "😐",
+};
+
+function MemorySkeleton() {
+  return (
+    <SafeAreaView style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.scroll}>
+        <View style={styles.headerRow}>
+          <Skeleton width={180} height={28} />
+        </View>
+        <View style={styles.metricsRow}>
+          <Skeleton width={90} height={16} />
+          <Skeleton width={90} height={16} />
+        </View>
+        <SkeletonCard lines={4} style={{ marginHorizontal: Spacing.xl }} />
+        <SkeletonCard lines={3} style={{ marginHorizontal: Spacing.xl }} />
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
 
 const DailyDetailView = () => {
+  const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
+  const dayKey = getTodayDayKey();
+
+  const summary = useQuery(
+    api.summaries.getSummaryByDay,
+    isAuthenticated ? { dayKey } : "skip",
+  );
+  const memories = useQuery(
+    api.memories.listMemoriesByDay,
+    isAuthenticated ? { dayKey } : "skip",
+  );
+  const day = useQuery(api.days.getDay, isAuthenticated ? { dayKey } : "skip");
+
+  const upsertDay = useMutation(api.days.upsertDay);
+
   const [manualEntry, setManualEntry] = useState("");
-  const [peopleTags] = useState<string[]>([]);
-  const [rating, setRating] = useState(0);
+  const [personInput, setPersonInput] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
-  const dataSources = [
-    "Locations: Map view with time spent",
-    "Calendar: Meetings and events",
-    "Health: Steps, sleep, activity",
-    "Spending: Transaction categories",
-    "Digital: Screen time, app usage",
-  ];
+  const rating = day?.rating ?? 0;
+  const peopleTags = React.useMemo(
+    () => day?.peopleTags ?? [],
+    [day?.peopleTags],
+  );
+  const manualNotes = React.useMemo(
+    () => day?.manualNotes ?? [],
+    [day?.manualNotes],
+  );
 
-  const handleAddPeople = () => {
-    // In a real app, this would open a people selection modal
-    console.log("Add people clicked");
-  };
+  const isLoading =
+    isAuthLoading || (isAuthenticated && memories === undefined);
 
-  const handleAddEntry = () => {
-    if (manualEntry.trim()) {
-      console.log("Adding entry:", manualEntry);
+  const handleRateDay = useCallback(
+    async (stars: number) => {
+      try {
+        await upsertDay({ dayKey, rating: stars });
+      } catch (err) {
+        console.error("Failed to rate day:", err);
+      }
+    },
+    [dayKey, upsertDay],
+  );
+
+  const handleAddEntry = useCallback(async () => {
+    if (!manualEntry.trim()) return;
+    setIsSaving(true);
+    try {
+      const updatedNotes = [...manualNotes, manualEntry.trim()];
+      await upsertDay({ dayKey, manualNotes: updatedNotes });
       setManualEntry("");
+    } catch (err) {
+      console.error("Failed to add entry:", err);
+      Alert.alert("Error", "Failed to save entry. Please try again.");
+    } finally {
+      setIsSaving(false);
     }
-  };
+  }, [manualEntry, manualNotes, dayKey, upsertDay]);
 
-  const handleRateDay = (stars: number) => {
-    setRating(stars);
-  };
+  const handleAddPerson = useCallback(async () => {
+    if (!personInput.trim()) return;
+    setIsSaving(true);
+    try {
+      const updatedTags = [...peopleTags, personInput.trim()];
+      await upsertDay({ dayKey, peopleTags: updatedTags });
+      setPersonInput("");
+    } catch (err) {
+      console.error("Failed to add person:", err);
+      Alert.alert("Error", "Failed to save. Please try again.");
+    } finally {
+      setIsSaving(false);
+    }
+  }, [personInput, peopleTags, dayKey, upsertDay]);
 
-  const renderStars = () => {
-    return (
-      <View style={styles.starsContainer}>
-        {[1, 2, 3, 4, 5].map((star) => (
-          <TouchableOpacity
-            key={star}
-            onPress={() => handleRateDay(star)}
-            style={styles.starButton}
-          >
-            <Text style={styles.star}>{star <= rating ? "★" : "☆"}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-    );
-  };
+  const handleRemovePerson = useCallback(
+    async (index: number) => {
+      try {
+        const updatedTags = peopleTags.filter((_, i) => i !== index);
+        await upsertDay({ dayKey, peopleTags: updatedTags });
+      } catch (err) {
+        console.error("Failed to remove person:", err);
+      }
+    },
+    [peopleTags, dayKey, upsertDay],
+  );
+
+  if (isLoading) return <MemorySkeleton />;
+
+  const moodFromMemories =
+    memories && memories.length > 0 ? (memories[0]?.mood ?? null) : null;
+
+  const sourcesUsed = summary?.sourcesUsed ?? [];
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor="#F5F5F5" />
+    <SafeAreaView style={styles.safe}>
       <ScrollView
-        style={styles.container}
+        contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Daily Detail View</Text>
-          <View style={styles.metricsRow}>
-            <Text style={styles.metric}>Overall Mood: Positive</Text>
-            <Text style={styles.metric}>Focus Level: 85%</Text>
+        {/* ── Header ──────────────────────────────────── */}
+        <View style={styles.headerRow}>
+          <Text style={styles.pageTitle}>Today{"'s"} Detail</Text>
+          <Text style={styles.dateText}>{dayKey}</Text>
+        </View>
+
+        {/* ── Quick Metrics ───────────────────────────── */}
+        <View style={styles.metricsRow}>
+          <View style={styles.metricChip}>
+            <Ionicons name="happy-outline" size={14} color={c.tint} />
+            <Text style={styles.metricText}>
+              {moodFromMemories
+                ? `${MOOD_EMOJI[moodFromMemories] ?? ""} ${moodFromMemories}`
+                : "No mood"}
+            </Text>
+          </View>
+          <View style={styles.metricChip}>
+            <Ionicons name="document-text-outline" size={14} color={c.tint} />
+            <Text style={styles.metricText}>
+              {memories?.length ?? 0} memories
+            </Text>
+          </View>
+          <View style={styles.metricChip}>
+            <Ionicons name="star" size={14} color={c.warning} />
+            <Text style={styles.metricText}>
+              {rating > 0 ? `${rating}/5` : "—"}
+            </Text>
           </View>
         </View>
 
-        {/* Day Story Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Your Day Story</Text>
-          <Text style={styles.storyText}>
-            Yesterday, you had a productive workday followed by an evening walk
-            in Central Park. You slept 7.5 hours and caught up with friends over
-            dinner.
-          </Text>
+        {/* ── Day Story ───────────────────────────────── */}
+        <View style={styles.section}>
+          <SectionHeader title="Your Day Story" />
+          <AppCard>
+            {summary ? (
+              <>
+                <Text style={styles.storyText}>{summary.story}</Text>
+                {summary.highlights && summary.highlights.length > 0 && (
+                  <View style={styles.highlightsWrap}>
+                    {summary.highlights.map((h: string, i: number) => (
+                      <View key={i} style={styles.highlightChip}>
+                        <Text style={styles.highlightText}>{h}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </>
+            ) : (
+              <EmptyState
+                icon="book-outline"
+                title="No story yet"
+                subtitle="Add memories and check back later for your daily narrative."
+              />
+            )}
+          </AppCard>
         </View>
 
-        {/* Data Sources Card */}
-        <View style={styles.card}>
-          <View style={styles.emojiHeader}>
-            <Text style={styles.cardTitle}>Data Sources</Text>
-          </View>
-          <View style={styles.dataSourcesContainer}>
-            {dataSources.map((source, index) => (
-              <View key={index} style={styles.dataSourceRow}>
-                <Text style={styles.dataSourceText}>{source}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
-
-        {/* Manual Additions Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Manual Additions</Text>
-
-          {/* Add Entry Input */}
-          <View style={styles.inputContainer}>
-            <TextInput
-              style={styles.textInput}
-              placeholder="Add what mattered today..."
-              placeholderTextColor="#999"
-              value={manualEntry}
-              onChangeText={setManualEntry}
-              multiline
-            />
-            <TouchableOpacity
-              style={[
-                styles.addButton,
-                !manualEntry.trim() && styles.addButtonDisabled,
-              ]}
-              onPress={handleAddEntry}
-              disabled={!manualEntry.trim()}
-            >
-              <Text style={styles.addButtonText}>Add Entry</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Tag People Section */}
+        {/* ── Today's Memories ─────────────────────────── */}
+        {memories && memories.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Tag people you met</Text>
-            <TouchableOpacity
-              style={styles.tagButton}
-              onPress={handleAddPeople}
-            >
-              <Text style={styles.tagButtonText}>+ Add People</Text>
-            </TouchableOpacity>
-            {peopleTags.length > 0 && (
-              <View style={styles.tagsContainer}>
-                {peopleTags.map((person, index) => (
-                  <View key={index} style={styles.tag}>
-                    <Text style={styles.tagText}>{person}</Text>
+            <SectionHeader title="Today's Memories" />
+            <AppCard padded={false}>
+              {memories.map((mem: any, idx: number) => (
+                <View
+                  key={mem._id}
+                  style={[
+                    styles.memoryRow,
+                    idx < memories.length - 1 && styles.memoryBorder,
+                  ]}
+                >
+                  <View style={styles.moodDot}>
+                    <Text style={{ fontSize: 14 }}>
+                      {MOOD_EMOJI[mem.mood ?? ""] ?? "📝"}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.memoryTitle}>{mem.title}</Text>
+                    {mem.description && (
+                      <Text style={styles.memoryDesc} numberOfLines={2}>
+                        {mem.description}
+                      </Text>
+                    )}
+                  </View>
+                </View>
+              ))}
+            </AppCard>
+          </View>
+        )}
+
+        {/* ── Data Sources ─────────────────────────────── */}
+        {sourcesUsed.length > 0 && (
+          <View style={styles.section}>
+            <SectionHeader title="Data Sources" />
+            <AppCard>
+              <View style={styles.sourcesWrap}>
+                {sourcesUsed.map((source: string, index: number) => (
+                  <View key={index} style={styles.sourceChip}>
+                    <Ionicons name="link-outline" size={12} color={c.tint} />
+                    <Text style={styles.sourceText}>{source}</Text>
+                  </View>
+                ))}
+              </View>
+            </AppCard>
+          </View>
+        )}
+
+        {/* ── Manual Notes ─────────────────────────────── */}
+        <View style={styles.section}>
+          <SectionHeader title="Manual Notes" />
+          <AppCard>
+            {manualNotes.length > 0 && (
+              <View style={{ marginBottom: Spacing.lg }}>
+                {manualNotes.map((note: string, index: number) => (
+                  <View key={index} style={styles.noteRow}>
+                    <View style={styles.noteBullet} />
+                    <Text style={styles.noteText}>{note}</Text>
                   </View>
                 ))}
               </View>
             )}
-          </View>
+            <TextInput
+              style={styles.input}
+              placeholder="Add what mattered today..."
+              placeholderTextColor={c.textTertiary}
+              value={manualEntry}
+              onChangeText={setManualEntry}
+              multiline
+              editable={!isSaving}
+            />
+            <AppButton
+              title={isSaving ? "" : "Add Entry"}
+              onPress={handleAddEntry}
+              disabled={!manualEntry.trim() || isSaving}
+              loading={isSaving}
+              size="md"
+              style={{ marginTop: Spacing.md }}
+            />
+          </AppCard>
+        </View>
 
-          {/* Rate Your Day Section */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Rate Your Day</Text>
-            {renderStars()}
-            <Text style={styles.ratingText}>
+        {/* ── People Tags ──────────────────────────────── */}
+        <View style={styles.section}>
+          <SectionHeader title="People You Met" />
+          <AppCard>
+            <View style={styles.personInputRow}>
+              <TextInput
+                style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                placeholder="Name..."
+                placeholderTextColor={c.textTertiary}
+                value={personInput}
+                onChangeText={setPersonInput}
+                editable={!isSaving}
+                onSubmitEditing={handleAddPerson}
+              />
+              <AppButton
+                title="Add"
+                onPress={handleAddPerson}
+                variant="secondary"
+                size="sm"
+                disabled={!personInput.trim() || isSaving}
+                style={{ marginLeft: Spacing.sm }}
+              />
+            </View>
+            {peopleTags.length > 0 && (
+              <View style={styles.tagsWrap}>
+                {peopleTags.map((person: string, index: number) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={styles.personTag}
+                    onLongPress={() => handleRemovePerson(index)}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="person-outline" size={12} color={c.tint} />
+                    <Text style={styles.personTagText}>{person}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </AppCard>
+        </View>
+
+        {/* ── Rate Your Day ────────────────────────────── */}
+        <View style={styles.section}>
+          <SectionHeader title="Rate Your Day" />
+          <AppCard style={{ alignItems: "center" }}>
+            <View style={styles.starsRow}>
+              {[1, 2, 3, 4, 5].map((star) => (
+                <TouchableOpacity
+                  key={star}
+                  onPress={() => handleRateDay(star)}
+                  style={styles.starBtn}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name={star <= rating ? "star" : "star-outline"}
+                    size={32}
+                    color={star <= rating ? "#FBBF24" : c.textTertiary}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.ratingLabel}>
               {rating === 0
                 ? "Tap to rate"
                 : rating === 5
@@ -164,204 +368,208 @@ const DailyDetailView = () => {
                         ? "Okay"
                         : "Not great"}
             </Text>
-          </View>
+          </AppCard>
         </View>
 
-        {/* Bottom padding for safe area */}
-        <View style={styles.bottomPadding} />
+        <View style={{ height: 100 }} />
       </ScrollView>
     </SafeAreaView>
   );
 };
 
+export default DailyDetailView;
+
+// ── Styles ──────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  safeArea: {
+  safe: {
     flex: 1,
-    backgroundColor: "#F5F5F5",
+    backgroundColor: c.background,
   },
-  container: {
-    flex: 1,
+  scroll: {
+    paddingTop: Spacing.lg,
+    paddingBottom: Spacing["2xl"],
   },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: 16,
-    paddingTop: Platform.OS === "ios" ? 0 : StatusBar.currentHeight,
+
+  // Header
+  headerRow: {
+    paddingHorizontal: Spacing.xl,
+    marginBottom: Spacing.md,
   },
-  header: {
-    alignItems: "center",
-    marginBottom: 24,
-    paddingTop: Platform.OS === "ios" ? 20 : 16,
+  pageTitle: {
+    ...Typography.title1,
+    color: c.text,
   },
-  headerTitle: {
-    fontSize: 19,
-    fontFamily: "Inter",
-    fontWeight: "700",
-    color: "#000",
-    marginBottom: 12,
-    textAlign: "center",
+  dateText: {
+    ...Typography.callout,
+    color: c.textSecondary,
+    marginTop: 2,
   },
+
+  // Metrics
   metricsRow: {
     flexDirection: "row",
-    justifyContent: "center",
-    gap: 24,
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.xl,
+    marginBottom: Spacing["2xl"],
+    flexWrap: "wrap",
   },
-  metric: {
-    fontSize: 13,
-    fontFamily: "Inter",
-    fontWeight: "500",
-    color: "rgba(0, 0, 0, 0.70)",
-    textAlign: "center",
-  },
-  card: {
-    width: CARD_WIDTH,
-    backgroundColor: "white",
-    borderRadius: 18,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  cardTitle: {
-    fontSize: 16,
-    fontFamily: "Inter",
-    fontWeight: "600",
-    color: "#000",
-    textAlign: "center",
-    marginBottom: 16,
-  },
-  storyText: {
-    fontSize: 13,
-    fontFamily: "Inter",
-    fontWeight: "400",
-    color: "#000",
-    lineHeight: 22,
-  },
-  emojiHeader: {
+  metricChip: {
+    flexDirection: "row",
     alignItems: "center",
-    marginBottom: 16,
+    gap: 4,
+    backgroundColor: c.tintLight,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
   },
-  emoji: {
-    fontSize: 16,
-    color: "rgba(0, 0, 0, 0.70)",
-    marginBottom: 8,
+  metricText: {
+    ...Typography.caption1,
+    color: c.tint,
   },
-  dataSourcesContainer: {
-    marginTop: 8,
-  },
-  dataSourceRow: {
-    marginBottom: 12,
-  },
-  dataSourceText: {
-    fontSize: 14,
-    fontFamily: "Inter",
-    fontWeight: "400",
-    color: "#000",
-    lineHeight: 22,
-  },
-  inputContainer: {
-    marginBottom: 24,
-  },
-  textInput: {
-    backgroundColor: "#ECECEC",
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    minHeight: 40,
-    fontSize: 15,
-    fontFamily: "Inter",
-    color: "#000",
-    marginBottom: 12,
-    textAlignVertical: "top",
-  },
-  addButton: {
-    backgroundColor: "#000",
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: "center",
-  },
-  addButtonDisabled: {
-    backgroundColor: "#666",
-  },
-  addButtonText: {
-    fontSize: 15,
-    fontFamily: "Inter",
-    fontWeight: "600",
-    color: "#FFF",
-  },
+
+  // Section
   section: {
-    marginTop: 20,
-    paddingTop: 20,
-    borderTopWidth: 1,
-    borderTopColor: "#F0F0F0",
+    paddingHorizontal: Spacing.xl,
+    marginBottom: Spacing["2xl"],
   },
-  sectionTitle: {
-    fontSize: 14,
-    fontFamily: "Inter",
-    fontWeight: "600",
-    color: "#000",
-    marginBottom: 12,
-    textAlign: "center",
+
+  // Story
+  storyText: {
+    ...Typography.body,
+    color: c.text,
   },
-  tagButton: {
-    backgroundColor: "#F5F5F5",
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    alignSelf: "center",
-    borderWidth: 1,
-    borderColor: "#E0E0E0",
-  },
-  tagButtonText: {
-    fontSize: 14,
-    fontFamily: "Inter",
-    fontWeight: "400",
-    color: "#000",
-  },
-  tagsContainer: {
+  highlightsWrap: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginTop: 12,
-    justifyContent: "center",
+    gap: Spacing.sm,
+    marginTop: Spacing.lg,
   },
-  tag: {
-    backgroundColor: "#E8E8E8",
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+  highlightChip: {
+    backgroundColor: c.tintLight,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
   },
-  tagText: {
-    fontSize: 13,
-    fontFamily: "Inter",
-    color: "#000",
+  highlightText: {
+    ...Typography.caption1,
+    color: c.tint,
   },
-  starsContainer: {
+
+  // Memories list
+  memoryRow: {
     flexDirection: "row",
-    justifyContent: "center",
-    gap: 12,
-    marginBottom: 8,
+    alignItems: "center",
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.lg,
   },
-  starButton: {
+  memoryBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: c.divider,
+  },
+  moodDot: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: c.surfaceSecondary,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: Spacing.md,
+  },
+  memoryTitle: {
+    ...Typography.bodyMedium,
+    color: c.text,
+  },
+  memoryDesc: {
+    ...Typography.callout,
+    color: c.textSecondary,
+    marginTop: 2,
+  },
+
+  // Sources
+  sourcesWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Spacing.sm,
+  },
+  sourceChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: c.surfaceSecondary,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+  },
+  sourceText: {
+    ...Typography.caption1,
+    color: c.textSecondary,
+  },
+
+  // Notes
+  noteRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: Spacing.sm,
+  },
+  noteBullet: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: c.tint,
+    marginTop: 7,
+    marginRight: Spacing.sm,
+  },
+  noteText: {
+    ...Typography.body,
+    color: c.text,
+    flex: 1,
+  },
+  input: {
+    backgroundColor: c.inputBg,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    minHeight: 44,
+    ...Typography.body,
+    color: c.text,
+  },
+
+  // People
+  personInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: Spacing.md,
+  },
+  tagsWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Spacing.sm,
+  },
+  personTag: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: c.tintLight,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs + 2,
+  },
+  personTagText: {
+    ...Typography.caption1,
+    color: c.tint,
+  },
+
+  // Stars
+  starsRow: {
+    flexDirection: "row",
+    gap: Spacing.md,
+    marginBottom: Spacing.sm,
+  },
+  starBtn: {
     padding: 4,
   },
-  star: {
-    fontSize: 24,
-    color: "#FFD700",
-  },
-  ratingText: {
-    fontSize: 14,
-    fontFamily: "Inter",
-    fontWeight: "400",
-    color: "#000",
-    textAlign: "center",
-    marginTop: 4,
-  },
-  bottomPadding: {
-    height: Platform.OS === "ios" ? 34 : 20, // Extra padding for iPhone home indicator
+  ratingLabel: {
+    ...Typography.callout,
+    color: c.textSecondary,
   },
 });
-
-export default DailyDetailView;

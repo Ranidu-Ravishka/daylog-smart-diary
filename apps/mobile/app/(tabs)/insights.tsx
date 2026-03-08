@@ -1,89 +1,236 @@
 import React from "react";
+import { View, Text, StyleSheet, ScrollView, Dimensions } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import { useQuery, useConvexAuth } from "convex/react";
+import { api } from "@repo/backend/convex";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Dimensions,
-  SafeAreaView,
-  Platform,
-  StatusBar,
-} from "react-native";
+  Colors,
+  Spacing,
+  Typography,
+  Radius,
+  Shadows,
+} from "@/constants/theme";
+import { AppCard } from "@/components/ui/app-card";
+import { SectionHeader } from "@/components/ui/section-header";
+import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
+import { EmptyState } from "@/components/ui/empty-state";
 
+const c = Colors.light;
 const { width } = Dimensions.get("window");
-const CARD_WIDTH = width - 48; // 354px equivalent with margins
+const CHART_WIDTH = width - Spacing.xl * 2 - Spacing.xl * 2; // card padding
+
+const MOOD_VALUES: Record<string, number> = {
+  happy: 75,
+  excited: 90,
+  loved: 85,
+  peaceful: 70,
+  sad: 30,
+  angry: 20,
+  anxious: 35,
+  neutral: 50,
+};
+
+const MOOD_EMOJI: Record<string, string> = {
+  happy: "😊",
+  sad: "😢",
+  excited: "🎉",
+  peaceful: "😌",
+  loved: "❤️",
+  angry: "😤",
+  anxious: "😰",
+  neutral: "😐",
+};
+
+function InsightsSkeleton() {
+  return (
+    <SafeAreaView style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.scroll}>
+        <View style={styles.headerRow}>
+          <Skeleton width={100} height={28} />
+        </View>
+        <View style={styles.statsRow}>
+          {[1, 2, 3].map((i) => (
+            <View key={i} style={styles.statCard}>
+              <Skeleton width={28} height={28} radius={14} />
+              <Skeleton width={40} height={22} style={{ marginTop: 8 }} />
+              <Skeleton width={55} height={12} style={{ marginTop: 4 }} />
+            </View>
+          ))}
+        </View>
+        <SkeletonCard lines={4} style={{ marginHorizontal: Spacing.xl }} />
+        <SkeletonCard lines={3} style={{ marginHorizontal: Spacing.xl }} />
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
 
 const InsightsScreen = () => {
-  const days = ["Su", "Sa", "Fr", "Th", "We", "Tu", "Mo"];
-  const moods = ["😔", "😐", "😊", "😍"];
+  const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
+  const summaries = useQuery(
+    api.summaries.listRecentSummaries,
+    isAuthenticated ? { limit: 7 } : "skip",
+  );
+  const memories = useQuery(
+    api.memories.listRecentMemories,
+    isAuthenticated ? { limit: 30 } : "skip",
+  );
 
-  const timeSpentData = [
-    { category: "Work", hours: "7.5h", progress: 143, max: 315 },
-    { category: "Health", hours: "2h", progress: 68, max: 315 },
-    { category: "Social", hours: "2.3h", progress: 76, max: 315 },
-    { category: "Entertainment", hours: "1.5h", progress: 52, max: 315 },
-  ];
+  const isLoading =
+    isAuthLoading || (isAuthenticated && memories === undefined);
 
-  const moodTrendsData = [
-    { value: 60, day: "Mo" },
-    { value: 75, day: "Tu" },
-    { value: 85, day: "We" },
-    { value: 90, day: "Th" },
-    { value: 70, day: "Fr" },
-    { value: 65, day: "Sa" },
-    { value: 80, day: "Su" },
-  ];
+  if (isLoading) return <InsightsSkeleton />;
+
+  const resolvedSummaries = summaries ?? [];
+  const resolvedMemories = memories ?? [];
+
+  // Derive mood trends (last 7 days)
+  const dayLabels = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+  const today = new Date();
+  const moodTrendsData = Array.from({ length: 7 }, (_, i) => {
+    const date = new Date(today);
+    date.setDate(date.getDate() - (6 - i));
+    const dayKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    const dayOfWeek =
+      dayLabels[date.getDay() === 0 ? 6 : date.getDay() - 1] ?? "?";
+
+    const dayMemories = resolvedMemories.filter(
+      (m: any) => m.dayKey === dayKey,
+    );
+    let value = 50;
+    if (dayMemories.length > 0) {
+      const moodScores = dayMemories
+        .filter((m: any) => m.mood)
+        .map((m: any) => MOOD_VALUES[m.mood] ?? 50);
+      if (moodScores.length > 0) {
+        value = Math.round(
+          moodScores.reduce((a: number, b: number) => a + b, 0) /
+            moodScores.length,
+        );
+      }
+    }
+    return { value, day: dayOfWeek };
+  });
+
+  const avgMood =
+    moodTrendsData.length > 0
+      ? (
+          moodTrendsData.reduce((sum, d) => sum + d.value, 0) /
+          moodTrendsData.length /
+          10
+        ).toFixed(1)
+      : "—";
+
+  const totalMemories = resolvedMemories.length;
+
+  // Mood distribution
+  const moodCounts: Record<string, number> = {};
+  resolvedMemories.forEach((m: any) => {
+    if (m.mood) {
+      moodCounts[m.mood] = (moodCounts[m.mood] ?? 0) + 1;
+    }
+  });
+  const topMoods = Object.entries(moodCounts)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 5);
+  const maxMoodCount = topMoods.length > 0 ? topMoods[0]![1] : 1;
+
+  // Metrics from latest summary
+  const latestSummary =
+    resolvedSummaries.length > 0 ? resolvedSummaries[0] : null;
+  const steps = latestSummary?.metrics?.steps;
+  const sleepHours = latestSummary?.metrics?.sleepMinutes
+    ? (latestSummary.metrics.sleepMinutes / 60).toFixed(1)
+    : null;
+
+  const hasData = resolvedMemories.length > 0 || resolvedSummaries.length > 0;
+
+  if (!hasData) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={{ flex: 1, justifyContent: "center" }}>
+          <EmptyState
+            icon="analytics-outline"
+            title="No Insights Yet"
+            subtitle="Start adding memories to see your mood trends, stats, and patterns here."
+          />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const renderMoodChart = () => {
-    const maxValue = Math.max(...moodTrendsData.map((d) => d.value));
-    const chartHeight = 100;
+    const maxValue = Math.max(...moodTrendsData.map((d) => d.value), 1);
+    const chartHeight = 120;
 
     return (
-      <View style={styles.moodChartContainer}>
-        {/* Horizontal grid lines */}
-        <View style={styles.gridLine} />
-        <View style={[styles.gridLine, { top: chartHeight * 0.25 }]} />
-        <View style={[styles.gridLine, { top: chartHeight * 0.5 }]} />
-        <View style={[styles.gridLine, { top: chartHeight * 0.75 }]} />
-        <View style={[styles.gridLine, { top: chartHeight - 1 }]} />
-
-        {/* Data points and lines */}
+      <View
+        style={{
+          height: chartHeight,
+          marginBottom: Spacing.lg,
+          position: "relative",
+        }}
+      >
+        {/* Grid lines */}
+        {[0, 0.25, 0.5, 0.75, 1].map((pct) => (
+          <View
+            key={pct}
+            style={{
+              position: "absolute",
+              top: chartHeight * pct,
+              left: 0,
+              right: 0,
+              height: 1,
+              backgroundColor: c.divider,
+            }}
+          />
+        ))}
+        {/* Data points + lines */}
         {moodTrendsData.map((item, index) => {
           const nextItem = moodTrendsData[index + 1];
-          const xPos = (index * (CARD_WIDTH - 80)) / 6;
+          const xPos = (index * CHART_WIDTH) / 6;
           const yPos = chartHeight - (item.value / maxValue) * chartHeight;
 
           return (
             <View
-              key={`point-${index}`}
-              style={[styles.dataPoint, { left: xPos, top: yPos - 3.5 }]}
+              key={index}
+              style={{
+                position: "absolute",
+                left: xPos - 4,
+                top: yPos - 4,
+                width: 8,
+                height: 8,
+                borderRadius: 4,
+                backgroundColor: c.tint,
+              }}
             >
               {nextItem && (
                 <View
-                  style={[
-                    styles.lineSegment,
-                    {
-                      width: Math.sqrt(
-                        Math.pow((CARD_WIDTH - 80) / 6, 2) +
-                          Math.pow(
-                            ((item.value - nextItem.value) / maxValue) *
-                              chartHeight,
-                            2,
-                          ),
-                      ),
-                      transform: [
-                        {
-                          rotate: `${Math.atan2(
-                            ((item.value - nextItem.value) / maxValue) *
-                              chartHeight,
-                            (CARD_WIDTH - 80) / 6,
-                          )}rad`,
-                        },
-                      ],
-                      left: 3.5,
-                      top: 3.5,
-                    },
-                  ]}
+                  style={{
+                    position: "absolute",
+                    height: 2,
+                    backgroundColor: c.tint,
+                    opacity: 0.6,
+                    left: 4,
+                    top: 3,
+                    width: Math.sqrt(
+                      Math.pow(CHART_WIDTH / 6, 2) +
+                        Math.pow(
+                          ((item.value - nextItem.value) / maxValue) *
+                            chartHeight,
+                          2,
+                        ),
+                    ),
+                    transform: [
+                      {
+                        rotate: `${Math.atan2(
+                          ((item.value - nextItem.value) / maxValue) *
+                            chartHeight,
+                          CHART_WIDTH / 6,
+                        )}rad`,
+                      },
+                    ],
+                  }}
                 />
               )}
             </View>
@@ -93,426 +240,246 @@ const InsightsScreen = () => {
     );
   };
 
-  const renderCircularProgress = (
-    value: number,
-    max: number,
-    size: number = 28,
-  ) => {
-    const innerSize = size * 0.55;
-
-    return (
-      <View style={[styles.circularProgress, { width: size, height: size }]}>
-        <View
-          style={[
-            styles.circularProgressBackground,
-            { width: size, height: size },
-          ]}
-        />
-        <View
-          style={[
-            styles.circularProgressFill,
-            { width: innerSize, height: innerSize },
-          ]}
-        />
-      </View>
-    );
-  };
-
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor="#F5F5F5" />
+    <SafeAreaView style={styles.safe}>
       <ScrollView
-        style={styles.container}
+        contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Insights</Text>
+        {/* ── Header ──────────────────────────────────── */}
+        <View style={styles.headerRow}>
+          <Text style={styles.pageTitle}>Insights</Text>
         </View>
 
-        {/* Mood Trends Card */}
-        <View style={[styles.card, styles.largeCard]}>
-          <Text style={styles.cardTitle}>Mood Trends</Text>
-
-          {/* Mood Chart */}
-          {renderMoodChart()}
-
-          {/* Days of Week */}
-          <View style={styles.daysRow}>
-            {days.map((day, index) => (
-              <View key={index} style={styles.dayContainer}>
-                <Text style={styles.dayText}>{day}</Text>
-              </View>
-            ))}
+        {/* ── Overview Stats ──────────────────────────── */}
+        <View style={styles.statsRow}>
+          <View style={styles.statCard}>
+            <Text style={{ fontSize: 20 }}>😊</Text>
+            <Text style={styles.statValue}>{avgMood}</Text>
+            <Text style={styles.statLabel}>Avg Mood</Text>
           </View>
+          <View style={styles.statCard}>
+            <Ionicons name="document-text-outline" size={20} color={c.tint} />
+            <Text style={styles.statValue}>{totalMemories}</Text>
+            <Text style={styles.statLabel}>Memories</Text>
+          </View>
+          {steps != null ? (
+            <View style={styles.statCard}>
+              <Ionicons name="walk-outline" size={20} color={c.success} />
+              <Text style={styles.statValue}>{steps.toLocaleString()}</Text>
+              <Text style={styles.statLabel}>Steps</Text>
+            </View>
+          ) : (
+            <View style={styles.statCard}>
+              <Ionicons name="moon-outline" size={20} color={c.warning} />
+              <Text style={styles.statValue}>{sleepHours ?? "—"}</Text>
+              <Text style={styles.statLabel}>Sleep (h)</Text>
+            </View>
+          )}
+        </View>
 
-          {/* Mood Scale */}
-          <View style={styles.moodScaleContainer}>
-            <View style={styles.moodScaleLabels}>
-              {moods.map((mood, index) => (
-                <Text key={index} style={styles.moodText}>
-                  {mood}
+        {/* ── Mood Trends ─────────────────────────────── */}
+        <View style={styles.section}>
+          <SectionHeader title="Mood Trends" action="7 days" />
+          <AppCard>
+            {renderMoodChart()}
+            <View style={styles.daysRow}>
+              {moodTrendsData.map((item, index) => (
+                <Text key={index} style={styles.dayLabel}>
+                  {item.day}
                 </Text>
               ))}
             </View>
-            <View style={styles.moodScaleBar} />
-            <View style={styles.moodScaleLabels}>
-              <Text style={styles.moodLabel}>Sad</Text>
-              <Text style={styles.moodLabel}>Neutral</Text>
-              <Text style={styles.moodLabel}>Happy</Text>
-              <Text style={styles.moodLabel}>Excited</Text>
-            </View>
-          </View>
+          </AppCard>
         </View>
 
-        {/* Stats Overview Card */}
-        <View style={[styles.card, styles.mediumCard]}>
-          <View style={styles.statsRow}>
-            <View style={styles.statItem}>
-              {renderCircularProgress(7.2, 10)}
-              <Text style={styles.statLabel}>Avg. Mood</Text>
-              <Text style={styles.statValue}>7.2/10</Text>
-            </View>
-
-            <View style={styles.statItem}>
-              <View style={styles.stepIcon}>
-                <Text style={styles.stepIconText}>👣</Text>
-              </View>
-              <Text style={styles.statLabel}>Steps</Text>
-              <Text style={styles.statValue}>5,420</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Expenses Trends Card */}
-        <View style={[styles.card, styles.largeCard]}>
-          <Text style={styles.cardTitle}>Expenses Trends</Text>
-
-          {/* Weekly Expenses */}
-          <View style={styles.expensesHeader}>
-            <View style={styles.daysRowSmall}>
-              {["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((day, index) => (
-                <View key={index} style={styles.dayContainerSmall}>
-                  <Text style={styles.dayTextSmall}>{day}</Text>
+        {/* ── Mood Distribution ───────────────────────── */}
+        {topMoods.length > 0 && (
+          <View style={styles.section}>
+            <SectionHeader title="Mood Distribution" />
+            <AppCard>
+              {topMoods.map(([mood, count]) => (
+                <View key={mood} style={styles.distRow}>
+                  <Text style={styles.distEmoji}>
+                    {MOOD_EMOJI[mood] ?? "❓"}
+                  </Text>
+                  <Text style={styles.distLabel}>
+                    {mood.charAt(0).toUpperCase() + mood.slice(1)}
+                  </Text>
+                  <View style={styles.barOuter}>
+                    <View
+                      style={[
+                        styles.barInner,
+                        { width: `${(count / maxMoodCount) * 100}%` },
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.distCount}>{count}</Text>
                 </View>
               ))}
-            </View>
-
-            <View style={styles.expenseTag}>
-              <View style={styles.expenseTagBackground} />
-              <Text style={styles.expenseAmount}>$1,230</Text>
-            </View>
+            </AppCard>
           </View>
+        )}
 
-          {/* Expense Chart */}
-          <View style={styles.expenseChart}>
-            <View style={styles.expenseBar} />
-            <View style={styles.verticalLine} />
-          </View>
-        </View>
-
-        {/* Time Spent Card */}
-        <View style={[styles.card, styles.largeCard]}>
-          <Text style={styles.cardTitle}>Time Spent</Text>
-
-          {timeSpentData.map((item, index) => (
-            <View key={index} style={styles.timeSpentRow}>
-              <Text style={styles.timeSpentCategory}>{item.category}</Text>
-              <View style={styles.progressBarContainer}>
-                <View style={styles.progressBarBackground}>
-                  <View
-                    style={[styles.progressBarFill, { width: item.progress }]}
-                  />
+        {/* ── Recent Stories ──────────────────────────── */}
+        {resolvedSummaries.length > 0 && (
+          <View style={styles.section}>
+            <SectionHeader title="Recent Stories" />
+            <AppCard padded={false}>
+              {resolvedSummaries.slice(0, 5).map((s: any, idx: number) => (
+                <View
+                  key={s._id}
+                  style={[
+                    styles.storyRow,
+                    idx < Math.min(resolvedSummaries.length, 5) - 1 &&
+                      styles.storyBorder,
+                  ]}
+                >
+                  <Text style={styles.storyDate}>{s.dayKey}</Text>
+                  <Text style={styles.storyText} numberOfLines={2}>
+                    {s.story}
+                  </Text>
+                  {s.highlights && s.highlights.length > 0 && (
+                    <Text style={styles.storyHighlights}>
+                      {s.highlights.length} highlight
+                      {s.highlights.length > 1 ? "s" : ""}
+                    </Text>
+                  )}
                 </View>
-                <Text style={styles.timeSpentHours}>{item.hours}</Text>
-              </View>
-            </View>
-          ))}
-        </View>
+              ))}
+            </AppCard>
+          </View>
+        )}
 
-        {/* Bottom padding */}
-        <View style={styles.bottomPadding} />
+        <View style={{ height: 100 }} />
       </ScrollView>
     </SafeAreaView>
   );
 };
 
+export default InsightsScreen;
+
+// ── Styles ──────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  safeArea: {
+  safe: {
     flex: 1,
-    backgroundColor: "#F5F5F5",
+    backgroundColor: c.background,
   },
-  container: {
+  scroll: {
+    paddingTop: Spacing.lg,
+    paddingBottom: Spacing["2xl"],
+  },
+
+  // Header
+  headerRow: {
+    paddingHorizontal: Spacing.xl,
+    marginBottom: Spacing["2xl"],
+  },
+  pageTitle: {
+    ...Typography.title1,
+    color: c.text,
+  },
+
+  // Stats
+  statsRow: {
+    flexDirection: "row",
+    gap: Spacing.md,
+    paddingHorizontal: Spacing.xl,
+    marginBottom: Spacing["2xl"],
+  },
+  statCard: {
     flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: 16,
-    paddingTop: Platform.OS === "ios" ? 0 : StatusBar.currentHeight,
-  },
-  header: {
+    backgroundColor: c.surface,
+    borderRadius: Radius.lg,
+    padding: Spacing.lg,
     alignItems: "center",
-    marginBottom: 24,
-    paddingTop: Platform.OS === "ios" ? 20 : 16,
+    ...Shadows.sm,
   },
-  headerTitle: {
-    fontSize: 19,
-    fontFamily: "Inter",
-    fontWeight: "700",
-    color: "#000",
-    textAlign: "center",
+  statValue: {
+    ...Typography.title2,
+    color: c.text,
+    marginTop: Spacing.sm,
   },
-  card: {
-    width: CARD_WIDTH,
-    backgroundColor: "white",
-    borderRadius: 18,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 4,
+  statLabel: {
+    ...Typography.caption2,
+    color: c.textSecondary,
+    marginTop: 2,
   },
-  largeCard: {
-    minHeight: 248,
+
+  // Sections
+  section: {
+    paddingHorizontal: Spacing.xl,
+    marginBottom: Spacing["2xl"],
   },
-  mediumCard: {
-    minHeight: 166,
-  },
-  cardTitle: {
-    fontSize: 16,
-    fontFamily: "Inter",
-    fontWeight: "600",
-    color: "#000",
-    textAlign: "center",
-    marginBottom: 20,
-  },
-  moodChartContainer: {
-    height: 100,
-    marginBottom: 20,
-    position: "relative",
-  },
-  gridLine: {
-    position: "absolute",
-    width: CARD_WIDTH - 80,
-    height: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.15)",
-    left: 10,
-  },
-  dataPoint: {
-    position: "absolute",
-    width: 7,
-    height: 7,
-    backgroundColor: "rgba(0, 0, 0, 0.80)",
-    borderRadius: 4,
-  },
-  lineSegment: {
-    position: "absolute",
-    height: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.80)",
-  },
+
+  // Days of week
   daysRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 10,
   },
-  dayContainer: {
+  dayLabel: {
+    ...Typography.caption1,
+    color: c.textSecondary,
     flex: 1,
-    alignItems: "center",
-  },
-  dayText: {
-    fontSize: 13,
-    fontFamily: "Inter",
-    fontWeight: "500",
-    color: "#000",
-  },
-  moodScaleContainer: {
-    alignItems: "center",
-  },
-  moodScaleBar: {
-    width: 200,
-    height: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.15)",
-    marginVertical: 8,
-  },
-  moodScaleLabels: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    width: 200,
-  },
-  moodText: {
-    fontSize: 13,
-    fontFamily: "Inter",
-    fontWeight: "500",
-    color: "#000",
-  },
-  moodLabel: {
-    fontSize: 11,
-    fontFamily: "Inter",
-    fontWeight: "400",
-    color: "#000",
-  },
-  statsRow: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    marginTop: 20,
-  },
-  statItem: {
-    alignItems: "center",
-  },
-  circularProgress: {
-    position: "relative",
-    marginBottom: 8,
-  },
-  circularProgressBackground: {
-    position: "absolute",
-    backgroundColor: "#438883",
-    opacity: 0.2,
-    borderRadius: 9999,
-  },
-  circularProgressFill: {
-    position: "absolute",
-    backgroundColor: "#438883",
-    borderRadius: 9999,
-    top: "50%",
-    left: "50%",
-    transform: [{ translateX: -9.18 }, { translateY: -7.635 }],
-  },
-  stepIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: "#F1F7F7",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 8,
-  },
-  stepIconText: {
-    fontSize: 16,
-  },
-  statLabel: {
-    fontSize: 10,
-    fontFamily: "Inter",
-    fontWeight: "200",
-    color: "#000",
-    marginBottom: 4,
-  },
-  statValue: {
-    fontSize: 11,
-    fontFamily: "Inter",
-    fontWeight: "700",
-    color: "#000",
-  },
-  expensesHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 20,
-  },
-  daysRowSmall: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  dayContainerSmall: {
-    minWidth: 16,
-    alignItems: "center",
-  },
-  dayTextSmall: {
-    fontSize: 13,
-    fontFamily: "Inter",
-    fontWeight: "500",
-    color: "#000",
-  },
-  expenseTag: {
-    position: "relative",
-    width: 53,
-    height: 26,
-  },
-  expenseTagBackground: {
-    position: "absolute",
-    width: "100%",
-    height: "100%",
-    backgroundColor: "#F1F7F7",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "rgba(67, 136, 131, 0.60)",
-  },
-  expenseAmount: {
-    position: "absolute",
-    width: "100%",
-    height: "100%",
-    fontSize: 9,
-    fontFamily: "Inter",
-    fontWeight: "600",
-    color: "#438883",
     textAlign: "center",
-    lineHeight: 26,
   },
-  expenseChart: {
-    height: 100,
-    borderRadius: 8,
-    overflow: "hidden",
-    position: "relative",
-  },
-  expenseBar: {
-    position: "absolute",
-    width: "100%",
-    height: "100%",
-    backgroundColor: "white",
-  },
-  verticalLine: {
-    position: "absolute",
-    width: 1,
-    height: 60,
-    backgroundColor: "#666",
-    left: "50%",
-    top: 20,
-    transform: [{ rotate: "90deg" }],
-  },
-  timeSpentRow: {
+
+  // Mood distribution
+  distRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: Spacing.md,
   },
-  timeSpentCategory: {
-    fontSize: 11,
-    fontFamily: "Inter",
-    fontWeight: "400",
-    color: "#000",
-    width: 80,
+  distEmoji: {
+    fontSize: 16,
+    marginRight: Spacing.sm,
   },
-  progressBarContainer: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
+  distLabel: {
+    ...Typography.callout,
+    color: c.text,
+    width: 72,
   },
-  progressBarBackground: {
+  barOuter: {
     flex: 1,
     height: 8,
-    backgroundColor: "rgba(217, 217, 217, 0.50)",
-    borderRadius: 56,
-    marginRight: 12,
+    backgroundColor: c.surfaceSecondary,
+    borderRadius: Radius.full,
+    marginHorizontal: Spacing.md,
     overflow: "hidden",
   },
-  progressBarFill: {
+  barInner: {
     height: "100%",
-    backgroundColor: "#000",
-    borderRadius: 56,
+    backgroundColor: c.tint,
+    borderRadius: Radius.full,
   },
-  timeSpentHours: {
-    fontSize: 11,
-    fontFamily: "Inter",
-    fontWeight: "400",
-    color: "#000",
-    width: 30,
-    textAlign: "center",
+  distCount: {
+    ...Typography.caption1,
+    color: c.textSecondary,
+    width: 24,
+    textAlign: "right",
   },
-  bottomPadding: {
-    height: Platform.OS === "ios" ? 34 : 20,
+
+  // Stories
+  storyRow: {
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.lg,
+  },
+  storyBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: c.divider,
+  },
+  storyDate: {
+    ...Typography.caption1,
+    color: c.textTertiary,
+    marginBottom: 4,
+  },
+  storyText: {
+    ...Typography.body,
+    color: c.text,
+  },
+  storyHighlights: {
+    ...Typography.caption2,
+    color: c.tint,
+    marginTop: 4,
   },
 });
-
-export default InsightsScreen;
