@@ -5,314 +5,458 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Platform,
-  StatusBar,
+  RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import { useUser } from "@clerk/clerk-expo";
+import { useQuery, useConvexAuth } from "convex/react";
+import { api } from "@repo/backend/convex";
+import {
+  Colors,
+  Spacing,
+  Typography,
+  Radius,
+  Shadows,
+} from "@/constants/theme";
+import { AppCard } from "@/components/ui/app-card";
+import { SectionHeader } from "@/components/ui/section-header";
+import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
+import { EmptyState } from "@/components/ui/empty-state";
 
+const c = Colors.light;
+
+function getTodayDayKey(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function getGreeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "Good Morning";
+  if (h < 17) return "Good Afternoon";
+  return "Good Evening";
+}
+
+function formatMemoryTime(timestamp: number): string {
+  const d = new Date(timestamp);
+  let h = d.getHours();
+  const m = String(d.getMinutes()).padStart(2, "0");
+  const ampm = h >= 12 ? "PM" : "AM";
+  h = h % 12 || 12;
+  return `${h}:${m} ${ampm}`;
+}
+
+const MOOD_EMOJI: Record<string, string> = {
+  happy: "😊",
+  sad: "😢",
+  excited: "🎉",
+  peaceful: "😌",
+  loved: "❤️",
+  angry: "😤",
+  anxious: "😰",
+  neutral: "😐",
+};
+
+// ── Loading skeleton ────────────────────────────────────────
+function HomeScreenSkeleton() {
+  return (
+    <SafeAreaView style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.scroll}>
+        <View style={styles.headerRow}>
+          <Skeleton width={200} height={28} />
+          <Skeleton width={36} height={36} radius={18} />
+        </View>
+        <View style={styles.statsRow}>
+          {[1, 2, 3].map((i) => (
+            <View key={i} style={styles.statCard}>
+              <Skeleton width={28} height={28} radius={14} />
+              <Skeleton width={40} height={22} style={{ marginTop: 8 }} />
+              <Skeleton width={60} height={12} style={{ marginTop: 4 }} />
+            </View>
+          ))}
+        </View>
+        <SkeletonCard lines={4} style={{ marginHorizontal: Spacing.xl }} />
+        <SkeletonCard lines={2} style={{ marginHorizontal: Spacing.xl }} />
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+// ── Main component ──────────────────────────────────────────
 const HomeScreen = () => {
-  // Mock data
-  const userName = "John";
-  const placesCount = 3;
-  const stepsCount = "5,420";
-  const eventsCount = 2;
+  const router = useRouter();
+  const { user } = useUser();
+  const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
+  const todayKey = getTodayDayKey();
+  const [refreshing, setRefreshing] = React.useState(false);
 
-  const dailySummary =
-    "Yesterday, you had a productive workday followed by an evening walk in Central Park. You slept 7.5 hours and caught up with friends over dinner.";
+  const recentMemories = useQuery(
+    api.memories.listRecentMemories,
+    isAuthenticated ? { limit: 10 } : "skip",
+  );
+  const todayDay = useQuery(
+    api.days.getDay,
+    isAuthenticated ? { dayKey: todayKey } : "skip",
+  );
+  const todaySummary = useQuery(
+    api.summaries.getSummaryByDay,
+    isAuthenticated ? { dayKey: todayKey } : "skip",
+  );
 
-  const timelineEvents = [
-    { location: "Home", time: "7.30 AM (45 min)" },
-    { location: "Work", time: "9 AM - 5 PM" },
-    { location: "Gym", time: "3:30 PM (15 min)" },
-    { location: "Central park", time: "8 PM" },
-  ];
+  const isLoading =
+    isAuthLoading || (isAuthenticated && recentMemories === undefined);
 
-  const quickActions = [
-    { icon: "add-circle-outline", label: "Add Memory" },
-    { icon: "target-outline", label: "Today's Focus" },
-    { icon: "analytics-outline", label: "Insights" },
-    { icon: "settings-outline", label: "Settings" },
-  ];
+  if (isLoading) return <HomeScreenSkeleton />;
+
+  const memories = recentMemories ?? [];
+  const todayMemories = memories.filter((m) => m.dayKey === todayKey);
+  const userName = user?.firstName ?? "there";
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 1000);
+  };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-
+    <SafeAreaView style={styles.safe}>
       <ScrollView
-        style={styles.container}
+        contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={c.tint}
+          />
+        }
       >
-        {/* Greeting */}
-        <View style={styles.greetingContainer}>
-          <Text style={styles.greetingText}>Good Morning, {userName}</Text>
+        {/* ── Header ────────────────────────────────────── */}
+        <View style={styles.headerRow}>
+          <View>
+            <Text style={styles.greeting}>{getGreeting()},</Text>
+            <Text style={styles.userName}>{userName}</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.avatarBtn}
+            onPress={() => router.push("/profile")}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="person" size={18} color={c.tint} />
+          </TouchableOpacity>
         </View>
 
-        {/* Stats Row */}
-        <View style={styles.statsContainer}>
-          <View style={styles.statItem}>
-            <Ionicons name="location-outline" size={15} color="black" />
-            <Text style={styles.statText}>{placesCount} Places</Text>
+        {/* ── Stats ─────────────────────────────────────── */}
+        <View style={styles.statsRow}>
+          <View style={styles.statCard}>
+            <Ionicons name="book-outline" size={20} color={c.tint} />
+            <Text style={styles.statValue}>{todayMemories.length}</Text>
+            <Text style={styles.statLabel}>Memories</Text>
           </View>
-
-          <View style={styles.statItem}>
-            <Ionicons name="walk-outline" size={15} color="black" />
-            <Text style={styles.statText}>{stepsCount} Steps</Text>
+          <View style={styles.statCard}>
+            <Ionicons name="star-outline" size={20} color={c.warning} />
+            <Text style={styles.statValue}>
+              {todayDay?.rating ? `${todayDay.rating}/5` : "—"}
+            </Text>
+            <Text style={styles.statLabel}>Rating</Text>
           </View>
-
-          <View style={styles.statItem}>
-            <Ionicons name="calendar-outline" size={15} color="black" />
-            <Text style={styles.statText}>{eventsCount} Events</Text>
+          <View style={styles.statCard}>
+            <Ionicons name="walk-outline" size={20} color={c.success} />
+            <Text style={styles.statValue}>
+              {todaySummary?.metrics?.steps?.toLocaleString() ?? "—"}
+            </Text>
+            <Text style={styles.statLabel}>Steps</Text>
           </View>
         </View>
 
-        {/* Main Content */}
-        <View style={styles.contentContainer}>
-          {/* Daily Summary Card */}
-          <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.cardTitle}>Daily Summary</Text>
-            </View>
-            <View style={styles.cardContent}>
-              <Text style={styles.summaryText}>{dailySummary}</Text>
-              <TouchableOpacity style={styles.exploreButton}>
-                <Text style={styles.exploreText}>
-                  Tap facts to explore details →
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Quick Actions Grid */}
-          <View style={styles.quickActionsContainer}>
-            <Text style={styles.sectionTitle}>Quick Actions</Text>
-            <View style={styles.actionsGrid}>
-              {quickActions.map((action, index) => (
-                <TouchableOpacity key={index} style={styles.actionCard}>
-                  <View style={styles.actionIconContainer}>
-                    <Ionicons
-                      name={action.icon as any}
-                      size={30}
-                      color="#000000"
-                    />
+        {/* ── Daily Summary ─────────────────────────────── */}
+        <View style={styles.section}>
+          <SectionHeader title="Today's Summary" />
+          <AppCard>
+            {todaySummary ? (
+              <>
+                <Text style={styles.summaryText}>{todaySummary.story}</Text>
+                {todaySummary.highlights.length > 0 && (
+                  <View style={styles.highlightsWrap}>
+                    {todaySummary.highlights.map((h, i) => (
+                      <View key={i} style={styles.highlightChip}>
+                        <Text style={styles.highlightText}>{h}</Text>
+                      </View>
+                    ))}
                   </View>
-                  <Text style={styles.actionLabel}>{action.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
+                )}
+              </>
+            ) : (
+              <EmptyState
+                icon="sunny-outline"
+                title="No summary yet"
+                subtitle="Add memories throughout the day to generate your daily story."
+              />
+            )}
+          </AppCard>
         </View>
 
-        {/* Today's Timeline Card */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Text style={styles.cardTitle}>Today&apos;s Timeline</Text>
-          </View>
-          <View style={styles.timelineContainer}>
-            {timelineEvents.map((event, index) => (
-              <View key={index} style={styles.timelineItem}>
-                <View style={styles.timelineLeft}>
-                  <Text style={styles.locationText}>{event.location}</Text>
+        {/* ── Quick Actions ─────────────────────────────── */}
+        <View style={styles.section}>
+          <SectionHeader title="Quick Actions" />
+          <View style={styles.actionsRow}>
+            {[
+              {
+                icon: "add-circle-outline" as const,
+                label: "Add",
+                route: "/add-memory",
+              },
+              {
+                icon: "today-outline" as const,
+                label: "Today",
+                route: "/memory",
+              },
+              {
+                icon: "bar-chart-outline" as const,
+                label: "Insights",
+                route: "/insights",
+              },
+              {
+                icon: "settings-outline" as const,
+                label: "Settings",
+                route: "/profile",
+              },
+            ].map((a, i) => (
+              <TouchableOpacity
+                key={i}
+                style={styles.actionItem}
+                onPress={() => router.push(a.route as any)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.actionIcon}>
+                  <Ionicons name={a.icon} size={22} color={c.tint} />
                 </View>
-                <View style={styles.timelineRight}>
-                  <Text style={styles.timeTextSmall}>{event.time}</Text>
-                </View>
-              </View>
+                <Text style={styles.actionLabel}>{a.label}</Text>
+              </TouchableOpacity>
             ))}
           </View>
         </View>
-        {/* Bottom Navigation Spacer */}
-        <View style={styles.bottomSpacer} />
+
+        {/* ── Recent Memories ───────────────────────────── */}
+        <View style={styles.section}>
+          <SectionHeader
+            title="Recent Memories"
+            action={memories.length > 0 ? "See all" : undefined}
+            onAction={() => router.push("/memory")}
+          />
+          {memories.length === 0 ? (
+            <AppCard>
+              <EmptyState
+                icon="sparkles-outline"
+                title="No memories yet"
+                subtitle="Capture your first moment to start building your timeline."
+                actionLabel="Add Memory"
+                onAction={() => router.push("/add-memory")}
+              />
+            </AppCard>
+          ) : (
+            <AppCard padded={false}>
+              {memories.map((mem, idx) => (
+                <View
+                  key={mem._id}
+                  style={[
+                    styles.memoryRow,
+                    idx < memories.length - 1 && styles.memoryBorder,
+                  ]}
+                >
+                  <View style={styles.moodDot}>
+                    <Text style={{ fontSize: 16 }}>
+                      {MOOD_EMOJI[mem.mood ?? ""] ?? "📝"}
+                    </Text>
+                  </View>
+                  <View style={styles.memoryInfo}>
+                    <Text style={styles.memoryTitle} numberOfLines={1}>
+                      {mem.title}
+                    </Text>
+                    {mem.mood && (
+                      <Text style={styles.memoryMood}>{mem.mood}</Text>
+                    )}
+                  </View>
+                  <View style={styles.memoryTime}>
+                    <Text style={styles.timeText}>
+                      {formatMemoryTime(mem.happenedAt)}
+                    </Text>
+                    <Text style={styles.dayText}>{mem.dayKey}</Text>
+                  </View>
+                </View>
+              ))}
+            </AppCard>
+          )}
+        </View>
+
+        <View style={{ height: 100 }} />
       </ScrollView>
     </SafeAreaView>
   );
 };
 
+export default HomeScreen;
+
+// ── Styles ──────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  safeArea: {
+  safe: {
     flex: 1,
-    backgroundColor: "#f8fafc",
-    paddingTop: Platform.OS === "android" ? StatusBar.currentHeight : 0,
+    backgroundColor: c.background,
   },
-  container: {
-    flex: 1,
+  scroll: {
+    paddingTop: Spacing.lg,
+    paddingBottom: Spacing["2xl"],
   },
-  scrollContent: {
-    paddingTop: 24,
-    paddingBottom: 20,
-  },
-  greetingContainer: {
-    paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 16,
-  },
-  greetingText: {
-    textAlign: "center",
-    color: "black",
-    fontSize: 19,
-    fontFamily: "Inter",
-    fontWeight: "700",
-    lineHeight: 22,
-  },
-  statsContainer: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    paddingHorizontal: 24,
-    paddingBottom: 24,
-  },
-  statItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  statText: {
-    textAlign: "center",
-    color: "black",
-    fontSize: 11,
-    fontFamily: "Inter",
-    fontWeight: "500",
-    lineHeight: 22,
-  },
-  contentContainer: {
-    paddingHorizontal: 24,
-    gap: 20,
-  },
-  card: {
-    backgroundColor: "white",
-    borderRadius: 18,
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 4,
-    overflow: "hidden",
-  },
-  cardHeader: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f1f5f9",
-  },
-  cardTitle: {
-    textAlign: "center",
-    color: "black",
-    fontSize: 16,
-    fontFamily: "Inter",
-    fontWeight: "600",
-    lineHeight: 22,
-  },
-  cardContent: {
-    padding: 20,
-  },
-  summaryText: {
-    width: "100%",
-    color: "black",
-    fontSize: 13,
-    fontFamily: "Inter",
-    fontWeight: "400",
-    lineHeight: 22,
-    marginBottom: 12,
-  },
-  exploreButton: {
-    alignSelf: "flex-start",
-  },
-  exploreText: {
-    color: "#0D00FF",
-    fontSize: 12,
-    fontFamily: "Inter",
-    fontWeight: "500",
-    lineHeight: 22,
-  },
-  timelineContainer: {
-    padding: 20,
-    gap: 16,
-  },
-  timelineItem: {
+
+  // Header
+  headerRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    paddingHorizontal: Spacing.xl,
+    marginBottom: Spacing["2xl"],
   },
-  timelineLeft: {
+  greeting: {
+    ...Typography.callout,
+    color: c.textSecondary,
+  },
+  userName: {
+    ...Typography.title1,
+    color: c.text,
+    marginTop: 2,
+  },
+  avatarBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: c.tintLight,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  // Stats
+  statsRow: {
+    flexDirection: "row",
+    gap: Spacing.md,
+    paddingHorizontal: Spacing.xl,
+    marginBottom: Spacing["2xl"],
+  },
+  statCard: {
     flex: 1,
+    backgroundColor: c.surface,
+    borderRadius: Radius.lg,
+    padding: Spacing.lg,
+    alignItems: "center",
+    ...Shadows.sm,
   },
-  timelineRight: {
-    flex: 1,
-    alignItems: "flex-end",
+  statValue: {
+    ...Typography.title2,
+    color: c.text,
+    marginTop: Spacing.sm,
   },
-  locationText: {
-    textAlign: "left",
-    color: "black",
-    fontSize: 14,
-    fontFamily: "Inter",
-    fontWeight: "400",
-    lineHeight: 22,
+  statLabel: {
+    ...Typography.caption2,
+    color: c.textSecondary,
+    marginTop: 2,
   },
-  timeTextSmall: {
-    textAlign: "right",
-    color: "rgba(0, 0, 0, 0.60)",
-    fontSize: 12,
-    fontFamily: "Inter",
-    fontWeight: "400",
-    lineHeight: 22,
+
+  // Sections
+  section: {
+    paddingHorizontal: Spacing.xl,
+    marginBottom: Spacing["2xl"],
   },
-  quickActionsContainer: {
-    marginTop: 8,
+
+  // Summary
+  summaryText: {
+    ...Typography.body,
+    color: c.text,
+    marginBottom: Spacing.md,
   },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#0f172a",
-    marginBottom: 16,
-    fontFamily: "Inter",
-  },
-  actionsGrid: {
+  highlightsWrap: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
+  },
+  highlightChip: {
+    backgroundColor: c.tintLight,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+  },
+  highlightText: {
+    ...Typography.caption1,
+    color: c.tint,
+  },
+
+  // Quick Actions
+  actionsRow: {
+    flexDirection: "row",
     justifyContent: "space-between",
   },
-  actionCard: {
-    width: "48%",
-    backgroundColor: "white",
-    borderRadius: 18,
-    padding: 20,
+  actionItem: {
     alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 4,
-    marginBottom: 12,
+    flex: 1,
   },
-  actionIconContainer: {
-    width: 60,
-    height: 60,
-    borderRadius: 15,
-    backgroundColor: "rgba(99, 102, 241, 0.1)",
+  actionIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 16,
+    backgroundColor: c.tintLight,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 12,
+    marginBottom: Spacing.sm,
   },
   actionLabel: {
-    textAlign: "center",
-    color: "black",
-    fontSize: 13,
-    fontFamily: "Inter",
-    fontWeight: "400",
-    lineHeight: 22,
+    ...Typography.caption1,
+    color: c.textSecondary,
   },
-  bottomSpacer: {
-    height: 80,
+
+  // Memory list
+  memoryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.lg,
+  },
+  memoryBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: c.divider,
+  },
+  moodDot: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: c.surfaceSecondary,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: Spacing.md,
+  },
+  memoryInfo: {
+    flex: 1,
+  },
+  memoryTitle: {
+    ...Typography.bodyMedium,
+    color: c.text,
+  },
+  memoryMood: {
+    ...Typography.caption2,
+    color: c.textTertiary,
+    marginTop: 2,
+    textTransform: "capitalize",
+  },
+  memoryTime: {
+    alignItems: "flex-end",
+    marginLeft: Spacing.md,
+  },
+  timeText: {
+    ...Typography.caption1,
+    color: c.textSecondary,
+  },
+  dayText: {
+    ...Typography.caption2,
+    color: c.textTertiary,
+    marginTop: 2,
   },
 });
-
-export default HomeScreen;

@@ -1,504 +1,533 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
-  Dimensions,
-  SafeAreaView,
-  Platform,
-  StatusBar,
   TouchableOpacity,
   Switch,
+  Alert,
 } from "react-native";
-import { Ionicons as Icon } from "@expo/vector-icons";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import { useUser, useAuth } from "@clerk/clerk-expo";
+import { useQuery, useConvexAuth } from "convex/react";
+import { api } from "@repo/backend/convex";
+import {
+  Colors,
+  Spacing,
+  Typography,
+  Radius,
+  Shadows,
+} from "@/constants/theme";
+import { AppCard } from "@/components/ui/app-card";
+import { SectionHeader } from "@/components/ui/section-header";
+import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
 
-const { width } = Dimensions.get("window");
-const CARD_WIDTH = width - 48; // 354px equivalent with margins
+const c = Colors.light;
 
+type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
+
+/* ── Skeleton ──────────────────────────────────────────── */
+function ProfileSkeleton() {
+  return (
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.scroll}>
+        <Skeleton
+          width={100}
+          height={24}
+          style={{ marginLeft: Spacing.xl, marginBottom: Spacing.xl }}
+        />
+        <SkeletonCard lines={2} />
+        <SkeletonCard lines={1} />
+        <SkeletonCard lines={4} />
+      </View>
+    </SafeAreaView>
+  );
+}
+
+/* ── Screen ────────────────────────────────────────────── */
 const SettingsScreen = () => {
-  const [settings, setSettings] = useState({
-    locationTracking: true,
-    darkMode: false,
-    allNotifications: true,
-    weeklyInsights: true,
-    dailySummary: true,
-    quietHours: false,
-  });
+  const { user } = useUser();
+  const { signOut } = useAuth();
+  const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
 
-  const toggleSetting = (key: keyof typeof settings) => {
-    setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
+  const integrations = useQuery(
+    api.integrations.listMyIntegrations,
+    isAuthenticated ? {} : "skip",
+  );
+  const preferences = useQuery(
+    api.userPreferences.getMyUserPreferences,
+    isAuthenticated ? {} : "skip",
+  );
+
+  const [darkMode, setDarkMode] = useState(false);
+  const [allNotifications, setAllNotifications] = useState(true);
+  const [weeklyInsights, setWeeklyInsights] = useState(true);
+  const [dailySummary, setDailySummary] = useState(true);
+  const [quietHours, setQuietHours] = useState(false);
+
+  useEffect(() => {
+    if (preferences) {
+      setDailySummary(preferences.reminderType === "daily");
+      setWeeklyInsights(preferences.reminderType === "weekly");
+    }
+  }, [preferences]);
+
+  /* ── Callbacks ────────────────────────── */
+  const handleSignOut = useCallback(() => {
+    Alert.alert("Sign Out", "Are you sure you want to sign out?", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Sign Out", style: "destructive", onPress: () => signOut() },
+    ]);
+  }, [signOut]);
+
+  const handleExportData = useCallback(() => {
+    Alert.alert(
+      "Export Data",
+      "Data export will be available in a future update.",
+    );
+  }, []);
+
+  const handleDeleteAccount = useCallback(() => {
+    Alert.alert(
+      "Delete Account",
+      "This action is permanent and cannot be undone. All your data will be deleted.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () =>
+            Alert.alert(
+              "Contact Support",
+              "Please contact support to delete your account.",
+            ),
+        },
+      ],
+    );
+  }, []);
+
+  const isLoading =
+    isAuthLoading || (isAuthenticated && integrations === undefined);
+
+  if (isLoading) return <ProfileSkeleton />;
+
+  const userName = user?.fullName ?? user?.firstName ?? "User";
+  const userEmail = user?.primaryEmailAddress?.emailAddress ?? "";
+
+  /* ── Integration data ────────────────── */
+  const integrationIcons: Record<string, IoniconName> = {
+    apple_health: "heart",
+    google_calendar: "calendar",
+    spotify: "musical-notes",
+    google_fit: "fitness",
+  };
+  const integrationNames: Record<string, string> = {
+    apple_health: "Apple Health",
+    google_calendar: "Google Calendar",
+    spotify: "Spotify",
+    google_fit: "Google Fit",
   };
 
-  const settingsData = [
-    {
-      title: "Privacy & Data",
-      items: [
-        {
-          title: "Location Tracking",
-          subtitle: "While using the app",
-          value: settings.locationTracking,
-          onToggle: () => toggleSetting("locationTracking"),
-          type: "toggle",
-        },
-        {
-          title: "Health Data",
-          subtitle: "Apple Health connected",
-          type: "info",
-        },
-        {
-          title: "Screen Time Tracking",
-          subtitle: "App usage analysis",
-          type: "info",
-        },
-      ],
-    },
-    {
-      title: "App Preferences",
-      items: [
-        {
-          title: "Dark Mode",
-          value: settings.darkMode,
-          onToggle: () => toggleSetting("darkMode"),
-          type: "toggle",
-        },
-      ],
-    },
-    {
-      title: "Integrations",
-      items: [
-        {
-          title: "Apple Health",
-          subtitle: "Connected",
-          type: "info",
-          icon: "heart",
-        },
-        {
-          title: "Google Calendar",
-          subtitle: "Not connected",
-          type: "info",
-          icon: "calendar",
-        },
-        {
-          title: "Spotify",
-          subtitle: "Music mood tracking",
-          type: "info",
-          icon: "musical-notes",
-        },
-      ],
-    },
-    {
-      title: "Notifications",
-      items: [
-        {
-          title: "All Notifications",
-          subtitle: "Master switch",
-          value: settings.allNotifications,
-          onToggle: () => toggleSetting("allNotifications"),
-          type: "toggle",
-        },
-        {
-          title: "Weekly Insights",
-          value: settings.weeklyInsights,
-          onToggle: () => toggleSetting("weeklyInsights"),
-          type: "toggle",
-          disabled: !settings.allNotifications,
-        },
-        {
-          title: "Daily Summary",
-          value: settings.dailySummary,
-          onToggle: () => toggleSetting("dailySummary"),
-          type: "toggle",
-          disabled: !settings.allNotifications,
-        },
-        {
-          title: "Quiet Hours",
-          subtitle: "10:00 PM - 7:00 AM",
-          value: settings.quietHours,
-          onToggle: () => toggleSetting("quietHours"),
-          type: "toggle",
-          disabled: !settings.allNotifications,
-        },
-      ],
-    },
-  ];
+  const integrationItems = (integrations ?? []).map((integration: any) => ({
+    title: integrationNames[integration.provider] ?? integration.provider,
+    subtitle:
+      integration.status === "connected"
+        ? "Connected"
+        : integration.status === "error"
+          ? "Error"
+          : "Disconnected",
+    icon: integrationIcons[integration.provider] ?? ("link" as IoniconName),
+    connected: integration.status === "connected",
+  }));
 
-  type IoniconName = React.ComponentProps<typeof Icon>["name"];
+  /* ── Toggle row helper ───────────────── */
+  const ToggleRow = ({
+    label,
+    subtitle,
+    value,
+    onToggle,
+    disabled,
+  }: {
+    label: string;
+    subtitle?: string;
+    value: boolean;
+    onToggle: () => void;
+    disabled?: boolean;
+  }) => (
+    <View style={styles.toggleRow}>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.toggleLabel, disabled && { opacity: 0.45 }]}>
+          {label}
+        </Text>
+        {subtitle && <Text style={styles.toggleSub}>{subtitle}</Text>}
+      </View>
+      <Switch
+        value={value}
+        onValueChange={onToggle}
+        disabled={disabled}
+        trackColor={{ false: c.border, true: c.tint }}
+        thumbColor="#FFF"
+      />
+    </View>
+  );
 
-  const actionItems: { title: string; icon: IoniconName; color?: string }[] = [
-    { title: "Export My Data", icon: "download-outline" },
-    { title: "Delete Account", icon: "trash-outline", color: "#FF3B30" },
-  ];
-
-  const aboutItems: { title: string; icon: IoniconName }[] = [
+  /* ── About links ─────────────────────── */
+  const aboutLinks: { title: string; icon: IoniconName }[] = [
     { title: "Help Center", icon: "help-circle-outline" },
     { title: "Privacy Policy", icon: "shield-checkmark-outline" },
-    { title: "Terms of Services", icon: "document-text-outline" },
+    { title: "Terms of Service", icon: "document-text-outline" },
   ];
 
-  const renderSettingItem = (item: any, index: number) => {
-    return (
-      <View key={index} style={styles.settingItem}>
-        <View style={styles.settingContent}>
-          <Text style={styles.settingTitle}>{item.title}</Text>
-          {item.subtitle && (
-            <Text style={styles.settingSubtitle}>{item.subtitle}</Text>
-          )}
-        </View>
-        {item.type === "toggle" ? (
-          <Switch
-            value={item.value}
-            onValueChange={item.onToggle}
-            disabled={item.disabled}
-            trackColor={{ false: "#E5E5EA", true: "#007AFF" }}
-            thumbColor="#FFFFFF"
-          />
-        ) : (
-          <Icon name="chevron-forward" size={20} color="#999" />
-        )}
-      </View>
-    );
-  };
-
-  const renderSection = (section: any, sectionIndex: number) => {
-    return (
-      <View key={sectionIndex} style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionIcon}>{section.icon}</Text>
-          <Text style={styles.sectionTitle}>{section.title}</Text>
-        </View>
-        <View style={styles.sectionCard}>
-          {section.items.map((item: any, index: number) => (
-            <View key={index}>
-              {renderSettingItem(item, index)}
-              {index < section.items.length - 1 && (
-                <View style={styles.itemDivider} />
-              )}
-            </View>
-          ))}
-        </View>
-      </View>
-    );
-  };
-
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar
-        barStyle={settings.darkMode ? "light-content" : "dark-content"}
-        backgroundColor={settings.darkMode ? "#000" : "#F5F5F5"}
-      />
+    <SafeAreaView style={styles.safe}>
       <ScrollView
-        style={[styles.container, settings.darkMode && styles.darkContainer]}
+        contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <Text
-            style={[styles.headerTitle, settings.darkMode && styles.darkText]}
-          >
-            Settings
-          </Text>
+        {/* ── Header ──────────────────────────────── */}
+        <View style={styles.headerRow}>
+          <Text style={styles.pageTitle}>Settings</Text>
         </View>
 
-        {/* Profile Section */}
-        <View
-          style={[styles.profileCard, settings.darkMode && styles.darkCard]}
-        >
-          <View style={styles.profileImage}>
-            <Icon name="person-circle" size={50} color="#007AFF" />
-          </View>
-          <View style={styles.profileInfo}>
-            <Text
-              style={[styles.profileName, settings.darkMode && styles.darkText]}
-            >
-              Ranidu Ravishka
-            </Text>
-            <Text
-              style={[
-                styles.profileEmail,
-                settings.darkMode && styles.darkText,
-              ]}
-            >
-              raniduravishka1010@gmail.com
-            </Text>
-          </View>
-        </View>
-
-        {/* Action Buttons */}
-        <View style={styles.actionButtons}>
-          {actionItems.map((item, index) => (
-            <TouchableOpacity key={index} style={styles.actionButton}>
-              <Icon
-                name={item.icon}
-                size={15}
-                color={item.color || (settings.darkMode ? "#FFF" : "#000")}
-              />
-              <Text
-                style={[
-                  styles.actionButtonText,
-                  settings.darkMode && styles.darkText,
-                  item.color && { color: item.color },
-                ]}
-              >
-                {item.title}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Settings Sections */}
-        {settingsData.map(renderSection)}
-
-        {/* About Section */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionIcon}>ℹ️</Text>
-            <Text style={styles.sectionTitle}>About & Help</Text>
-          </View>
-          <View
-            style={[styles.aboutCard, settings.darkMode && styles.darkCard]}
-          >
-            <View style={styles.versionInfo}>
-              <Text
-                style={[
-                  styles.aboutLabel,
-                  settings.darkMode && styles.darkText,
-                ]}
-              >
-                Version
-              </Text>
-              <Text
-                style={[
-                  styles.versionText,
-                  settings.darkMode && styles.darkText,
-                ]}
-              >
-                DayLog v2.1.4
-              </Text>
+        {/* ── Profile Card ────────────────────────── */}
+        <View style={styles.pad}>
+          <AppCard>
+            <View style={styles.profileRow}>
+              <View style={styles.avatar}>
+                <Ionicons name="person" size={24} color={c.tint} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.profileName}>{userName}</Text>
+                <Text style={styles.profileEmail}>{userEmail}</Text>
+              </View>
             </View>
-            {aboutItems.map((item, index) => (
-              <TouchableOpacity key={index} style={styles.aboutItem}>
-                <Icon
-                  name={item.icon}
-                  size={20}
-                  color={settings.darkMode ? "#999" : "#666"}
-                />
-                <Text
-                  style={[
-                    styles.aboutItemText,
-                    settings.darkMode && styles.darkText,
-                  ]}
-                >
-                  {item.title}
-                </Text>
-                <Icon name="chevron-forward" size={20} color="#999" />
-              </TouchableOpacity>
-            ))}
-          </View>
+          </AppCard>
         </View>
 
-        {/* Bottom padding */}
-        <View style={styles.bottomPadding} />
+        {/* ── Quick Actions ───────────────────────── */}
+        <View style={[styles.pad, styles.quickRow]}>
+          <TouchableOpacity style={styles.quickBtn} onPress={handleExportData}>
+            <Ionicons name="download-outline" size={18} color={c.text} />
+            <Text style={styles.quickText}>Export Data</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.quickBtn} onPress={handleSignOut}>
+            <Ionicons name="log-out-outline" size={18} color={c.error} />
+            <Text style={[styles.quickText, { color: c.error }]}>Sign Out</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* ── App Preferences ─────────────────────── */}
+        <View style={styles.pad}>
+          <SectionHeader title="App Preferences" />
+          <AppCard>
+            <ToggleRow
+              label="Dark Mode"
+              value={darkMode}
+              onToggle={() => setDarkMode((v) => !v)}
+            />
+          </AppCard>
+        </View>
+
+        {/* ── Integrations ────────────────────────── */}
+        <View style={styles.pad}>
+          <SectionHeader title="Integrations" />
+          <AppCard>
+            {integrationItems.length === 0 ? (
+              <View style={styles.emptyRow}>
+                <Ionicons
+                  name="link-outline"
+                  size={18}
+                  color={c.textTertiary}
+                />
+                <Text style={styles.emptyText}>No integrations connected</Text>
+              </View>
+            ) : (
+              integrationItems.map((item, i) => (
+                <View key={i}>
+                  {i > 0 && <View style={styles.divider} />}
+                  <View style={styles.integrationRow}>
+                    <Ionicons name={item.icon} size={20} color={c.icon} />
+                    <View style={{ flex: 1, marginLeft: Spacing.md }}>
+                      <Text style={styles.integrationTitle}>{item.title}</Text>
+                      <Text
+                        style={[
+                          styles.integrationSub,
+                          item.connected && { color: c.success },
+                        ]}
+                      >
+                        {item.subtitle}
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={16}
+                      color={c.textTertiary}
+                    />
+                  </View>
+                </View>
+              ))
+            )}
+          </AppCard>
+        </View>
+
+        {/* ── Notifications ───────────────────────── */}
+        <View style={styles.pad}>
+          <SectionHeader title="Notifications" />
+          <AppCard>
+            <ToggleRow
+              label="All Notifications"
+              subtitle="Master switch"
+              value={allNotifications}
+              onToggle={() => setAllNotifications((v) => !v)}
+            />
+            <View style={styles.divider} />
+            <ToggleRow
+              label="Weekly Insights"
+              value={weeklyInsights}
+              onToggle={() => setWeeklyInsights((v) => !v)}
+              disabled={!allNotifications}
+            />
+            <View style={styles.divider} />
+            <ToggleRow
+              label="Daily Summary"
+              value={dailySummary}
+              onToggle={() => setDailySummary((v) => !v)}
+              disabled={!allNotifications}
+            />
+            <View style={styles.divider} />
+            <ToggleRow
+              label="Quiet Hours"
+              subtitle="10:00 PM — 7:00 AM"
+              value={quietHours}
+              onToggle={() => setQuietHours((v) => !v)}
+              disabled={!allNotifications}
+            />
+          </AppCard>
+        </View>
+
+        {/* ── Sync Status ─────────────────────────── */}
+        {preferences && (
+          <View style={styles.pad}>
+            <SectionHeader title="Sync Status" />
+            <AppCard>
+              <Text style={styles.syncText}>
+                Reminder: {preferences.reminderType} at{" "}
+                {preferences.formattedTime}
+              </Text>
+              <Text style={[styles.syncText, { marginTop: 4 }]}>
+                Focus areas: {preferences.focusAreas?.length ?? 0} selected
+              </Text>
+            </AppCard>
+          </View>
+        )}
+
+        {/* ── About & Help ────────────────────────── */}
+        <View style={styles.pad}>
+          <SectionHeader title="About & Help" />
+          <AppCard>
+            <View style={styles.versionRow}>
+              <Text style={styles.versionLabel}>Version</Text>
+              <Text style={styles.versionValue}>DayLog v2.1.4</Text>
+            </View>
+            {aboutLinks.map((item, i) => (
+              <View key={i}>
+                <View style={styles.divider} />
+                <TouchableOpacity style={styles.aboutRow} activeOpacity={0.6}>
+                  <Ionicons name={item.icon} size={18} color={c.icon} />
+                  <Text style={styles.aboutText}>{item.title}</Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={16}
+                    color={c.textTertiary}
+                  />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </AppCard>
+        </View>
+
+        {/* ── Danger Zone ─────────────────────────── */}
+        <View style={styles.pad}>
+          <TouchableOpacity
+            style={styles.dangerBtn}
+            onPress={handleDeleteAccount}
+          >
+            <Ionicons name="trash-outline" size={16} color={c.error} />
+            <Text style={styles.dangerText}>Delete Account</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={{ height: 100 }} />
       </ScrollView>
     </SafeAreaView>
   );
 };
 
+export default SettingsScreen;
+
+/* ── Styles ──────────────────────────────────────────── */
 const styles = StyleSheet.create({
-  safeArea: {
+  safe: {
     flex: 1,
-    backgroundColor: "#F5F5F5",
+    backgroundColor: c.background,
   },
-  container: {
-    flex: 1,
-    backgroundColor: "#F5F5F5",
+  scroll: {
+    paddingTop: Spacing.lg,
   },
-  darkContainer: {
-    backgroundColor: "#000",
+  headerRow: {
+    paddingHorizontal: Spacing.xl,
+    marginBottom: Spacing["2xl"],
   },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: 16,
-    paddingTop: Platform.OS === "ios" ? 0 : StatusBar.currentHeight,
+  pageTitle: {
+    ...Typography.title1,
+    color: c.text,
   },
-  header: {
-    alignItems: "center",
-    marginBottom: 24,
-    paddingTop: Platform.OS === "ios" ? 20 : 16,
+  pad: {
+    paddingHorizontal: Spacing.xl,
+    marginBottom: Spacing.xl,
   },
-  headerTitle: {
-    fontSize: 19,
-    fontFamily: "Inter",
-    fontWeight: "700",
-    color: "#000",
-    textAlign: "center",
-  },
-  profileCard: {
-    width: CARD_WIDTH,
-    backgroundColor: "white",
-    borderRadius: 18,
-    padding: 20,
-    marginBottom: 20,
+
+  /* Profile */
+  profileRow: {
     flexDirection: "row",
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 4,
   },
-  darkCard: {
-    backgroundColor: "#1C1C1E",
-  },
-  profileImage: {
-    marginRight: 16,
-  },
-  profileInfo: {
-    flex: 1,
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: c.tintLight,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: Spacing.lg,
   },
   profileName: {
-    fontSize: 17,
-    fontFamily: "Inter",
-    fontWeight: "600",
-    color: "#000",
-    marginBottom: 4,
+    ...Typography.bodyMedium,
+    color: c.text,
   },
   profileEmail: {
-    fontSize: 14,
-    fontFamily: "Inter",
-    fontWeight: "300",
-    color: "#000",
-  },
-  actionButtons: {
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 24,
-    marginBottom: 32,
-  },
-  actionButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  actionButtonText: {
-    fontSize: 10,
-    fontFamily: "Inter",
-    fontWeight: "300",
-    color: "#000",
-  },
-  section: {
-    marginBottom: 20,
-  },
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 12,
-    marginLeft: 8,
-  },
-  sectionIcon: {
-    fontSize: 16,
-    marginRight: 8,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontFamily: "Inter",
-    fontWeight: "600",
-    color: "#000",
-  },
-  sectionCard: {
-    width: CARD_WIDTH,
-    backgroundColor: "white",
-    borderRadius: 18,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 4,
-    overflow: "hidden",
-  },
-  settingItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    minHeight: 49,
-  },
-  settingContent: {
-    flex: 1,
-  },
-  settingTitle: {
-    fontSize: 15,
-    fontFamily: "Inter",
-    fontWeight: "500",
-    color: "#000",
-    textAlign: "left",
-  },
-  settingSubtitle: {
-    fontSize: 10,
-    fontFamily: "Inter",
-    fontWeight: "200",
-    color: "#666",
-    textAlign: "left",
+    ...Typography.caption1,
+    color: c.textSecondary,
     marginTop: 2,
   },
-  itemDivider: {
-    height: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.1)",
-    marginHorizontal: 20,
-  },
-  aboutCard: {
-    width: CARD_WIDTH,
-    backgroundColor: "white",
-    borderRadius: 18,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  versionInfo: {
+
+  /* Quick actions */
+  quickRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 16,
+    gap: Spacing.md,
   },
-  aboutLabel: {
-    fontSize: 12,
-    fontFamily: "Inter",
-    fontWeight: "300",
-    color: "#000",
-  },
-  versionText: {
-    fontSize: 12,
-    fontFamily: "Inter",
-    fontWeight: "400",
-    color: "#000",
-    width: 92,
-    textAlign: "center",
-  },
-  aboutItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 12,
-  },
-  aboutItemText: {
-    fontSize: 12,
-    fontFamily: "Inter",
-    fontWeight: "300",
-    color: "#000",
+  quickBtn: {
     flex: 1,
-    marginLeft: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.sm,
+    backgroundColor: c.surface,
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.md,
+    ...Shadows.sm,
   },
-  bottomPadding: {
-    height: Platform.OS === "ios" ? 34 : 20,
+  quickText: {
+    ...Typography.callout,
+    color: c.text,
   },
-  darkText: {
-    color: "#FFF",
+
+  /* Toggle rows */
+  toggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: Spacing.xs,
+  },
+  toggleLabel: {
+    ...Typography.body,
+    color: c.text,
+  },
+  toggleSub: {
+    ...Typography.caption1,
+    color: c.textTertiary,
+    marginTop: 2,
+  },
+
+  /* Integration rows */
+  integrationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: Spacing.sm,
+  },
+  integrationTitle: {
+    ...Typography.body,
+    color: c.text,
+  },
+  integrationSub: {
+    ...Typography.caption1,
+    color: c.textSecondary,
+    marginTop: 2,
+  },
+  emptyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    paddingVertical: Spacing.xs,
+  },
+  emptyText: {
+    ...Typography.callout,
+    color: c.textTertiary,
+  },
+
+  /* Divider */
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: c.divider,
+    marginVertical: Spacing.sm,
+  },
+
+  /* Sync */
+  syncText: {
+    ...Typography.callout,
+    color: c.textSecondary,
+  },
+
+  /* Version / About */
+  versionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: Spacing.xs,
+  },
+  versionLabel: {
+    ...Typography.caption1,
+    color: c.textTertiary,
+  },
+  versionValue: {
+    ...Typography.caption1,
+    color: c.text,
+  },
+  aboutRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: Spacing.sm,
+  },
+  aboutText: {
+    ...Typography.body,
+    color: c.text,
+    flex: 1,
+    marginLeft: Spacing.md,
+  },
+
+  /* Danger */
+  dangerBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+  },
+  dangerText: {
+    ...Typography.callout,
+    color: c.error,
   },
 });
-
-export default SettingsScreen;

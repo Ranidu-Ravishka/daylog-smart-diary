@@ -8,11 +8,8 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import "react-native-reanimated";
 
-import {
-  ConvexReactClient,
-  ConvexProviderWithAuth,
-  useMutation,
-} from "convex/react";
+import { ConvexReactClient, useMutation } from "convex/react";
+import { ConvexProviderWithClerk } from "convex/react-clerk";
 
 import { ClerkProvider, useAuth, useUser } from "@clerk/clerk-expo";
 import { api } from "@repo/backend/convex";
@@ -73,24 +70,10 @@ function SyncClerkUserToConvex() {
 }
 
 function ConvexAuthProvider({ children }: { children: React.ReactNode }) {
-  const { isLoaded, isSignedIn, getToken } = useAuth();
-
   return (
-    <ConvexProviderWithAuth
-      client={convex}
-      useAuth={() => ({
-        isLoading: !isLoaded,
-        isAuthenticated: !!isSignedIn,
-        fetchAccessToken: async ({ forceRefreshToken }) => {
-          return await getToken({
-            template: "convex",
-            skipCache: forceRefreshToken,
-          });
-        },
-      })}
-    >
+    <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
       {children}
-    </ConvexProviderWithAuth>
+    </ConvexProviderWithClerk>
   );
 }
 

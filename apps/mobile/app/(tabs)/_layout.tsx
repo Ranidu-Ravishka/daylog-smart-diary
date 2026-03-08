@@ -9,18 +9,26 @@ import { useColorScheme } from "@/hooks/use-color-scheme";
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
-  const { isSignedIn } = useAuth();
+  const { isSignedIn, isLoaded } = useAuth();
+
+  // Wait for Clerk to finish loading before deciding
+  if (!isLoaded) {
+    return null;
+  }
 
   if (!isSignedIn) {
     return <Redirect href="/sign-in" />;
   }
+
+  const theme = Colors[colorScheme ?? "light"];
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarButton: HapticTab,
-        tabBarActiveTintColor: Colors[colorScheme ?? "light"].tint,
+        tabBarActiveTintColor: theme.tint,
+        tabBarInactiveTintColor: theme.tabIconDefault,
         tabBarLabelPosition: "below-icon",
         tabBarItemStyle: {
           flex: 1,
@@ -39,7 +47,9 @@ export default function TabLayout() {
           height: 68,
           paddingTop: 6,
           paddingBottom: 6,
+          backgroundColor: theme.surface,
           borderTopWidth: 0.5,
+          borderTopColor: theme.divider,
         },
       }}
     >
