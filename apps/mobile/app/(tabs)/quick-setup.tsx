@@ -58,6 +58,17 @@ export default function QuickSetupScreen() {
     }
   }, [isSignedIn, router]);
 
+  // Auto-redirect to home if preferences already exist (onboarding complete)
+  useEffect(() => {
+    if (
+      savedPreferences &&
+      savedPreferences.focusAreas &&
+      savedPreferences.focusAreas.length > 0
+    ) {
+      router.replace("/(tabs)");
+    }
+  }, [savedPreferences, router]);
+
   useEffect(() => {
     if (didPrefill.current) return;
     if (!savedPreferences) return;

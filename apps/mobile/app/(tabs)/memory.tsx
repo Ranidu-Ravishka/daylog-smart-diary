@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
+  RefreshControl,
   Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -74,8 +75,15 @@ const DailyDetailView = () => {
   const [manualEntry, setManualEntry] = useState("");
   const [personInput, setPersonInput] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [optimisticRating, setOptimisticRating] = useState<number | null>(null);
 
-  const rating = day?.rating ?? 0;
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 1000);
+  }, []);
+
+  const rating = optimisticRating ?? day?.rating ?? 0;
   const peopleTags = React.useMemo(
     () => day?.peopleTags ?? [],
     [day?.peopleTags],
@@ -90,9 +98,11 @@ const DailyDetailView = () => {
 
   const handleRateDay = useCallback(
     async (stars: number) => {
+      setOptimisticRating(stars);
       try {
         await upsertDay({ dayKey, rating: stars });
       } catch (err) {
+        setOptimisticRating(null);
         console.error("Failed to rate day:", err);
       }
     },
@@ -153,6 +163,13 @@ const DailyDetailView = () => {
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={c.tint}
+          />
+        }
       >
         {/* ── Header ──────────────────────────────────── */}
         <View style={styles.headerRow}>

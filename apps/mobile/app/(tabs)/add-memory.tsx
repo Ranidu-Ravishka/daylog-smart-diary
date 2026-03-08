@@ -130,7 +130,7 @@ export default function AddMemoryScreen() {
       setMood("happy");
 
       Alert.alert("Memory Saved", "Your memory has been captured!", [
-        { text: "OK", onPress: () => router.push("/(tabs)") },
+        { text: "OK", onPress: () => router.replace("/(tabs)") },
       ]);
     } catch (err: any) {
       console.error("Failed to create memory:", err);
