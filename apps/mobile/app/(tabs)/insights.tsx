@@ -1,5 +1,12 @@
-import React from "react";
-import { View, Text, StyleSheet, ScrollView, Dimensions } from "react-native";
+import React, { useState, useCallback } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  RefreshControl,
+  Dimensions,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useConvexAuth } from "convex/react";
@@ -67,6 +74,13 @@ function InsightsSkeleton() {
 
 const InsightsScreen = () => {
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 1000);
+  }, []);
+
   const summaries = useQuery(
     api.summaries.listRecentSummaries,
     isAuthenticated ? { limit: 7 } : "skip",
@@ -245,6 +259,13 @@ const InsightsScreen = () => {
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={c.tint}
+          />
+        }
       >
         {/* ── Header ──────────────────────────────────── */}
         <View style={styles.headerRow}>
