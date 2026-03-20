@@ -1,12 +1,14 @@
 "use client";
 
-import { ConvexReactClient, useMutation } from "convex/react";
+import { ConvexProvider, ConvexReactClient, useMutation } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { ReactNode, useEffect, useRef } from "react";
 import { useAuth, useUser } from "@clerk/nextjs";
 import { api } from "@repo/backend/convex";
 
-const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+const convex = convexUrl ? new ConvexReactClient(convexUrl) : null;
+const hasClerk = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 function SyncClerkUserToConvex() {
   const { isLoaded, isSignedIn, user } = useUser();
@@ -50,6 +52,12 @@ function SyncClerkUserToConvex() {
 }
 
 export function ConvexClientProvider({ children }: { children: ReactNode }) {
+  if (!convex) return <>{children}</>;
+
+  if (!hasClerk) {
+    return <ConvexProvider client={convex}>{children}</ConvexProvider>;
+  }
+
   return (
     <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
       <SyncClerkUserToConvex />
