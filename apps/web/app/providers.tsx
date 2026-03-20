@@ -6,7 +6,8 @@ import { ReactNode, useEffect, useRef } from "react";
 import { ClerkProvider, useAuth, useUser } from "@clerk/nextjs";
 import { api } from "@repo/backend/convex";
 
-const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+const convex = convexUrl ? new ConvexReactClient(convexUrl) : null;
 
 function SyncClerkUserToConvex() {
   const { isLoaded, isSignedIn, user } = useUser();
@@ -50,6 +51,8 @@ function SyncClerkUserToConvex() {
 }
 
 function ConvexClientProvider({ children }: { children: ReactNode }) {
+  if (!convex) return <>{children}</>;
+
   return (
     <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
       <SyncClerkUserToConvex />
@@ -62,7 +65,7 @@ export function Providers({ children }: { children: ReactNode }) {
   const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
   if (!clerkPublishableKey) {
-    throw new Error("Missing NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY for web app");
+    return <>{children}</>;
   }
 
   const inner = <ConvexClientProvider>{children}</ConvexClientProvider>;
