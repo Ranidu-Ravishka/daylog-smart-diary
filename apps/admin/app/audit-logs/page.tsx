@@ -3,9 +3,15 @@
 import AdminGuard from "@/components/admin-guard";
 import { api } from "@repo/backend/convex";
 import { useConvexAuth, useQuery } from "convex/react";
+import { useMemo, useState } from "react";
 
 export default function AuditLogsPage() {
   const { isAuthenticated } = useConvexAuth();
+  const [actorFilter, setActorFilter] = useState<string>("all");
+  const [actionFilter, setActionFilter] = useState<string>("all");
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
+
   const isAdmin = useQuery(
     api.users.isCurrentUserAdmin,
     isAuthenticated ? {} : "skip",
@@ -14,6 +20,54 @@ export default function AuditLogsPage() {
     api.admin.listAuditLogs,
     isAdmin ? { limit: 200 } : "skip",
   );
+  const users = useQuery(api.admin.listAllUsers, isAdmin ? {} : "skip");
+
+  const actorOptions = useMemo(() => {
+    if (!logs) return [];
+    return [...new Set(logs.map((row) => String(row.actorUserId)))].sort();
+  }, [logs]);
+
+  const actionOptions = useMemo(() => {
+    if (!logs) return [];
+    return [...new Set(logs.map((row) => row.action))].sort();
+  }, [logs]);
+
+  const userById = useMemo(() => {
+    const map = new Map<string, { email: string; clerkUserId: string }>();
+    if (!users) return map;
+    users.forEach((user) => {
+      map.set(String(user._id), {
+        email: user.email,
+        clerkUserId: user.clerkUserId,
+      });
+    });
+    return map;
+  }, [users]);
+
+  const filteredLogs = useMemo(() => {
+    if (!logs) return [];
+
+    const start = startDate
+      ? new Date(`${startDate}T00:00:00`).getTime()
+      : null;
+    const end = endDate ? new Date(`${endDate}T23:59:59.999`).getTime() : null;
+
+    return logs.filter((row) => {
+      if (actorFilter !== "all" && String(row.actorUserId) !== actorFilter) {
+        return false;
+      }
+      if (actionFilter !== "all" && row.action !== actionFilter) {
+        return false;
+      }
+      if (start !== null && row.at < start) {
+        return false;
+      }
+      if (end !== null && row.at > end) {
+        return false;
+      }
+      return true;
+    });
+  }, [logs, actorFilter, actionFilter, startDate, endDate]);
 
   return (
     <AdminGuard>
@@ -31,12 +85,82 @@ export default function AuditLogsPage() {
             </div>
           </div>
 
+          <div className="mb-4 grid gap-3 rounded-xl border border-gray-200 bg-white p-4 md:grid-cols-5">
+            <label className="text-xs text-gray-600">
+              Actor
+              <select
+                className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
+                value={actorFilter}
+                onChange={(event) => setActorFilter(event.target.value)}
+              >
+                <option value="all">All actors</option>
+                {actorOptions.map((id) => (
+                  <option key={id} value={id}>
+                    {userById.get(id)?.email || id}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="text-xs text-gray-600">
+              Action
+              <select
+                className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
+                value={actionFilter}
+                onChange={(event) => setActionFilter(event.target.value)}
+              >
+                <option value="all">All actions</option>
+                {actionOptions.map((action) => (
+                  <option key={action} value={action}>
+                    {action}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="text-xs text-gray-600">
+              Start date
+              <input
+                type="date"
+                className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
+                value={startDate}
+                onChange={(event) => setStartDate(event.target.value)}
+              />
+            </label>
+
+            <label className="text-xs text-gray-600">
+              End date
+              <input
+                type="date"
+                className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
+                value={endDate}
+                onChange={(event) => setEndDate(event.target.value)}
+              />
+            </label>
+
+            <div className="flex items-end">
+              <button
+                onClick={() => {
+                  setActorFilter("all");
+                  setActionFilter("all");
+                  setStartDate("");
+                  setEndDate("");
+                }}
+                className="w-full rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Clear Filters
+              </button>
+            </div>
+          </div>
+
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
             {logs === undefined ? (
-              <div className="p-6 text-sm text-gray-600">Loading...</div>
-            ) : logs.length === 0 ? (
               <div className="p-6 text-sm text-gray-600">
-                No audit logs yet.
+                Loading audit logs…
+              </div>
+            ) : filteredLogs.length === 0 ? (
+              <div className="p-6 text-sm text-gray-600">
+                No audit logs match the current filters.
               </div>
             ) : (
               <div className="overflow-auto">
@@ -58,7 +182,7 @@ export default function AuditLogsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {logs.map((row) => (
+                    {filteredLogs.map((row) => (
                       <tr key={row._id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-gray-900">
                           {row.action}
@@ -67,7 +191,12 @@ export default function AuditLogsPage() {
                           {row.target ?? "—"}
                         </td>
                         <td className="px-4 py-3 font-mono text-xs text-gray-800">
-                          {row.actorUserId}
+                          <div>{String(row.actorUserId)}</div>
+                          {userById.get(String(row.actorUserId))?.email && (
+                            <div className="text-[11px] text-gray-500">
+                              {userById.get(String(row.actorUserId))?.email}
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-gray-600">
                           {new Date(row.at).toLocaleString()}
