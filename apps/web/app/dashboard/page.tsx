@@ -3,14 +3,7 @@
 import { useQuery, useConvexAuth } from "convex/react";
 import { api } from "@repo/backend/convex";
 import { useState } from "react";
-import {
-  ChevronLeft,
-  ChevronRight,
-  Sparkles,
-  Clock,
-  FileText,
-  Users,
-} from "lucide-react";
+import { Sparkles, Clock, FileText, Users, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { DayRating } from "@/components/DayRating";
 import { MemoryForm } from "@/components/MemoryForm";
 import { MemoryCard, type MemoryData } from "@/components/MemoryCard";
+import { DashboardDatePicker } from "@/components/DashboardDatePicker";
 
 const MOOD_EMOJI: Record<string, string> = {
   happy: "😊",
@@ -33,17 +27,6 @@ const MOOD_EMOJI: Record<string, string> = {
 
 function getDayKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function formatDate(dayKey: string): string {
-  const [y, m, d] = dayKey.split("-").map(Number);
-  const date = new Date(y!, m! - 1, d);
-  return date.toLocaleDateString("en-US", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
 }
 
 function LoadingSkeleton() {
@@ -62,6 +45,49 @@ function LoadingSkeleton() {
       <Skeleton className="h-32" />
     </div>
   );
+}
+
+function SummarySkeleton() {
+  return (
+    <Card>
+      <CardContent className="space-y-3 p-5">
+        <Skeleton className="h-4 w-3/4" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-5/6" />
+        <Separator className="my-4" />
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="h-3 w-2/3" />
+        <Skeleton className="h-3 w-1/2" />
+      </CardContent>
+    </Card>
+  );
+}
+
+function MemoriesSkeleton() {
+  return (
+    <div className="space-y-2">
+      {[1, 2, 3].map((item) => (
+        <Card key={item}>
+          <CardContent className="space-y-3 p-4">
+            <div className="flex items-center justify-between">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-4 w-16" />
+            </div>
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-3/4" />
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function formatMinutesAsHours(minutes: number) {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
 }
 
 export default function DashboardPage() {
@@ -84,16 +110,11 @@ export default function DashboardPage() {
 
   const isLoading =
     isAuthLoading || (isAuthenticated && memories === undefined);
+  const isSummaryLoading = isAuthenticated && summary === undefined;
+  const isMemoriesLoading = isAuthenticated && memories === undefined;
 
-  const navigateDay = (offset: number) => {
-    setSelectedDate((prev) => {
-      const d = new Date(prev);
-      d.setDate(d.getDate() + offset);
-      return d;
-    });
-  };
-
-  const isToday = getDayKey(new Date()) === dayKey;
+  const hasMemories = (memories?.length ?? 0) > 0;
+  const isSummaryPending = !isSummaryLoading && !summary && hasMemories;
 
   const handleEditMemory = (memory: MemoryData) => {
     setEditingMemory(memory);
@@ -120,34 +141,37 @@ export default function DashboardPage() {
   const moodFromMemories =
     memories && memories.length > 0 ? (memories[0]?.mood ?? null) : null;
 
+  const summaryMetrics = summary?.metrics;
+  const metricItems = [
+    summaryMetrics?.steps
+      ? { label: "Steps", value: `${summaryMetrics.steps.toLocaleString()}` }
+      : null,
+    summaryMetrics?.sleepMinutes
+      ? {
+          label: "Sleep",
+          value: formatMinutesAsHours(summaryMetrics.sleepMinutes),
+        }
+      : null,
+    summaryMetrics?.screenTimeMinutes
+      ? {
+          label: "Screen time",
+          value: formatMinutesAsHours(summaryMetrics.screenTimeMinutes),
+        }
+      : null,
+    summaryMetrics?.spendingTotal !== undefined
+      ? {
+          label: "Spending",
+          value: `$${summaryMetrics.spendingTotal.toFixed(2)}`,
+        }
+      : null,
+  ].filter((item): item is { label: string; value: string } => Boolean(item));
+
   return (
     <div className="max-w-2xl">
-      {/* ── Date navigation ───────────────────────────── */}
-      <div className="flex items-center gap-3 mb-8">
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-8 w-8"
-          onClick={() => navigateDay(-1)}
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <div className="flex-1">
-          <h1 className="text-xl font-semibold tracking-tight">
-            {formatDate(dayKey)}
-          </h1>
-          {isToday && <p className="text-xs text-muted-foreground">Today</p>}
-        </div>
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-8 w-8"
-          onClick={() => navigateDay(1)}
-          disabled={isToday}
-        >
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-      </div>
+      <DashboardDatePicker
+        selectedDate={selectedDate}
+        onSelectDate={setSelectedDate}
+      />
 
       {/* ── Quick stats ───────────────────────────────── */}
       <div className="grid grid-cols-3 gap-3 mb-8">
@@ -178,7 +202,9 @@ export default function DashboardPage() {
           <Sparkles className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-sm font-medium">AI Summary</h2>
         </div>
-        {summary ? (
+        {isSummaryLoading ? (
+          <SummarySkeleton />
+        ) : summary ? (
           <Card>
             <CardContent className="p-5">
               <p className="text-sm text-muted-foreground leading-relaxed">
@@ -210,6 +236,43 @@ export default function DashboardPage() {
                   ))}
                 </div>
               )}
+              {metricItems.length > 0 && (
+                <>
+                  <Separator className="my-4" />
+                  <div>
+                    <div className="mb-2 flex items-center gap-2 text-xs font-medium">
+                      <Activity className="h-3.5 w-3.5" />
+                      Metrics
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {metricItems.map((metric) => (
+                        <div
+                          key={metric.label}
+                          className="rounded-md border border-border p-2"
+                        >
+                          <p className="text-[11px] text-muted-foreground">
+                            {metric.label}
+                          </p>
+                          <p className="text-sm font-medium">{metric.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        ) : isSummaryPending ? (
+          <Card>
+            <CardContent className="p-8 text-center">
+              <Sparkles className="mx-auto mb-3 h-8 w-8 animate-pulse text-muted-foreground/60" />
+              <p className="text-sm text-muted-foreground">
+                Generating summary...
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                We found memories for this day and are preparing your day
+                summary.
+              </p>
             </CardContent>
           </Card>
         ) : (
@@ -259,7 +322,9 @@ export default function DashboardPage() {
           <Clock className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-sm font-medium">Memories</h2>
         </div>
-        {memories && memories.length > 0 ? (
+        {isMemoriesLoading ? (
+          <MemoriesSkeleton />
+        ) : memories && memories.length > 0 ? (
           <div className="space-y-2">
             {memories.map((memory) => (
               <MemoryCard
