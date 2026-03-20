@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery, useConvexAuth } from "convex/react";
+import { useAction, useQuery, useConvexAuth } from "convex/react";
 import { api } from "@repo/backend/convex";
 import { useState } from "react";
 import { Sparkles, Clock, FileText, Users, Activity } from "lucide-react";
@@ -13,6 +13,7 @@ import { DayRating } from "@/components/DayRating";
 import { MemoryForm } from "@/components/MemoryForm";
 import { MemoryCard, type MemoryData } from "@/components/MemoryCard";
 import { DashboardDatePicker } from "@/components/DashboardDatePicker";
+import { toastError, toastSuccess } from "@/lib/toast";
 
 const MOOD_EMOJI: Record<string, string> = {
   happy: "😊",
@@ -90,13 +91,30 @@ function formatMinutesAsHours(minutes: number) {
   return `${h}h ${m}m`;
 }
 
+function formatDateTime(timestamp: number) {
+  return new Date(timestamp).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export default function DashboardPage() {
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [showMemoryForm, setShowMemoryForm] = useState(false);
   const [editingMemory, setEditingMemory] = useState<MemoryData | null>(null);
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [summaryGenerationError, setSummaryGenerationError] = useState<
+    string | null
+  >(null);
 
   const dayKey = getDayKey(selectedDate);
+  const generateSummaryForDay = useAction(
+    api.summaryGeneration.generateSummaryForDay,
+  );
 
   const summary = useQuery(
     api.summaries.getSummaryByDay,
@@ -134,6 +152,25 @@ export default function DashboardPage() {
   const handleDeleteSuccess = () => {
     // Trigger a refetch by just letting React/Convex handle it naturally
     // The query will re-run automatically when the data changes
+  };
+
+  const handleGenerateSummary = async () => {
+    setSummaryGenerationError(null);
+    setIsGeneratingSummary(true);
+
+    try {
+      await generateSummaryForDay({ dayKey });
+      toastSuccess("Summary generated successfully");
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to generate summary. Please try again.";
+      setSummaryGenerationError(message);
+      toastError(message);
+    } finally {
+      setIsGeneratingSummary(false);
+    }
   };
 
   if (isLoading) return <LoadingSkeleton />;
@@ -198,10 +235,32 @@ export default function DashboardPage() {
 
       {/* ── AI Summary ────────────────────────────────── */}
       <section className="mb-8">
-        <div className="flex items-center gap-2 mb-3">
-          <Sparkles className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-medium">AI Summary</h2>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-medium">AI Summary</h2>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleGenerateSummary}
+            disabled={isGeneratingSummary}
+          >
+            {isGeneratingSummary ? "Generating..." : "Generate Summary"}
+          </Button>
         </div>
+        {summary?.generatedAt ? (
+          <p className="mb-3 text-xs text-muted-foreground">
+            Last generated: {formatDateTime(summary.generatedAt)}
+          </p>
+        ) : null}
+        {summaryGenerationError ? (
+          <Card className="mb-3 border-destructive/30">
+            <CardContent className="p-3 text-xs text-destructive">
+              {summaryGenerationError}
+            </CardContent>
+          </Card>
+        ) : null}
         {isSummaryLoading ? (
           <SummarySkeleton />
         ) : summary ? (

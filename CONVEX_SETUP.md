@@ -76,7 +76,10 @@ EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_xxx
 ```bash
 CLERK_JWT_ISSUER_DOMAIN=https://your-instance.clerk.accounts.dev
 CLERK_WEBHOOK_SECRET=whsec_xxx
+OPENAI_API_KEY=sk-xxxx
 ```
+
+`OPENAI_API_KEY` is required for manual AI summary generation from the web dashboard.
 
 ⚠️ **All three apps must use the SAME Convex URL**
 

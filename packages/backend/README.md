@@ -27,3 +27,11 @@ of Clerk user IDs allowed to self-promote:
 - `ADMIN_BOOTSTRAP_CLERK_USER_IDS=clerk_user_id_1,clerk_user_id_2`
 
 Then call the mutation `users:bootstrapMakeMeAdmin` while signed in.
+
+## AI summary generation environment
+
+Set the OpenAI API key in Convex dashboard environment variables:
+
+- `OPENAI_API_KEY=sk-...`
+
+This key is used by `summaryGeneration:generateSummaryForDay` via an internal Convex action.
