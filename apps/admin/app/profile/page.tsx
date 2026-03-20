@@ -57,5 +57,9 @@ function ClerkProfile() {
 }
 
 export default function Profile() {
-  return hasClerk ? <ClerkProfile /> : <NoAuthProfile />;
+  if (!hasClerk) {
+    return <NoAuthProfile />;
+  }
+
+  return <ClerkProfile />;
 }

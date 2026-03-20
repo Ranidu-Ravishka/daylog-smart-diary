@@ -6,6 +6,17 @@ This monorepo shares a single Convex backend (`packages/backend`) across three a
 - **Admin** (Next.js on port 3001)
 - **Mobile** (Expo/React Native)
 
+## 🔐 Authentication Strategy (Final)
+
+DayLog is standardized on **Clerk** for all clients (**Web + Admin + Mobile**) and Convex JWT verification.
+
+- Provider used across apps: **Clerk only**
+- Convex auth provider: `packages/backend/convex/auth.config.ts` (Clerk JWT issuer)
+- Admin and web sign-in/sign-up routes use Clerk components
+- User sync happens via:
+  - Client-side sync mutation after sign-in
+  - Server webhook at `POST /clerk/webhook` for Clerk user events
+
 ## 🚀 Initial Setup
 
 ### 1. Install Dependencies
@@ -39,23 +50,52 @@ After `convex dev` runs, you'll get a deployment URL. Copy it and update these f
 
 **`apps/web/.env.local`:**
 
-```
+```dotenv
 NEXT_PUBLIC_CONVEX_URL=https://your-project.convex.cloud
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_xxx
+CLERK_SECRET_KEY=sk_test_xxx
 ```
 
 **`apps/admin/.env.local`:**
 
-```
+```dotenv
 NEXT_PUBLIC_CONVEX_URL=https://your-project.convex.cloud
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_xxx
+CLERK_SECRET_KEY=sk_test_xxx
 ```
 
 **`apps/mobile/.env.local`:**
 
-```
+```dotenv
 EXPO_PUBLIC_CONVEX_URL=https://your-project.convex.cloud
+EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_xxx
+```
+
+**Convex Dashboard Environment Variables:**
+
+```bash
+CLERK_JWT_ISSUER_DOMAIN=https://your-instance.clerk.accounts.dev
+CLERK_WEBHOOK_SECRET=whsec_xxx
 ```
 
 ⚠️ **All three apps must use the SAME Convex URL**
+
+## 🪝 Clerk Webhook Setup (Required)
+
+1. In Clerk Dashboard, create a webhook endpoint pointing to:
+
+- `https://<your-convex-deployment>.convex.site/clerk/webhook`
+
+1. Subscribe at minimum to events:
+
+- `user.created`
+- `user.updated`
+
+1. Copy the signing secret from Clerk and set it as:
+
+- `CLERK_WEBHOOK_SECRET` in Convex environment variables
+
+The webhook implementation verifies Svix signature headers and rejects invalid signatures.
 
 ## 🏃 Running the Apps
 
@@ -83,7 +123,7 @@ pnpm dev:mobile
 
 ## 📁 Project Structure
 
-```
+```text
 packages/
   backend/              # Shared Convex backend
     convex/
@@ -153,8 +193,8 @@ const handleAction = () => {
 
 After starting all apps, visit:
 
-1. **Web:** http://localhost:3000 - Import and use `ConvexDemo` component
-2. **Admin:** http://localhost:3001 - Import and use `ConvexDemo` component
+1. **Web:** [http://localhost:3000](http://localhost:3000) - Import and use `ConvexDemo` component
+2. **Admin:** [http://localhost:3001](http://localhost:3001) - Import and use `ConvexDemo` component
 3. **Mobile:** Use Expo Go app or simulator - Import `ConvexDemo` from components
 
 Each app has a demo component showing:
