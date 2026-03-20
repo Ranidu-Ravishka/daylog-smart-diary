@@ -17,6 +17,7 @@ import type * as integrations from "../integrations.js";
 import type * as memories from "../memories.js";
 import type * as myFunctions from "../myFunctions.js";
 import type * as summaries from "../summaries.js";
+import type * as summaryGeneration from "../summaryGeneration.js";
 import type * as userPreferences from "../userPreferences.js";
 import type * as users from "../users.js";
 import type * as validators from "../validators.js";
@@ -38,6 +39,7 @@ declare const fullApi: ApiFromModules<{
   memories: typeof memories;
   myFunctions: typeof myFunctions;
   summaries: typeof summaries;
+  summaryGeneration: typeof summaryGeneration;
   userPreferences: typeof userPreferences;
   users: typeof users;
   validators: typeof validators;
