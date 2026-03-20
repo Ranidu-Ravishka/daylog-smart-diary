@@ -1,34 +1,12 @@
 "use client";
 
-import {
-  ConvexReactClient,
-  ConvexProviderWithAuth,
-  useMutation,
-} from "convex/react";
+import { ConvexReactClient, useMutation } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
-import { ReactNode, useCallback, useEffect, useMemo, useRef } from "react";
+import { ReactNode, useEffect, useRef } from "react";
 import { useAuth, useUser } from "@clerk/nextjs";
 import { api } from "@repo/backend/convex";
 
 const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
-const hasClerk = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-
-/**
- * Dummy auth hook used when Clerk is not configured.
- * Provides the same shape expected by ConvexProviderWithAuth so that
- * useConvexAuth() works everywhere (returns isAuthenticated: false).
- */
-function useNoAuth() {
-  const fetchAccessToken = useCallback(async () => null, []);
-  return useMemo(
-    () => ({
-      isLoading: false,
-      isAuthenticated: false,
-      fetchAccessToken,
-    }),
-    [fetchAccessToken],
-  );
-}
 
 function SyncClerkUserToConvex() {
   const { isLoaded, isSignedIn, user } = useUser();
@@ -72,14 +50,6 @@ function SyncClerkUserToConvex() {
 }
 
 export function ConvexClientProvider({ children }: { children: ReactNode }) {
-  if (!hasClerk) {
-    return (
-      <ConvexProviderWithAuth client={convex} useAuth={useNoAuth}>
-        {children}
-      </ConvexProviderWithAuth>
-    );
-  }
-
   return (
     <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
       <SyncClerkUserToConvex />

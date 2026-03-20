@@ -2,8 +2,6 @@
 import Link from "next/link";
 import { SignedIn, SignedOut, SignOutButton, useUser } from "@clerk/nextjs";
 
-const hasClerk = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-
 const navLinks = [
   { href: "/admin/dashboard", label: "Dashboard" },
   { href: "/content", label: "Content" },
@@ -16,27 +14,7 @@ const navLinks = [
   { href: "/audit-logs", label: "Audit Logs" },
 ];
 
-function StaticNavigations() {
-  return (
-    <nav className="w-full flex h-16 items-center justify-between px-4 border-b border-gray-200 shadow-lg mb-4">
-      <div className="flex">
-        <span className="font-bold">Admin Panel</span>
-      </div>
-      <div className="flex gap-3 items-center">
-        {navLinks.map((link) => (
-          <Link key={link.href} href={link.href}>
-            {link.label}
-          </Link>
-        ))}
-      </div>
-      <div className="flex items-center gap-3">
-        <span className="text-xs text-gray-500">Auth not configured</span>
-      </div>
-    </nav>
-  );
-}
-
-function ClerkNavigations() {
+export default function Navigations() {
   const { user } = useUser();
   return (
     <nav className="w-full flex h-16 items-center justify-between px-4 border-b border-gray-200 shadow-lg mb-4">
@@ -79,8 +57,4 @@ function ClerkNavigations() {
       </div>
     </nav>
   );
-}
-
-export default function Navigations() {
-  return hasClerk ? <ClerkNavigations /> : <StaticNavigations />;
 }

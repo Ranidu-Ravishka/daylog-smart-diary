@@ -1,30 +1,18 @@
 import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { Webhook } from "svix";
 
 // Clerk webhook endpoint to sync users into Convex.
 // Configure in the Clerk dashboard, pointing to:
 //   POST /clerk/webhook
 //
-// For production, set the CLERK_WEBHOOK_SECRET environment
-// variable on the Convex dashboard so that incoming webhook
-// payloads are verified against the Svix signature headers.
-
-/**
- * Verify the webhook came from Clerk by checking the Svix
- * signature headers against CLERK_WEBHOOK_SECRET.
- * Returns true if verification passes or if no secret is
- * configured (dev-mode fallback with a console warning).
- */
-async function verifyWebhookSignature(
+function verifyWebhookSignature(
   payloadText: string,
   headers: Headers,
-): Promise<boolean> {
+): boolean {
   const secret = process.env.CLERK_WEBHOOK_SECRET;
   if (!secret) {
-    console.warn(
-      "[clerk-webhook] CLERK_WEBHOOK_SECRET is not set — skipping signature verification. Set it for production.",
-    );
-    return true;
+    throw new Error("Missing CLERK_WEBHOOK_SECRET");
   }
 
   const svixId = headers.get("svix-id");
@@ -35,48 +23,18 @@ async function verifyWebhookSignature(
     return false;
   }
 
-  // Verify timestamp is within 5 minutes to prevent replay attacks
-  const timestampSeconds = parseInt(svixTimestamp, 10);
-  if (isNaN(timestampSeconds)) return false;
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  if (Math.abs(nowSeconds - timestampSeconds) > 300) {
+  const webhook = new Webhook(secret);
+
+  try {
+    webhook.verify(payloadText, {
+      "svix-id": svixId,
+      "svix-timestamp": svixTimestamp,
+      "svix-signature": svixSignature,
+    });
+    return true;
+  } catch {
     return false;
   }
-
-  // Build the signed content and verify using HMAC-SHA256
-  const signedContent = `${svixId}.${svixTimestamp}.${payloadText}`;
-  const encoder = new TextEncoder();
-
-  // The secret is base64-encoded with a "whsec_" prefix
-  const secretBytes = Uint8Array.from(
-    atob(secret.replace(/^whsec_/, "")),
-    (c) => c.charCodeAt(0),
-  );
-
-  const key = await crypto.subtle.importKey(
-    "raw",
-    secretBytes,
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-
-  const signatureBytes = await crypto.subtle.sign(
-    "HMAC",
-    key,
-    encoder.encode(signedContent),
-  );
-
-  const computedSig = btoa(
-    String.fromCharCode(...new Uint8Array(signatureBytes)),
-  );
-
-  // svix-signature may contain multiple space-separated sigs (v1,xxx)
-  const expectedSignatures = svixSignature.split(" ");
-  return expectedSignatures.some((sig) => {
-    const [, sigValue] = sig.split(",");
-    return sigValue === computedSig;
-  });
 }
 
 export const clerkWebhook = httpAction(async (ctx, request) => {
@@ -87,7 +45,14 @@ export const clerkWebhook = httpAction(async (ctx, request) => {
   const payloadText = await request.text();
 
   // Verify webhook signature when CLERK_WEBHOOK_SECRET is set
-  const isValid = await verifyWebhookSignature(payloadText, request.headers);
+  let isValid = false;
+  try {
+    isValid = verifyWebhookSignature(payloadText, request.headers);
+  } catch (error) {
+    console.error("[clerk-webhook] Configuration error:", error);
+    return new Response("Webhook not configured", { status: 500 });
+  }
+
   if (!isValid) {
     console.error("[clerk-webhook] Signature verification failed");
     return new Response("Unauthorized: invalid signature", { status: 401 });
