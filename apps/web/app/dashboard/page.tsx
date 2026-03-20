@@ -16,6 +16,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DayRating } from "@/components/DayRating";
+import { MemoryForm } from "@/components/MemoryForm";
+import { MemoryCard, type MemoryData } from "@/components/MemoryCard";
 
 const MOOD_EMOJI: Record<string, string> = {
   happy: "😊",
@@ -64,6 +67,8 @@ function LoadingSkeleton() {
 export default function DashboardPage() {
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
   const [selectedDate, setSelectedDate] = useState(() => new Date());
+  const [showMemoryForm, setShowMemoryForm] = useState(false);
+  const [editingMemory, setEditingMemory] = useState<MemoryData | null>(null);
 
   const dayKey = getDayKey(selectedDate);
 
@@ -89,6 +94,26 @@ export default function DashboardPage() {
   };
 
   const isToday = getDayKey(new Date()) === dayKey;
+
+  const handleEditMemory = (memory: MemoryData) => {
+    setEditingMemory(memory);
+    setShowMemoryForm(true);
+  };
+
+  const handleFormSuccess = () => {
+    setShowMemoryForm(false);
+    setEditingMemory(null);
+  };
+
+  const handleFormCancel = () => {
+    setShowMemoryForm(false);
+    setEditingMemory(null);
+  };
+
+  const handleDeleteSuccess = () => {
+    // Trigger a refetch by just letting React/Convex handle it naturally
+    // The query will re-run automatically when the data changes
+  };
 
   if (isLoading) return <LoadingSkeleton />;
 
@@ -142,17 +167,7 @@ export default function DashboardPage() {
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
-            <div className="flex justify-center gap-0.5">
-              {[1, 2, 3, 4, 5].map((s) => (
-                <span
-                  key={s}
-                  className={`text-sm ${s <= (day?.rating ?? 0) ? "text-foreground" : "text-border"}`}
-                >
-                  ★
-                </span>
-              ))}
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground">Rating</p>
+            <DayRating dayKey={dayKey} initialRating={day?.rating ?? null} />
           </CardContent>
         </Card>
       </div>
@@ -212,6 +227,32 @@ export default function DashboardPage() {
         )}
       </section>
 
+      {/* ── Create Memory Form ────────────────────────── */}
+      {showMemoryForm && (
+        <MemoryForm
+          dayKey={dayKey}
+          memoryId={editingMemory?._id}
+          initialData={
+            editingMemory
+              ? {
+                  title: editingMemory.title,
+                  description: editingMemory.description,
+                  mood: editingMemory.mood,
+                  happenedAt: editingMemory.happenedAt,
+                }
+              : undefined
+          }
+          onSuccess={handleFormSuccess}
+          onCancel={handleFormCancel}
+        />
+      )}
+
+      {!showMemoryForm && (
+        <Button onClick={() => setShowMemoryForm(true)} className="mb-8">
+          + Add Memory
+        </Button>
+      )}
+
       {/* ── Memories ──────────────────────────────────── */}
       <section className="mb-8">
         <div className="flex items-center gap-2 mb-3">
@@ -220,49 +261,24 @@ export default function DashboardPage() {
         </div>
         {memories && memories.length > 0 ? (
           <div className="space-y-2">
-            {memories.map((memory) => {
-              const time = new Date(memory.happenedAt);
-              const h = time.getHours();
-              const m = String(time.getMinutes()).padStart(2, "0");
-              const ampm = h >= 12 ? "PM" : "AM";
-              const fmtH = h % 12 || 12;
-
-              return (
-                <Card
-                  key={memory._id}
-                  className="transition-colors hover:bg-muted/30"
-                >
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between">
-                      <p className="text-sm font-medium">{memory.title}</p>
-                      <span className="ml-3 shrink-0 text-xs text-muted-foreground">
-                        {fmtH}:{m} {ampm}
-                      </span>
-                    </div>
-                    {memory.description && (
-                      <p className="mt-1 text-sm text-muted-foreground leading-relaxed">
-                        {memory.description}
-                      </p>
-                    )}
-                    {memory.mood && (
-                      <Badge variant="secondary" className="mt-2">
-                        {MOOD_EMOJI[memory.mood] ?? "😐"} {memory.mood}
-                      </Badge>
-                    )}
-                  </CardContent>
-                </Card>
-              );
-            })}
+            {memories.map((memory) => (
+              <MemoryCard
+                key={memory._id}
+                memory={memory as MemoryData}
+                onEdit={handleEditMemory}
+                onDeleteSuccess={handleDeleteSuccess}
+              />
+            ))}
           </div>
         ) : (
           <Card>
             <CardContent className="p-8 text-center">
               <Clock className="mx-auto h-8 w-8 text-muted-foreground/50 mb-3" />
               <p className="text-sm text-muted-foreground">
-                No memories for this day.
+                No memories for this day yet.
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                Capture moments using the mobile app.
+                Create a memory to get started.
               </p>
             </CardContent>
           </Card>
