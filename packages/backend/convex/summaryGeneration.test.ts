@@ -6,6 +6,19 @@ let isRetryableOpenAiStatus: typeof import("./summaryGeneration").isRetryableOpe
 let normalizeModelOutput: typeof import("./summaryGeneration").normalizeModelOutput;
 let generateSummaryForDay: typeof import("./summaryGeneration").generateSummaryForDay;
 
+function getHandler<TArgs extends Record<string, unknown>, TResult>(
+  fn: unknown,
+): (ctx: Record<string, unknown>, args: TArgs) => Promise<TResult> {
+  const handler = (fn as { _handler?: unknown })._handler;
+  if (typeof handler !== "function") {
+    throw new Error("Convex function handler not found");
+  }
+  return handler as (
+    ctx: Record<string, unknown>,
+    args: TArgs,
+  ) => Promise<TResult>;
+}
+
 beforeAll(async () => {
   process.env.CLERK_JWT_ISSUER_DOMAIN ??= "https://clerk.accounts.dev";
   process.env.CLERK_WEBHOOK_SECRET ??= "whsec_test_secret";
@@ -96,7 +109,10 @@ describe("summary generation with integration data", () => {
       .mockResolvedValueOnce([]);
     const runMutation = vi.fn();
 
-    const handler = (generateSummaryForDay as { _handler: Function })._handler;
+    const handler = getHandler<
+      { dayKey: string },
+      { success: boolean; summaryId?: string; generatedAt?: number }
+    >(generateSummaryForDay);
 
     await expect(
       handler(
@@ -152,7 +168,10 @@ describe("summary generation with integration data", () => {
       .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce({ _id: "daySummaries:1", generatedAt: 123 });
 
-    const handler = (generateSummaryForDay as { _handler: Function })._handler;
+    const handler = getHandler<
+      { dayKey: string },
+      { success: boolean; summaryId?: string; generatedAt?: number }
+    >(generateSummaryForDay);
     const result = await handler(
       {
         runQuery,
@@ -168,7 +187,10 @@ describe("summary generation with integration data", () => {
     });
 
     const upsertArgs = runMutation.mock.calls[1]?.[1];
-    expect(upsertArgs.metrics).toMatchObject({ steps: 6342, sleepMinutes: 420 });
+    expect(upsertArgs.metrics).toMatchObject({
+      steps: 6342,
+      sleepMinutes: 420,
+    });
     expect(upsertArgs.sourcesUsed).toEqual(
       expect.arrayContaining(["Integrations", "Google Fit"]),
     );
@@ -220,7 +242,10 @@ describe("summary generation with integration data", () => {
       .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce({ _id: "daySummaries:2", generatedAt: 456 });
 
-    const handler = (generateSummaryForDay as { _handler: Function })._handler;
+    const handler = getHandler<
+      { dayKey: string },
+      { success: boolean; summaryId?: string; generatedAt?: number }
+    >(generateSummaryForDay);
     await handler(
       {
         runQuery,

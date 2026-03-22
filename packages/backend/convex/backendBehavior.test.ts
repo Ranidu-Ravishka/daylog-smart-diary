@@ -6,7 +6,10 @@ import {
   generateMemoryMediaUploadUrl,
   listMemoryMedia,
 } from "./memories";
-import { syncAllMyIntegrationsForDay, syncMyIntegrationForDay } from "./integrations";
+import {
+  syncAllMyIntegrationsForDay,
+  syncMyIntegrationForDay,
+} from "./integrations";
 import {
   listAllUsers,
   listAuditLogsPaginated,
@@ -597,13 +600,11 @@ describe("backend behavior: integration sync actions", () => {
 
     const runMutation = vi.fn().mockResolvedValue(null);
     const ctx = {
-      runQuery: vi
-        .fn()
-        .mockResolvedValueOnce({
-          _id: "integrations:1",
-          userId: "user:1",
-          status: "connected",
-        }),
+      runQuery: vi.fn().mockResolvedValueOnce({
+        _id: "integrations:1",
+        userId: "user:1",
+        status: "connected",
+      }),
       runMutation,
       runAction: vi.fn(),
     };
@@ -626,16 +627,22 @@ describe("backend behavior: integration sync actions", () => {
       { dayKey: string },
       {
         dayKey: string;
-        results: Array<{ provider: string; success: boolean; message?: string }>;
+        results: Array<{
+          provider: string;
+          success: boolean;
+          message?: string;
+        }>;
       }
     >(syncAllMyIntegrationsForDay);
 
-    const runAction = vi.fn(async (_ref: unknown, args: { provider: string }) => {
-      if (args.provider === "google_calendar") {
-        throw new Error("calendar api timeout");
-      }
-      return { success: true };
-    });
+    const runAction = vi.fn(
+      async (_ref: unknown, args: { provider: string }) => {
+        if (args.provider === "google_calendar") {
+          throw new Error("calendar api timeout");
+        }
+        return { success: true };
+      },
+    );
 
     const ctx = {
       runQuery: vi.fn().mockResolvedValue([

@@ -17,7 +17,9 @@ export type IntegrationId = EntityId<"integrations">;
 export type DayId = EntityId<"days">;
 export type PreferenceId = EntityId<"userPreferences">;
 
-export function toEntityId<T extends AdminEntityTable>(value: string): EntityId<T> {
+export function toEntityId<T extends AdminEntityTable>(
+  value: string,
+): EntityId<T> {
   return value as EntityId<T>;
 }
 
