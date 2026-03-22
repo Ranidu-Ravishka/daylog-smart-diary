@@ -9,7 +9,9 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "eslint . --ext .js,.jsx,.ts,.tsx --max-warnings=0"
+    "lint": "eslint . --ext .js,.jsx,.ts,.tsx --max-warnings=0",
+    "check-types": "tsc --noEmit",
+    "build:ci": "CI=1 expo export --platform web"
   },
   "dependencies": {
     "@clerk/clerk-expo": "^2.19.11",

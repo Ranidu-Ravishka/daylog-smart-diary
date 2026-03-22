@@ -83,6 +83,27 @@ pnpm lint:admin
 pnpm lint:mobile
 ```
 
+## CI required PR checks
+
+PR validation runs in `.github/workflows/feature.yml` and should require these job checks in branch protection:
+
+- `Feature Branch CI / ci-checks`
+- `Feature Branch CI / Backend Tests`
+- `Feature Branch CI / Mobile Validation`
+
+Run the same gates locally before opening a PR:
+
+```bash
+pnpm lint
+pnpm typecheck
+pnpm --filter @repo/backend test:run
+pnpm --filter mobile check-types
+pnpm --filter mobile lint
+pnpm --filter mobile build:ci
+```
+
+`mobile build:ci` uses Expo web export as the strongest reliable CI build-level validation in this stack (without requiring native macOS/iOS build infrastructure in GitHub-hosted runners).
+
 ## Security and secrets
 
 - Never commit `.env` or `.env.local` files with real credentials.

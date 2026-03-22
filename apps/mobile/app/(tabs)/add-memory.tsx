@@ -16,7 +16,6 @@ import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { useMutation } from "convex/react";
 import { api } from "@repo/backend/convex";
-import type { Id } from "@repo/backend/convex/_generated/dataModel";
 import {
   Colors,
   Spacing,
@@ -40,6 +39,8 @@ type SelectedImage = {
   uploading: boolean;
   error: boolean;
 };
+
+type MemoryId = string;
 
 export default function AddMemoryScreen() {
   const router = useRouter();
@@ -85,7 +86,7 @@ export default function AddMemoryScreen() {
 
   const uploadImageToConvex = async (
     imageUri: string,
-    memoryId: Id<"memories">,
+    memoryId: MemoryId,
     imageMeta?: { width?: number; height?: number },
   ): Promise<boolean> => {
     try {

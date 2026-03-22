@@ -88,7 +88,7 @@ jobs:
           echo "mobile=$MOBILE" >> "$GITHUB_OUTPUT"
 
   # ==================================================
-  # Main CI checks
+  # Main CI checks (lint/typecheck/web/admin)
   # ==================================================
   ci-checks:
     runs-on: ubuntu-latest
@@ -111,12 +111,13 @@ jobs:
         uses: pnpm/action-setup@v4
 
       - name: Get pnpm store directory
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+        id: pnpm-cache
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
 
       - name: Setup pnpm cache
         uses: actions/cache@v4
         with:
-          path: ${{ env.STORE_PATH }}
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
@@ -142,9 +143,6 @@ jobs:
       - name: Type check
         run: pnpm typecheck
 
-      - name: Backend tests
-        run: pnpm --filter @repo/backend test:run
-
       - name: Build web app
         if: needs.changes.outputs.web == 'true'
         run: pnpm run build:web
@@ -152,3 +150,86 @@ jobs:
       - name: Build admin app
         if: needs.changes.outputs.admin == 'true'
         run: pnpm run build:admin
+
+  # ==================================================
+  # Backend tests (required gate)
+  # ==================================================
+  backend-tests:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run backend tests
+        run: pnpm --filter @repo/backend test:run
+
+  # ==================================================
+  # Mobile validation (required gate)
+  # ==================================================
+  mobile-validation:
+    name: Mobile Validation
+    runs-on: ubuntu-latest
+    env:
+      EXPO_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ci_dummy"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Mobile typecheck
+        run: pnpm --filter mobile check-types
+
+      - name: Mobile lint
+        run: pnpm --filter mobile lint
+
+      - name: Mobile build validation (Expo web export)
+        run: pnpm --filter mobile build:ci
