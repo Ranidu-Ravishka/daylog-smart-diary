@@ -219,7 +219,9 @@ export const listMemoryMediaThumbnailsForMemories = query({
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
 
-    const uniqueIds = Array.from(new Set(args.memoryIds.map((id) => String(id))))
+    const uniqueIds = Array.from(
+      new Set(args.memoryIds.map((id) => String(id))),
+    )
       .map((id) => id as Id<"memories">)
       .slice(0, 100);
 

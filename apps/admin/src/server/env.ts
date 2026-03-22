@@ -18,15 +18,9 @@ function isPlaceholderValue(value: string): boolean {
 
   if (exactPlaceholders.has(normalized)) return true;
 
-  return [
-    "your_",
-    "your-",
-    "your ",
-    "<",
-    "example",
-    "placeholder",
-    "xxx",
-  ].some((token) => normalized.includes(token));
+  return ["your_", "your-", "your ", "<", "example", "placeholder", "xxx"].some(
+    (token) => normalized.includes(token),
+  );
 }
 
 function readRequiredEnv(
@@ -80,7 +74,9 @@ function validateClerkSecretKey(value: string): string | null {
 function failIfInvalid(errors: EnvError[]): void {
   if (errors.length === 0) return;
 
-  const formatted = errors.map((err) => `- ${err.name}: ${err.reason}`).join("\n");
+  const formatted = errors
+    .map((err) => `- ${err.name}: ${err.reason}`)
+    .join("\n");
   throw new Error(
     `[env:admin] Invalid server environment configuration.\n${formatted}`,
   );
