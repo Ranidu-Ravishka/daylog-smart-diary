@@ -102,6 +102,7 @@ export const updateDayRating = mutation({
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
 
+    validateDayKey(args.dayKey);
     validateRating(args.rating);
 
     const day = await ctx.db
@@ -112,7 +113,13 @@ export const updateDayRating = mutation({
       .unique();
 
     if (!day) {
-      throw new Error("Day not found — create it first with upsertDay");
+      const id = await ctx.db.insert("days", {
+        userId: user._id,
+        dayKey: args.dayKey,
+        rating: args.rating,
+      });
+
+      return await ctx.db.get(id);
     }
 
     await ctx.db.patch(day._id, { rating: args.rating });

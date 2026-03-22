@@ -20,6 +20,7 @@
     "@react-navigation/elements": "^2.6.3",
     "@react-navigation/native": "^7.1.8",
     "@repo/backend": "workspace:*",
+    "@repo/ui": "workspace:*",
     "convex": "^1.29.3",
     "expo": "~54.0.25",
     "expo-constants": "~18.0.10",

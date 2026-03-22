@@ -204,6 +204,15 @@ export const adminDeleteUser = mutation({
       await ctx.db.delete(log._id);
     }
 
+    // Cascade: delete summary quota counters for this user
+    const quotas = await ctx.db
+      .query("summaryGenerationQuotas")
+      .withIndex("by_user_day", (q) => q.eq("userId", args.userId))
+      .collect();
+    for (const quota of quotas) {
+      await ctx.db.delete(quota._id);
+    }
+
     await ctx.db.delete(args.userId);
     await logAdminAction(ctx, admin._id, "delete_user", user.email);
     return { success: true };

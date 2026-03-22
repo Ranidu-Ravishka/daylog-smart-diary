@@ -2,6 +2,7 @@
 
 import { useAction, useQuery, useConvexAuth } from "convex/react";
 import { api } from "@repo/backend/convex";
+import { MOOD_EMOJI } from "@repo/ui/lib/constants";
 import { useState } from "react";
 import { Sparkles, Clock, FileText, Users, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,17 +15,6 @@ import { MemoryForm } from "@/components/MemoryForm";
 import { MemoryCard, type MemoryData } from "@/components/MemoryCard";
 import { DashboardDatePicker } from "@/components/DashboardDatePicker";
 import { toastError, toastSuccess } from "@/lib/toast";
-
-const MOOD_EMOJI: Record<string, string> = {
-  happy: "😊",
-  sad: "😢",
-  excited: "🎉",
-  peaceful: "😌",
-  loved: "❤️",
-  angry: "😤",
-  anxious: "😰",
-  neutral: "😐",
-};
 
 function getDayKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -132,7 +122,11 @@ export default function DashboardPage() {
   const isMemoriesLoading = isAuthenticated && memories === undefined;
 
   const hasMemories = (memories?.length ?? 0) > 0;
-  const isSummaryPending = !isSummaryLoading && !summary && hasMemories;
+  const hasDayMetadata =
+    day?.rating !== undefined ||
+    (day?.manualNotes?.length ?? 0) > 0 ||
+    (day?.peopleTags?.length ?? 0) > 0;
+  const hasSummarySourceData = hasMemories || hasDayMetadata;
 
   const handleEditMemory = (memory: MemoryData) => {
     setEditingMemory(memory);
@@ -244,7 +238,7 @@ export default function DashboardPage() {
             variant="outline"
             size="sm"
             onClick={handleGenerateSummary}
-            disabled={isGeneratingSummary}
+            disabled={isGeneratingSummary || !hasSummarySourceData}
           >
             {isGeneratingSummary ? "Generating..." : "Generate Summary"}
           </Button>
@@ -321,19 +315,6 @@ export default function DashboardPage() {
               )}
             </CardContent>
           </Card>
-        ) : isSummaryPending ? (
-          <Card>
-            <CardContent className="p-8 text-center">
-              <Sparkles className="mx-auto mb-3 h-8 w-8 animate-pulse text-muted-foreground/60" />
-              <p className="text-sm text-muted-foreground">
-                Generating summary...
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                We found memories for this day and are preparing your day
-                summary.
-              </p>
-            </CardContent>
-          </Card>
         ) : (
           <Card>
             <CardContent className="p-8 text-center">
@@ -342,7 +323,9 @@ export default function DashboardPage() {
                 No summary generated for this day yet.
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                Summaries are created automatically from your memories.
+                {hasSummarySourceData
+                  ? "Click Generate Summary to create one from your day data."
+                  : "Add a memory, rating, note, or people tag, then generate a summary."}
               </p>
             </CardContent>
           </Card>
@@ -399,10 +382,11 @@ export default function DashboardPage() {
             <CardContent className="p-8 text-center">
               <Clock className="mx-auto h-8 w-8 text-muted-foreground/50 mb-3" />
               <p className="text-sm text-muted-foreground">
-                No memories for this day yet.
+                No memories today.
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                Create a memory to get started.
+                Everything is working—this day just has no data yet. Add a
+                memory to get started.
               </p>
             </CardContent>
           </Card>

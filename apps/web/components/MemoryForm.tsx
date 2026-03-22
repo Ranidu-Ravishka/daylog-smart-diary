@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "@repo/backend/convex";
+import { MOOD_EMOJI, MOODS } from "@repo/ui/lib/constants";
 import type { Id } from "../../../packages/backend/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,19 +17,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toastError, toastSuccess } from "@/lib/toast";
-
-const MOOD_EMOJI: Record<string, string> = {
-  happy: "😊",
-  sad: "😢",
-  excited: "🎉",
-  peaceful: "😌",
-  loved: "❤️",
-  angry: "😤",
-  anxious: "😰",
-  neutral: "😐",
-};
-
-const MOODS = Object.keys(MOOD_EMOJI);
 
 interface MemoryFormProps {
   dayKey: string;

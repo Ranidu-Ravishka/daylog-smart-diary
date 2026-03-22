@@ -13,6 +13,7 @@ import { useRouter } from "expo-router";
 import { useUser } from "@clerk/clerk-expo";
 import { useQuery, useConvexAuth } from "convex/react";
 import { api } from "@repo/backend/convex";
+import { MOOD_EMOJI } from "@repo/ui/lib/constants";
 import {
   Colors,
   Spacing,
@@ -47,17 +48,6 @@ function formatMemoryTime(timestamp: number): string {
   h = h % 12 || 12;
   return `${h}:${m} ${ampm}`;
 }
-
-const MOOD_EMOJI: Record<string, string> = {
-  happy: "😊",
-  sad: "😢",
-  excited: "🎉",
-  peaceful: "😌",
-  loved: "❤️",
-  angry: "😤",
-  anxious: "😰",
-  neutral: "😐",
-};
 
 // ── Loading skeleton ────────────────────────────────────────
 function HomeScreenSkeleton() {

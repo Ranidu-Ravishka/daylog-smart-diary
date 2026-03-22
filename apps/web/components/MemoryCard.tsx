@@ -3,21 +3,11 @@
 import { useState } from "react";
 import type { Id } from "../../../packages/backend/convex/_generated/dataModel";
 import { EllipsisVertical, Trash, Edit } from "lucide-react";
+import { MOOD_EMOJI } from "@repo/ui/lib/constants";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DeleteMemoryDialog } from "./DeleteMemoryDialog";
-
-const MOOD_EMOJI: Record<string, string> = {
-  happy: "😊",
-  sad: "😢",
-  excited: "🎉",
-  peaceful: "😌",
-  loved: "❤️",
-  angry: "😤",
-  anxious: "😰",
-  neutral: "😐",
-};
 
 export interface MemoryData {
   _id: Id<"memories">;

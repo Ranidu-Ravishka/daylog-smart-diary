@@ -13,6 +13,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useMutation, useConvexAuth } from "convex/react";
 import { api } from "@repo/backend/convex";
+import { MOOD_EMOJI } from "@repo/ui/lib/constants";
 import { Colors, Spacing, Typography, Radius } from "@/constants/theme";
 import { AppCard } from "@/components/ui/app-card";
 import { SectionHeader } from "@/components/ui/section-header";
@@ -26,17 +27,6 @@ function getTodayDayKey(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
-
-const MOOD_EMOJI: Record<string, string> = {
-  happy: "😊",
-  sad: "😢",
-  excited: "🎉",
-  peaceful: "😌",
-  loved: "❤️",
-  angry: "😤",
-  anxious: "😰",
-  neutral: "😐",
-};
 
 function MemorySkeleton() {
   return (
@@ -229,7 +219,7 @@ const DailyDetailView = () => {
         </View>
 
         {/* ── Today's Memories ─────────────────────────── */}
-        {memories && memories.length > 0 && (
+        {memories && memories.length > 0 ? (
           <View style={styles.section}>
             <SectionHeader title="Today's Memories" />
             <AppCard padded={false}>
@@ -256,6 +246,17 @@ const DailyDetailView = () => {
                   </View>
                 </View>
               ))}
+            </AppCard>
+          </View>
+        ) : (
+          <View style={styles.section}>
+            <SectionHeader title="Today's Memories" />
+            <AppCard>
+              <EmptyState
+                icon="time-outline"
+                title="No memories today"
+                subtitle="Everything is working—this day just has no memories yet. Add one to get started."
+              />
             </AppCard>
           </View>
         )}

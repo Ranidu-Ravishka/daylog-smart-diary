@@ -35,21 +35,19 @@ function SyncClerkUserToConvex() {
 
   useEffect(() => {
     if (!isLoaded || !isSignedIn || !user) return;
-
     if (lastSyncedUserId.current === user.id) return;
 
     const primaryEmailId = user.primaryEmailAddressId;
     const emailAddresses = user.emailAddresses;
 
-    let email: string | undefined;
-    if (emailAddresses && emailAddresses.length > 0) {
-      const primary = emailAddresses.find((e) =>
-        primaryEmailId
-          ? e.id === primaryEmailId
-          : e.id === user.primaryEmailAddressId,
-      );
-      email = (primary ?? emailAddresses[0]).emailAddress;
-    }
+    const email =
+      emailAddresses && emailAddresses.length > 0
+        ? (
+            emailAddresses.find((e) =>
+              primaryEmailId ? e.id === primaryEmailId : false,
+            ) ?? emailAddresses[0]
+          )?.emailAddress
+        : undefined;
 
     if (!email) return;
 
@@ -91,8 +89,14 @@ export default function RootLayout() {
           <SyncClerkUserToConvex />
           <Stack>
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="sign-in" options={{ headerShown: false }} />
-            <Stack.Screen name="sign-up" options={{ headerShown: false }} />
+            <Stack.Screen
+              name="(auth)/sign-in"
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="(auth)/sign-up"
+              options={{ headerShown: false }}
+            />
           </Stack>
           <StatusBar style="auto" />
         </ThemeProvider>

@@ -85,7 +85,17 @@ export default defineSchema(
       ),
       sourcesUsed: v.array(v.string()),
       generatedAt: v.number(),
-    }).index("by_user_day", ["userId", "dayKey"]),
+    })
+      .index("by_user_day", ["userId", "dayKey"])
+      .index("by_user_generatedAt", ["userId", "generatedAt"]),
+
+    // ── Per-user quota counters for summary generation ──────
+    summaryGenerationQuotas: defineTable({
+      userId: v.id("user"),
+      quotaDayKey: v.string(), // YYYY-MM-DD (UTC day)
+      used: v.number(),
+      updatedAt: v.number(),
+    }).index("by_user_day", ["userId", "quotaDayKey"]),
 
     // ── Integrations (external data-source connections) ──────
     integrations: defineTable({

@@ -11,6 +11,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useConvexAuth } from "convex/react";
 import { api } from "@repo/backend/convex";
+import { MOOD_EMOJI } from "@repo/ui/lib/constants";
 import {
   Colors,
   Spacing,
@@ -36,17 +37,6 @@ const MOOD_VALUES: Record<string, number> = {
   angry: 20,
   anxious: 35,
   neutral: 50,
-};
-
-const MOOD_EMOJI: Record<string, string> = {
-  happy: "😊",
-  sad: "😢",
-  excited: "🎉",
-  peaceful: "😌",
-  loved: "❤️",
-  angry: "😤",
-  anxious: "😰",
-  neutral: "😐",
 };
 
 function InsightsSkeleton() {

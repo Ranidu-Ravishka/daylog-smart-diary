@@ -3,6 +3,12 @@ import { mutation, query } from "./_generated/server";
 import { requireUser, requireOwnership } from "./authz";
 import { validateDayKey, clampLimit } from "./validators";
 
+export const DAILY_SUMMARY_GENERATION_LIMIT = 5;
+
+export function getUtcDayKey(timestamp: number): string {
+  return new Date(timestamp).toISOString().slice(0, 10);
+}
+
 // ── Get summary for a specific day ──────────────────────────
 export const getSummaryByDay = query({
   args: { dayKey: v.string() },
@@ -121,5 +127,74 @@ export const deleteSummary = mutation({
 
     await ctx.db.delete(args.summaryId);
     return { success: true };
+  },
+});
+
+// ── Get current authenticated user's generation quota usage for today (UTC) ──
+export const getSummaryQuotaForDay = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await requireUser(ctx);
+    const quotaDayKey = getUtcDayKey(Date.now());
+
+    const quota = await ctx.db
+      .query("summaryGenerationQuotas")
+      .withIndex("by_user_day", (q) =>
+        q.eq("userId", user._id).eq("quotaDayKey", quotaDayKey),
+      )
+      .unique();
+
+    const used = quota?.used ?? 0;
+    return {
+      quotaDayKey,
+      used,
+      limit: DAILY_SUMMARY_GENERATION_LIMIT,
+      remaining: Math.max(DAILY_SUMMARY_GENERATION_LIMIT - used, 0),
+    };
+  },
+});
+
+// ── Reserve one generation slot for today (UTC). Throws when quota exceeded. ──
+export const reserveSummaryGenerationSlot = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const user = await requireUser(ctx);
+    const now = Date.now();
+    const quotaDayKey = getUtcDayKey(now);
+
+    const existing = await ctx.db
+      .query("summaryGenerationQuotas")
+      .withIndex("by_user_day", (q) =>
+        q.eq("userId", user._id).eq("quotaDayKey", quotaDayKey),
+      )
+      .unique();
+
+    const used = existing?.used ?? 0;
+    if (used >= DAILY_SUMMARY_GENERATION_LIMIT) {
+      throw new Error(
+        "Daily summary limit reached (5/day). Please try again tomorrow.",
+      );
+    }
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        used: used + 1,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("summaryGenerationQuotas", {
+        userId: user._id,
+        quotaDayKey,
+        used: 1,
+        updatedAt: now,
+      });
+    }
+
+    return {
+      quotaDayKey,
+      used: used + 1,
+      limit: DAILY_SUMMARY_GENERATION_LIMIT,
+      remaining: Math.max(DAILY_SUMMARY_GENERATION_LIMIT - (used + 1), 0),
+    };
   },
 });

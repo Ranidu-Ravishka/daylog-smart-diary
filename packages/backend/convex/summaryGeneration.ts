@@ -3,6 +3,36 @@ import { action, internalAction } from "./_generated/server";
 import { api } from "./_generated/api";
 import { validateDayKey } from "./validators";
 
+const OPENAI_MAX_ATTEMPTS = 3;
+const OPENAI_BASE_BACKOFF_MS = 400;
+
+export class OpenAiRequestError extends Error {
+  status: number;
+  retryable: boolean;
+
+  constructor(status: number, message: string, retryable: boolean) {
+    super(message);
+    this.name = "OpenAiRequestError";
+    this.status = status;
+    this.retryable = retryable;
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function isRetryableOpenAiStatus(status: number): boolean {
+  if (status === 429) return true;
+  return status >= 500;
+}
+
+export function isRetryableOpenAiError(error: unknown): boolean {
+  if (error instanceof OpenAiRequestError) return error.retryable;
+  if (error instanceof TypeError) return true;
+  return false;
+}
+
 function clampHighlights(highlights: unknown): string[] {
   if (!Array.isArray(highlights)) return [];
   return highlights
@@ -17,7 +47,7 @@ function toFiniteNumber(value: unknown): number | undefined {
   return value;
 }
 
-function normalizeModelOutput(payload: unknown) {
+export function normalizeModelOutput(payload: unknown) {
   const obj = (payload ?? {}) as Record<string, unknown>;
   const storyValue = obj.story;
   const story =
@@ -64,78 +94,114 @@ async function generateSummaryWithOpenAi(dayKey: string, modelInput: string) {
     throw new Error("Missing OPENAI_API_KEY in Convex environment");
   }
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${openAiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "gpt-4o",
-      temperature: 0.3,
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "day_summary",
-          strict: true,
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              story: { type: "string" },
-              highlights: {
-                type: "array",
-                items: { type: "string" },
-                maxItems: 6,
-              },
-              metrics: {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                  steps: { type: "number" },
-                  sleepMinutes: { type: "number" },
-                  screenTimeMinutes: { type: "number" },
-                  spendingTotal: { type: "number" },
+  const callOpenAi = async () => {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${openAiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o",
+        temperature: 0.3,
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "day_summary",
+            strict: true,
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                story: { type: "string" },
+                highlights: {
+                  type: "array",
+                  items: { type: "string" },
+                  maxItems: 6,
+                },
+                metrics: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    steps: { type: "number" },
+                    sleepMinutes: { type: "number" },
+                    screenTimeMinutes: { type: "number" },
+                    spendingTotal: { type: "number" },
+                  },
+                },
+                sourcesUsed: {
+                  type: "array",
+                  items: { type: "string" },
+                  maxItems: 8,
                 },
               },
-              sourcesUsed: {
-                type: "array",
-                items: { type: "string" },
-                maxItems: 8,
-              },
+              required: ["story", "highlights", "sourcesUsed"],
             },
-            required: ["story", "highlights", "sourcesUsed"],
           },
         },
-      },
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a concise wellbeing journaling assistant. Create an honest, grounded summary with no invented facts. Keep the narrative under 120 words and highlights short.",
-        },
-        {
-          role: "user",
-          content: `Generate a summary for ${dayKey}. Use only this JSON input:\n${modelInput}`,
-        },
-      ],
-    }),
-  });
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a concise wellbeing journaling assistant. Create an honest, grounded summary with no invented facts. Keep the narrative under 120 words and highlights short.",
+          },
+          {
+            role: "user",
+            content: `Generate a summary for ${dayKey}. Use only this JSON input:\n${modelInput}`,
+          },
+        ],
+      }),
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `OpenAI request failed (${response.status}): ${errorText.slice(0, 300)}`,
-    );
+    if (!response.ok) {
+      const errorText = await response.text();
+      const status = response.status;
+      const retryable = isRetryableOpenAiStatus(status);
+      throw new OpenAiRequestError(
+        status,
+        `OpenAI request failed (${status}): ${errorText.slice(0, 300)}`,
+        retryable,
+      );
+    }
+
+    const json = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    return json.choices?.[0]?.message?.content;
+  };
+
+  let content: string | undefined;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= OPENAI_MAX_ATTEMPTS; attempt++) {
+    try {
+      content = await callOpenAi();
+      break;
+    } catch (error) {
+      lastError = error;
+      const shouldRetry =
+        attempt < OPENAI_MAX_ATTEMPTS && isRetryableOpenAiError(error);
+
+      if (!shouldRetry) {
+        break;
+      }
+
+      const backoffMs = OPENAI_BASE_BACKOFF_MS * 2 ** (attempt - 1);
+      console.warn(
+        `[summaryGeneration] OpenAI attempt ${attempt} failed; retrying in ${backoffMs}ms`,
+      );
+      await sleep(backoffMs);
+    }
   }
 
-  const json = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  const content = json.choices?.[0]?.message?.content;
-
   if (!content) {
-    throw new Error("OpenAI returned empty content for summary generation");
+    if (lastError instanceof OpenAiRequestError) {
+      throw new Error(lastError.message);
+    }
+
+    throw new Error(
+      "Summary generation failed after retries. Please try again in a moment.",
+    );
   }
 
   let parsed: unknown;
@@ -192,6 +258,11 @@ export const generateSummaryForDay = action({
         "No memories or day metadata found for this date. Add data before generating a summary.",
       );
     }
+
+    await ctx.runMutation(
+      (api as any).summaries.reserveSummaryGenerationSlot,
+      {},
+    );
 
     const modelInput = JSON.stringify({
       dayKey: args.dayKey,

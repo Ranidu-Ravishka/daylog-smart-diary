@@ -130,6 +130,9 @@ jobs:
       - name: Type check
         run: pnpm typecheck
 
+      - name: Backend tests
+        run: pnpm --filter @repo/backend test:run
+
       - name: Build web app
         if: needs.changes.outputs.web == 'true'
         run: pnpm run build:web

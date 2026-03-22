@@ -48,6 +48,14 @@ This will:
 
 After `convex dev` runs, you'll get a deployment URL. Copy it and update these files:
 
+Copy each example file first:
+
+```powershell
+cp apps/web/.env.example apps/web/.env.local
+cp apps/admin/.env.example apps/admin/.env.local
+cp apps/mobile/.env.example apps/mobile/.env.local
+```
+
 **`apps/web/.env.local`:**
 
 ```dotenv
@@ -93,6 +101,7 @@ OPENAI_API_KEY=sk-xxxx
 
 - `user.created`
 - `user.updated`
+- `user.deleted`
 
 1. Copy the signing secret from Clerk and set it as:
 
@@ -107,6 +116,13 @@ The webhook implementation verifies Svix signature headers and rejects invalid s
 ```powershell
 # From root directory
 pnpm dev
+```
+
+In a separate terminal, run Convex dev from backend package:
+
+```powershell
+cd packages/backend
+npx convex dev
 ```
 
 ### Option 2: Run Apps Individually
