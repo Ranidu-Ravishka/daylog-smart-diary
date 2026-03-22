@@ -261,6 +261,22 @@ export const deleteUserAndRelatedDataByClerkId = internalMutation({
       await ctx.db.delete(row._id);
     }
 
+    const integrationSecrets = await ctx.db
+      .query("integrationSecrets")
+      .withIndex("by_user_provider", (q) => q.eq("userId", user._id))
+      .collect();
+    for (const secret of integrationSecrets) {
+      await ctx.db.delete(secret._id);
+    }
+
+    const integrationSyncRuns = await ctx.db
+      .query("integrationSyncRuns")
+      .withIndex("by_user_provider", (q) => q.eq("userId", user._id))
+      .collect();
+    for (const run of integrationSyncRuns) {
+      await ctx.db.delete(run._id);
+    }
+
     await ctx.db.delete(user._id);
     return { success: true, deleted: true };
   },

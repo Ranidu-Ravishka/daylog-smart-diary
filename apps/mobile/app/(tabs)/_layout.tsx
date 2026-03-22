@@ -1,7 +1,9 @@
 import { Tabs, Redirect } from "expo-router";
 import React from "react";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
 
 import { useAuth } from "@clerk/clerk-expo";
+import { useConvexAuth } from "convex/react";
 import { HapticTab } from "@/components/haptic-tab";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
@@ -10,13 +12,24 @@ import { useColorScheme } from "@/hooks/use-color-scheme";
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
-  const { isSignedIn } = useAuth();
-
-  if (!isSignedIn) {
-    return <Redirect href="/sign-in" />;
-  }
+  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoading: isConvexAuthLoading, isAuthenticated } = useConvexAuth();
 
   const theme = Colors[colorScheme ?? "light"];
+
+  if (!isLoaded || isConvexAuthLoading) {
+    return (
+      <View
+        style={[styles.loadingContainer, { backgroundColor: theme.background }]}
+      >
+        <ActivityIndicator color={theme.tint} size="large" />
+      </View>
+    );
+  }
+
+  if (!isSignedIn || !isAuthenticated) {
+    return <Redirect href="/sign-in" />;
+  }
 
   return (
     <ErrorBoundary>
@@ -113,3 +126,11 @@ export default function TabLayout() {
     </ErrorBoundary>
   );
 }
+
+const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+});

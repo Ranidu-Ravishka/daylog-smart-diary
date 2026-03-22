@@ -4,6 +4,9 @@ import { mutation, query, MutationCtx } from "./_generated/server";
 import { requireAdmin } from "./authz";
 import { validateDayKey, validateRating } from "./validators";
 import { Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
+
+const OPAQUE_TOKEN_REF_PREFIX = "tokref_";
 
 // ────────────────────────────────────────────────────────────
 // All functions in this file require admin privileges.
@@ -234,6 +237,24 @@ export const adminDeleteUser = mutation({
       .collect();
     for (const row of integrationDailyData) {
       await ctx.db.delete(row._id);
+    }
+
+    // Cascade: delete integration secrets for this user
+    const integrationSecrets = await ctx.db
+      .query("integrationSecrets")
+      .withIndex("by_user_provider", (q) => q.eq("userId", args.userId))
+      .collect();
+    for (const secret of integrationSecrets) {
+      await ctx.db.delete(secret._id);
+    }
+
+    // Cascade: delete integration sync runs for this user
+    const integrationSyncRuns = await ctx.db
+      .query("integrationSyncRuns")
+      .withIndex("by_user_provider", (q) => q.eq("userId", args.userId))
+      .collect();
+    for (const run of integrationSyncRuns) {
+      await ctx.db.delete(run._id);
     }
 
     await ctx.db.delete(args.userId);
@@ -858,14 +879,27 @@ export const adminCreateIntegration = mutation({
     scopes: v.optional(v.array(v.string())),
     tokenRef: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<unknown> => {
     const admin = await requireAdmin(ctx);
-    const id = await ctx.db.insert("integrations", {
+
+    const nextTokenRef: string | undefined =
+      args.tokenRef && !args.tokenRef.startsWith(OPAQUE_TOKEN_REF_PREFIX)
+        ? await ctx.runMutation(
+            internal.integrations.storeIntegrationSecretInternal,
+            {
+              userId: args.userId,
+              provider: args.provider,
+              accessToken: args.tokenRef,
+            },
+          )
+        : args.tokenRef;
+
+    const id: Id<"integrations"> = await ctx.db.insert("integrations", {
       userId: args.userId,
       provider: args.provider,
       status: args.status,
       scopes: args.scopes,
-      tokenRef: args.tokenRef,
+      tokenRef: nextTokenRef,
     });
     await logAdminAction(ctx, admin._id, "create_integration", args.provider);
     return await ctx.db.get(id);
@@ -961,7 +995,22 @@ export const adminUpdateIntegration = mutation({
     if (args.provider !== undefined) updates.provider = args.provider;
     if (args.status !== undefined) updates.status = args.status;
     if (args.scopes !== undefined) updates.scopes = args.scopes;
-    if (args.tokenRef !== undefined) updates.tokenRef = args.tokenRef;
+    if (args.tokenRef !== undefined) {
+      if (args.tokenRef && !args.tokenRef.startsWith(OPAQUE_TOKEN_REF_PREFIX)) {
+        const nextProvider = args.provider ?? integration.provider;
+        updates.tokenRef = await ctx.runMutation(
+          internal.integrations.storeIntegrationSecretInternal,
+          {
+            userId: integration.userId,
+            provider: nextProvider,
+            accessToken: args.tokenRef,
+            existingTokenRef: integration.tokenRef,
+          },
+        );
+      } else {
+        updates.tokenRef = args.tokenRef;
+      }
+    }
 
     await ctx.db.patch(args.integrationId, updates);
     await logAdminAction(
@@ -980,6 +1029,38 @@ export const adminDeleteIntegration = mutation({
     const admin = await requireAdmin(ctx);
     const integration = await ctx.db.get(args.integrationId);
     if (!integration) throw new Error("Integration not found");
+
+    const linkedDailyRows = await ctx.db
+      .query("integrationDailyData")
+      .withIndex("by_user_provider", (q) =>
+        q.eq("userId", integration.userId).eq("provider", integration.provider),
+      )
+      .collect();
+    for (const row of linkedDailyRows) {
+      await ctx.db.delete(row._id);
+    }
+
+    const tokenRef = integration.tokenRef;
+    if (tokenRef && tokenRef.startsWith(OPAQUE_TOKEN_REF_PREFIX)) {
+      const secret = await ctx.db
+        .query("integrationSecrets")
+        .withIndex("by_tokenRef", (q) => q.eq("tokenRef", tokenRef))
+        .unique();
+      if (secret) {
+        await ctx.db.delete(secret._id);
+      }
+    }
+
+    const syncRuns = await ctx.db
+      .query("integrationSyncRuns")
+      .withIndex("by_user_provider", (q) =>
+        q.eq("userId", integration.userId).eq("provider", integration.provider),
+      )
+      .collect();
+    for (const run of syncRuns) {
+      await ctx.db.delete(run._id);
+    }
+
     await ctx.db.delete(args.integrationId);
     await logAdminAction(
       ctx,

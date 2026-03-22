@@ -598,7 +598,11 @@ describe("backend behavior: integration sync actions", () => {
       { success: boolean; provider: string; dayKey: string }
     >(syncMyIntegrationForDay);
 
-    const runMutation = vi.fn().mockResolvedValue(null);
+    const runMutation = vi
+      .fn()
+      .mockResolvedValueOnce({ shouldSync: true, reason: "ready" })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
     const ctx = {
       runQuery: vi.fn().mockResolvedValueOnce({
         _id: "integrations:1",
@@ -615,10 +619,16 @@ describe("backend behavior: integration sync actions", () => {
       'Provider "spotify" is missing tokenRef. Reconnect integration before syncing.',
     );
 
-    expect(runMutation).toHaveBeenCalledTimes(1);
-    expect(runMutation.mock.calls[0]?.[1]).toMatchObject({
+    expect(runMutation).toHaveBeenCalledTimes(3);
+    expect(runMutation.mock.calls[1]?.[1]).toMatchObject({
       integrationId: "integrations:1",
       reason: expect.stringContaining("missing tokenRef"),
+    });
+    expect(runMutation.mock.calls[2]?.[1]).toMatchObject({
+      userId: "user:1",
+      provider: "spotify",
+      dayKey: "2025-03-10",
+      status: "error",
     });
   });
 

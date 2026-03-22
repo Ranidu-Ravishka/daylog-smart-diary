@@ -124,6 +124,35 @@ export default defineSchema(
       .index("by_provider", ["provider"])
       .index("by_status_provider", ["status", "provider"]),
 
+    // ── Server-side integration secrets (never exposed to clients) ─────
+    integrationSecrets: defineTable({
+      userId: v.id("user"),
+      provider: v.string(),
+      tokenRef: v.string(),
+      accessToken: v.string(),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    })
+      .index("by_tokenRef", ["tokenRef"])
+      .index("by_user_provider", ["userId", "provider"]),
+
+    // ── Per-user/provider/day sync state (idempotency + retries) ──────
+    integrationSyncRuns: defineTable({
+      userId: v.id("user"),
+      provider: v.string(),
+      dayKey: v.string(),
+      status: v.union(
+        v.literal("in_progress"),
+        v.literal("success"),
+        v.literal("error"),
+      ),
+      startedAt: v.number(),
+      updatedAt: v.number(),
+      lastError: v.optional(v.string()),
+    })
+      .index("by_user_provider_day", ["userId", "provider", "dayKey"])
+      .index("by_user_provider", ["userId", "provider"]),
+
     // ── Normalized per-day integration sync payloads ───────
     integrationDailyData: defineTable({
       userId: v.id("user"),
