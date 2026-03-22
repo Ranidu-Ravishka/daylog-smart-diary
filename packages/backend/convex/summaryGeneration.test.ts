@@ -1,9 +1,10 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 let OpenAiRequestError: typeof import("./summaryGeneration").OpenAiRequestError;
 let isRetryableOpenAiError: typeof import("./summaryGeneration").isRetryableOpenAiError;
 let isRetryableOpenAiStatus: typeof import("./summaryGeneration").isRetryableOpenAiStatus;
 let normalizeModelOutput: typeof import("./summaryGeneration").normalizeModelOutput;
+let generateSummaryForDay: typeof import("./summaryGeneration").generateSummaryForDay;
 
 beforeAll(async () => {
   process.env.CLERK_JWT_ISSUER_DOMAIN ??= "https://clerk.accounts.dev";
@@ -15,6 +16,11 @@ beforeAll(async () => {
   isRetryableOpenAiError = mod.isRetryableOpenAiError;
   isRetryableOpenAiStatus = mod.isRetryableOpenAiStatus;
   normalizeModelOutput = mod.normalizeModelOutput;
+  generateSummaryForDay = mod.generateSummaryForDay;
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("summary generation retry behavior", () => {
@@ -78,5 +84,159 @@ describe("summary generation output normalization", () => {
       "Day metadata",
       "OpenAI GPT-4o",
     ]);
+  });
+});
+
+describe("summary generation with integration data", () => {
+  it("throws when memories, day metadata, and integrations are all empty", async () => {
+    const runQuery = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce([]);
+    const runMutation = vi.fn();
+
+    const handler = (generateSummaryForDay as { _handler: Function })._handler;
+
+    await expect(
+      handler(
+        {
+          runQuery,
+          runMutation,
+        },
+        { dayKey: "2025-03-11" },
+      ),
+    ).rejects.toThrow(
+      "No memories, day metadata, or integration sync data found for this date. Add data before generating a summary.",
+    );
+
+    expect(runMutation).not.toHaveBeenCalled();
+  });
+
+  it("generates summary when only integration sync data exists", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  story: "Integration-only day summary",
+                  highlights: ["Pulled from integrations"],
+                  metrics: {},
+                  sourcesUsed: ["OpenAI GPT-4o"],
+                }),
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const runQuery = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce([
+        {
+          provider: "google_fit",
+          metrics: { steps: 6342, sleepMinutes: 420 },
+          summary: "Good activity",
+          signals: ["6,342 steps", "420 sleep minutes"],
+          syncedAt: Date.now(),
+        },
+      ]);
+    const runMutation = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ _id: "daySummaries:1", generatedAt: 123 });
+
+    const handler = (generateSummaryForDay as { _handler: Function })._handler;
+    const result = await handler(
+      {
+        runQuery,
+        runMutation,
+      },
+      { dayKey: "2025-03-12" },
+    );
+
+    expect(result).toMatchObject({
+      success: true,
+      summaryId: "daySummaries:1",
+      generatedAt: 123,
+    });
+
+    const upsertArgs = runMutation.mock.calls[1]?.[1];
+    expect(upsertArgs.metrics).toMatchObject({ steps: 6342, sleepMinutes: 420 });
+    expect(upsertArgs.sourcesUsed).toEqual(
+      expect.arrayContaining(["Integrations", "Google Fit"]),
+    );
+  });
+
+  it("merges partial provider metrics with model output safely", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  story: "Mixed-source summary",
+                  highlights: ["Model had partial metrics"],
+                  metrics: { steps: 4200 },
+                  sourcesUsed: ["Memories"],
+                }),
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const runQuery = vi
+      .fn()
+      .mockResolvedValueOnce([{ title: "Walk", happenedAt: 1739922000000 }])
+      .mockResolvedValueOnce({ rating: 4, manualNotes: [], peopleTags: [] })
+      .mockResolvedValueOnce([
+        {
+          provider: "spotify",
+          summary: "Music activity only",
+          signals: ["12 tracks played"],
+          syncedAt: Date.now(),
+        },
+        {
+          provider: "apple_health",
+          metrics: { spendingTotal: 12.345, screenTimeMinutes: 95 },
+          summary: "Apple Health upload",
+          signals: ["95 screen minutes"],
+          syncedAt: Date.now(),
+        },
+      ]);
+
+    const runMutation = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ _id: "daySummaries:2", generatedAt: 456 });
+
+    const handler = (generateSummaryForDay as { _handler: Function })._handler;
+    await handler(
+      {
+        runQuery,
+        runMutation,
+      },
+      { dayKey: "2025-03-13" },
+    );
+
+    const upsertArgs = runMutation.mock.calls[1]?.[1];
+    expect(upsertArgs.metrics).toMatchObject({
+      steps: 4200,
+      screenTimeMinutes: 95,
+      spendingTotal: 12.35,
+    });
+    expect(upsertArgs.sourcesUsed).toEqual(
+      expect.arrayContaining(["Integrations", "Spotify", "Apple Health"]),
+    );
   });
 });

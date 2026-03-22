@@ -1,36 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# DayLog Admin App (`apps/admin`)
 
-## Getting Started
+Admin Next.js application for managing users, content, memories, days, summaries,
+integrations, preferences, and audit logs.
 
-First, run the development server:
+## Required environment variables
+
+Create `apps/admin/.env.local` from `apps/admin/.env.example`.
+
+Required:
+
+- `NEXT_PUBLIC_CONVEX_URL`
+- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
+- `CLERK_SECRET_KEY`
+
+## Local development
+
+From repo root:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm dev:admin
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Admin runs on port `3001`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Commands
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+From repo root:
 
-## Learn More
+```bash
+pnpm --filter admin dev
+pnpm --filter admin lint
+pnpm --filter admin build
+pnpm --filter admin start
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Admin access bootstrap
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+For first-time admin access:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Set `ADMIN_BOOTSTRAP_CLERK_USER_IDS` in Convex environment variables.
+2. Sign in with one of those Clerk user IDs.
+3. Call mutation `users:bootstrapMakeMeAdmin`.
 
-## Deploy on Vercel
+## Runtime notes
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Admin list pages use server-backed pagination endpoints.
+- Integration status and audit log filters are server-side.
+- Startup env validation fails fast for missing/invalid critical env vars.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Troubleshooting
+
+- `Unauthorized` errors: verify user is admin in backend `user` table.
+- Startup env errors: verify required variables and value formats.
+- Data load errors: verify shared `NEXT_PUBLIC_CONVEX_URL` matches backend deployment.

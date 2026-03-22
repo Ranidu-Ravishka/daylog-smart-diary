@@ -10,6 +10,13 @@ DayLog is a multi-app journaling platform with a shared Convex backend.
 - `packages/backend` — Shared Convex backend
 - `packages/ui` — Shared UI/hooks/constants
 
+## Documentation map
+
+- Setup: [CONVEX_SETUP.md](CONVEX_SETUP.md)
+- Day-to-day workflow: [workflow.md](workflow.md)
+- Deploy + operations runbook: [DEPLOY_RUNBOOK.md](DEPLOY_RUNBOOK.md)
+- Security + secret handling: [SECURITY.md](SECURITY.md)
+
 ## Prerequisites
 
 - Node.js `>=18`
@@ -71,6 +78,7 @@ pnpm dev:mobile
 ```bash
 pnpm build
 pnpm lint
+pnpm typecheck
 ```
 
 Targeted:
@@ -117,6 +125,13 @@ pnpm --filter @repo/backend test:run
 pnpm --filter admin lint
 pnpm --filter admin build
 ```
+
+## App-specific docs
+
+- Web app setup and commands: [apps/web/README.md](apps/web/README.md)
+- Admin app setup and commands: [apps/admin/README.md](apps/admin/README.md)
+- Mobile app setup and commands: [apps/mobile/README.md](apps/mobile/README.md)
+- Backend package docs: [packages/backend/README.md](packages/backend/README.md)
 
 ## Security and secrets
 

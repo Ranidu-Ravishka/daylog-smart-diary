@@ -6,6 +6,7 @@ import {
   generateMemoryMediaUploadUrl,
   listMemoryMedia,
 } from "./memories";
+import { syncAllMyIntegrationsForDay, syncMyIntegrationForDay } from "./integrations";
 import {
   listAllUsers,
   listAuditLogsPaginated,
@@ -584,5 +585,80 @@ describe("backend behavior: admin pagination and filters", () => {
     });
 
     expect(empty.page).toHaveLength(0);
+  });
+});
+
+describe("backend behavior: integration sync actions", () => {
+  it("marks integration error when provider token is missing", async () => {
+    const syncOne = getHandler<
+      { provider: string; dayKey: string },
+      { success: boolean; provider: string; dayKey: string }
+    >(syncMyIntegrationForDay);
+
+    const runMutation = vi.fn().mockResolvedValue(null);
+    const ctx = {
+      runQuery: vi
+        .fn()
+        .mockResolvedValueOnce({
+          _id: "integrations:1",
+          userId: "user:1",
+          status: "connected",
+        }),
+      runMutation,
+      runAction: vi.fn(),
+    };
+
+    await expect(
+      syncOne(ctx, { provider: "spotify", dayKey: "2025-03-10" }),
+    ).rejects.toThrow(
+      'Provider "spotify" is missing tokenRef. Reconnect integration before syncing.',
+    );
+
+    expect(runMutation).toHaveBeenCalledTimes(1);
+    expect(runMutation.mock.calls[0]?.[1]).toMatchObject({
+      integrationId: "integrations:1",
+      reason: expect.stringContaining("missing tokenRef"),
+    });
+  });
+
+  it("syncs only supported connected providers and returns per-provider outcomes", async () => {
+    const syncAll = getHandler<
+      { dayKey: string },
+      {
+        dayKey: string;
+        results: Array<{ provider: string; success: boolean; message?: string }>;
+      }
+    >(syncAllMyIntegrationsForDay);
+
+    const runAction = vi.fn(async (_ref: unknown, args: { provider: string }) => {
+      if (args.provider === "google_calendar") {
+        throw new Error("calendar api timeout");
+      }
+      return { success: true };
+    });
+
+    const ctx = {
+      runQuery: vi.fn().mockResolvedValue([
+        { provider: "spotify", status: "connected" },
+        { provider: "google_calendar", status: "connected" },
+        { provider: "google_fit", status: "disconnected" },
+        { provider: "banking", status: "connected" },
+      ]),
+      runMutation: vi.fn(),
+      runAction,
+    };
+
+    const result = await syncAll(ctx, { dayKey: "2025-03-10" });
+
+    expect(result.dayKey).toBe("2025-03-10");
+    expect(result.results).toEqual([
+      { provider: "spotify", success: true },
+      {
+        provider: "google_calendar",
+        success: false,
+        message: "calendar api timeout",
+      },
+    ]);
+    expect(runAction).toHaveBeenCalledTimes(2);
   });
 });

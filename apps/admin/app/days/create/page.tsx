@@ -2,6 +2,7 @@
 
 import AdminGuard from "@/components/admin-guard";
 import DayForm from "@/components/form/dayForm";
+import { toEntityId, type UserId } from "@/lib/admin-ids";
 import { api } from "@repo/backend/convex";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useState } from "react";
@@ -15,7 +16,7 @@ export default function CreateDayPage() {
   const users = useQuery(api.admin.listAllUsers, isAdmin ? {} : "skip");
   const createDay = useMutation(api.admin.adminCreateDay);
 
-  const [selectedUserId, setSelectedUserId] = useState("");
+  const [selectedUserId, setSelectedUserId] = useState<UserId | "">("");
 
   return (
     <AdminGuard>
@@ -26,7 +27,11 @@ export default function CreateDayPage() {
           </label>
           <select
             value={selectedUserId}
-            onChange={(e) => setSelectedUserId(e.target.value)}
+            onChange={(e) =>
+              setSelectedUserId(
+                e.target.value ? toEntityId<"user">(e.target.value) : "",
+              )
+            }
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
           >
             <option value="">Select a user…</option>
@@ -52,8 +57,7 @@ export default function CreateDayPage() {
               throw new Error("Please select an owner user");
             }
             await createDay({
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              userId: selectedUserId as any,
+              userId: selectedUserId,
               dayKey: values.dayKey,
               rating: values.rating || undefined,
               manualNotes:

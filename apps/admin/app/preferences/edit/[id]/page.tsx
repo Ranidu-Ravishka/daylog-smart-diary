@@ -2,13 +2,16 @@
 
 import AdminGuard from "@/components/admin-guard";
 import PreferenceForm from "@/components/form/preferenceForm";
+import { idQueryArg, toEntityId } from "@/lib/admin-ids";
 import { api } from "@repo/backend/convex";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useParams } from "next/navigation";
 
 export default function EditPreferencePage() {
   const params = useParams<{ id: string }>();
-  const preferenceId = params?.id;
+  const preferenceId = params?.id
+    ? toEntityId<"userPreferences">(params.id)
+    : undefined;
   const { isAuthenticated } = useConvexAuth();
   const isAdmin = useQuery(
     api.users.isCurrentUserAdmin,
@@ -17,8 +20,7 @@ export default function EditPreferencePage() {
 
   const existing = useQuery(
     api.admin.adminGetUserPreference,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    preferenceId && isAdmin ? { preferenceId: preferenceId as any } : "skip",
+    idQueryArg(preferenceId, isAdmin, "preferenceId"),
   );
   const updatePreference = useMutation(api.admin.adminUpdateUserPreference);
 
@@ -51,8 +53,7 @@ export default function EditPreferencePage() {
         successMessage="Preferences updated successfully."
         onSubmit={async (values) => {
           await updatePreference({
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            preferenceId: preferenceId as any,
+            preferenceId,
             focusAreas: values.focusAreas,
             reminderType: values.reminderType,
             dailyTime: values.dailyTime,

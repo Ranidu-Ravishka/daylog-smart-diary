@@ -2,13 +2,16 @@
 
 import AdminGuard from "@/components/admin-guard";
 import SummaryForm from "@/components/form/summaryForm";
+import { idQueryArg, toEntityId } from "@/lib/admin-ids";
 import { api } from "@repo/backend/convex";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useParams } from "next/navigation";
 
 export default function EditSummaryPage() {
   const params = useParams<{ id: string }>();
-  const summaryId = params?.id;
+  const summaryId = params?.id
+    ? toEntityId<"daySummaries">(params.id)
+    : undefined;
   const { isAuthenticated } = useConvexAuth();
   const isAdmin = useQuery(
     api.users.isCurrentUserAdmin,
@@ -17,8 +20,7 @@ export default function EditSummaryPage() {
 
   const existing = useQuery(
     api.admin.adminGetSummary,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    summaryId && isAdmin ? { summaryId: summaryId as any } : "skip",
+    idQueryArg(summaryId, isAdmin, "summaryId"),
   );
   const updateSummary = useMutation(api.admin.adminUpdateSummary);
 
@@ -50,8 +52,7 @@ export default function EditSummaryPage() {
         successMessage="Summary updated successfully."
         onSubmit={async (values) => {
           await updateSummary({
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            summaryId: summaryId as any,
+            summaryId,
             dayKey: values.dayKey,
             story: values.story,
             highlights: values.highlights,

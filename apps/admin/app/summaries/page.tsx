@@ -1,9 +1,9 @@
 "use client";
 
 import AdminGuard from "@/components/admin-guard";
+import type { SummaryId } from "@/lib/admin-ids";
 import { api } from "@repo/backend/convex";
 import { makeFunctionReference } from "convex/server";
-import type { GenericId } from "convex/values";
 import {
   useConvexAuth,
   useMutation,
@@ -18,8 +18,7 @@ export default function SummariesPage() {
     "admin:listSummariesPaginated",
   );
   const { isAuthenticated } = useConvexAuth();
-  const [selectedId, setSelectedId] =
-    useState<GenericId<"daySummaries"> | null>(null);
+  const [selectedId, setSelectedId] = useState<SummaryId | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const isAdmin = useQuery(
@@ -39,7 +38,7 @@ export default function SummariesPage() {
   );
   const deleteSummary = useMutation(api.admin.adminDeleteSummary);
 
-  const onDelete = async (summaryId: GenericId<"daySummaries">) => {
+  const onDelete = async (summaryId: SummaryId) => {
     setDeleteError(null);
     if (!window.confirm("Delete this summary record?")) return;
 

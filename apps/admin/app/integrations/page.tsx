@@ -1,9 +1,9 @@
 "use client";
 
 import AdminGuard from "@/components/admin-guard";
+import type { IntegrationId } from "@/lib/admin-ids";
 import { api } from "@repo/backend/convex";
 import { makeFunctionReference } from "convex/server";
-import type { GenericId } from "convex/values";
 import {
   useConvexAuth,
   useMutation,
@@ -20,8 +20,7 @@ export default function IntegrationsPage() {
     "admin:listIntegrationsPaginated",
   );
   const { isAuthenticated } = useConvexAuth();
-  const [selectedId, setSelectedId] =
-    useState<GenericId<"integrations"> | null>(null);
+  const [selectedId, setSelectedId] = useState<IntegrationId | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const isAdmin = useQuery(
@@ -47,7 +46,7 @@ export default function IntegrationsPage() {
   );
   const deleteIntegration = useMutation(api.admin.adminDeleteIntegration);
 
-  const onDelete = async (integrationId: GenericId<"integrations">) => {
+  const onDelete = async (integrationId: IntegrationId) => {
     setDeleteError(null);
     if (!window.confirm("Delete this integration record?")) return;
 

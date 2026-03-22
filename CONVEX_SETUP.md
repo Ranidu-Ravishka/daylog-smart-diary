@@ -19,9 +19,9 @@ DayLog is standardized on **Clerk** for all clients (**Web + Admin + Mobile**) a
 
 ## 🚀 Initial Setup
 
-### 1. Install Dependencies
+### 1. Install dependencies
 
-```powershell
+```bash
 pnpm install
 ```
 
@@ -29,9 +29,8 @@ pnpm install
 
 Navigate to the backend package and initialize Convex:
 
-```powershell
-cd packages/backend
-npx convex dev
+```bash
+pnpm --filter @repo/backend dev
 ```
 
 This will:
@@ -50,7 +49,7 @@ After `convex dev` runs, you'll get a deployment URL. Copy it and update these f
 
 Copy each example file first:
 
-```powershell
+```bash
 cp apps/web/.env.example apps/web/.env.local
 cp apps/admin/.env.example apps/admin/.env.local
 cp apps/mobile/.env.example apps/mobile/.env.local
@@ -126,23 +125,22 @@ The webhook implementation verifies Svix signature headers and rejects invalid s
 
 ## 🏃 Running the Apps
 
-### Option 1: Run All Apps with Turbo
+### Option 1: Run all apps with Turbo
 
-```powershell
+```bash
 # From root directory
 pnpm dev
 ```
 
-In a separate terminal, run Convex dev from backend package:
+In a separate terminal, run Convex dev:
 
-```powershell
-cd packages/backend
-npx convex dev
+```bash
+pnpm --filter @repo/backend dev
 ```
 
 ### Option 2: Run Apps Individually
 
-```powershell
+```bash
 # Web app (port 3000)
 pnpm dev:web
 
@@ -283,3 +281,5 @@ If startup fails with an `[env:convex]` or `[env:admin]` error:
 - [Convex Documentation](https://docs.convex.dev)
 - [Convex with Next.js](https://docs.convex.dev/quickstart/nextjs)
 - [Convex with React Native](https://docs.convex.dev/quickstart/react-native)
+- [Developer workflow](workflow.md)
+- [Deploy + operations runbook](DEPLOY_RUNBOOK.md)

@@ -2,13 +2,14 @@
 
 import AdminGuard from "@/components/admin-guard";
 import UserForm from "@/components/form/userForm";
+import { idQueryArg, toEntityId } from "@/lib/admin-ids";
 import { api } from "@repo/backend/convex";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useParams } from "next/navigation";
 
 export default function EditUserPage() {
   const params = useParams<{ id: string }>();
-  const userId = params?.id;
+  const userId = params?.id ? toEntityId<"user">(params.id) : undefined;
   const { isAuthenticated } = useConvexAuth();
   const isAdmin = useQuery(
     api.users.isCurrentUserAdmin,
@@ -17,8 +18,7 @@ export default function EditUserPage() {
 
   const existing = useQuery(
     api.admin.adminGetUser,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    userId && isAdmin ? { userId: userId as any } : "skip",
+    idQueryArg(userId, isAdmin, "userId"),
   );
   const updateUser = useMutation(api.admin.adminUpdateUser);
 
@@ -47,8 +47,7 @@ export default function EditUserPage() {
         successMessage="User updated successfully."
         onSubmit={async (values) => {
           await updateUser({
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            userId: userId as any,
+            userId,
             email: values.email,
             firstName: values.firstName,
             lastName: values.lastName,

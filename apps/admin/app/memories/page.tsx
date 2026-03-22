@@ -1,9 +1,9 @@
 "use client";
 
 import AdminGuard from "@/components/admin-guard";
+import type { MemoryId } from "@/lib/admin-ids";
 import { api } from "@repo/backend/convex";
 import { makeFunctionReference } from "convex/server";
-import type { GenericId } from "convex/values";
 import {
   useConvexAuth,
   useMutation,
@@ -18,9 +18,7 @@ export default function MemoriesPage() {
     "admin:listMemoriesPaginated",
   );
   const { isAuthenticated } = useConvexAuth();
-  const [selectedId, setSelectedId] = useState<GenericId<"memories"> | null>(
-    null,
-  );
+  const [selectedId, setSelectedId] = useState<MemoryId | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
 
@@ -41,7 +39,7 @@ export default function MemoriesPage() {
   );
   const deleteMemory = useMutation(api.admin.adminDeleteMemory);
 
-  const onDelete = async (memoryId: GenericId<"memories">, title: string) => {
+  const onDelete = async (memoryId: MemoryId, title: string) => {
     setDeleteError(null);
     if (!window.confirm(`Delete memory "${title}"? This cannot be undone.`)) {
       return;

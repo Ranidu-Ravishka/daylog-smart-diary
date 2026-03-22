@@ -1,22 +1,34 @@
-# Convex + TypeScript + ESLint
+# DayLog Backend Package (`packages/backend`)
 
-This template provides a minimal setup to get Convex working, with TypeScript
-and ESLint.
+Shared Convex backend for web, admin, and mobile apps.
 
-Start by editing `convex/myFunctions.ts` and interact with your backend from the
-dashboard or via the CLI:
+## Local commands
 
-```sh
-npx convex run myFunctions:myQuery '{"first": 1, "second": "Hello"}'
+From repo root:
+
+```bash
+pnpm --filter @repo/backend dev
+pnpm --filter @repo/backend logs
+pnpm --filter @repo/backend lint
+pnpm --filter @repo/backend test:run
 ```
 
-See Convex docs at <https://docs.convex.dev/home>
+## Backend structure
 
-## Setting up
+- Convex functions: `packages/backend/convex/*.ts`
+- Schema: `packages/backend/convex/schema.ts`
+- Auth config: `packages/backend/convex/auth.config.ts`
+- Generated API/types: `packages/backend/convex/_generated/*`
 
-```sh
-npm create convex@latest -t bare
-```
+## Required Convex environment variables
+
+- `CLERK_JWT_ISSUER_DOMAIN`
+- `CLERK_WEBHOOK_SECRET`
+- `OPENAI_API_KEY`
+
+Optional:
+
+- `ADMIN_BOOTSTRAP_CLERK_USER_IDS`
 
 ## Admin bootstrap (Clerk)
 
@@ -51,3 +63,9 @@ Optional:
 
 If you see an `[env:convex]` startup error, fix the listed variables in Convex
 dashboard environment settings and restart `convex dev`.
+
+## Integration sync notes
+
+- Supported providers currently include `google_calendar`, `google_fit`, `spotify`, `apple_health`.
+- Provider daily sync data is normalized into `integrationDailyData`.
+- Summary generation consumes integration daily data as additional model context.

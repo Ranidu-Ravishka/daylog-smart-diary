@@ -1,9 +1,9 @@
 "use client";
 
 import AdminGuard from "@/components/admin-guard";
+import type { PreferenceId } from "@/lib/admin-ids";
 import { api } from "@repo/backend/convex";
 import { makeFunctionReference } from "convex/server";
-import type { GenericId } from "convex/values";
 import {
   useConvexAuth,
   useMutation,
@@ -18,8 +18,7 @@ export default function PreferencesPage() {
     "admin:listUserPreferencesPaginated",
   );
   const { isAuthenticated } = useConvexAuth();
-  const [selectedId, setSelectedId] =
-    useState<GenericId<"userPreferences"> | null>(null);
+  const [selectedId, setSelectedId] = useState<PreferenceId | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const isAdmin = useQuery(
     api.users.isCurrentUserAdmin,
@@ -40,7 +39,7 @@ export default function PreferencesPage() {
   );
   const deletePreference = useMutation(api.admin.adminDeleteUserPreference);
 
-  const onDelete = async (preferenceId: GenericId<"userPreferences">) => {
+  const onDelete = async (preferenceId: PreferenceId) => {
     setDeleteError(null);
     if (!window.confirm("Delete this preference record?")) return;
 
