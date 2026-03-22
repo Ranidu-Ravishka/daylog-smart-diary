@@ -18,17 +18,21 @@ import DateTimePicker, {
 import { ThemedView } from "@/components/themed-view";
 import { ThemedText } from "@/components/themed-text";
 import { useAuth, useUser } from "@clerk/clerk-expo";
-import { useMutation, useQuery } from "convex/react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "@repo/backend/convex";
 
 export default function QuickSetupScreen() {
   const router = useRouter();
   const { isSignedIn } = useAuth();
+  const { isAuthenticated, isLoading: isConvexAuthLoading } = useConvexAuth();
   const { user } = useUser();
   const syncUserPreferences = useMutation(
     api.userPreferences.syncMyUserPreferences,
   );
-  const savedPreferences = useQuery(api.userPreferences.getMyUserPreferences);
+  const savedPreferences = useQuery(
+    api.userPreferences.getMyUserPreferences,
+    isAuthenticated ? {} : "skip",
+  );
   const didPrefill = useRef(false);
 
   const [isSaving, setIsSaving] = useState(false);
@@ -60,6 +64,8 @@ export default function QuickSetupScreen() {
 
   // Auto-redirect to home if preferences already exist (onboarding complete)
   useEffect(() => {
+    if (isConvexAuthLoading) return;
+    if (!isAuthenticated) return;
     if (
       savedPreferences &&
       savedPreferences.focusAreas &&
@@ -67,7 +73,7 @@ export default function QuickSetupScreen() {
     ) {
       router.replace("/(tabs)");
     }
-  }, [savedPreferences, router]);
+  }, [savedPreferences, router, isAuthenticated, isConvexAuthLoading]);
 
   useEffect(() => {
     if (didPrefill.current) return;
