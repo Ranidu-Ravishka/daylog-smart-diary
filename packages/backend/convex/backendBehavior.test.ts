@@ -7,11 +7,15 @@ import {
   listMemoryMedia,
 } from "./memories";
 import {
+  listAllUsers,
+  listAuditLogsPaginated,
+  listIntegrationsPaginated,
+} from "./admin";
+import {
   DAILY_SUMMARY_GENERATION_LIMIT,
   getSummaryQuotaForDay,
   reserveSummaryGenerationSlot,
 } from "./summaries";
-import { listAllUsers } from "./admin";
 
 type TableName =
   | "user"
@@ -81,6 +85,20 @@ class InMemoryQuery {
 
   async take(limit: number) {
     return this.rows.slice(0, limit);
+  }
+
+  async paginate(args: { numItems: number; cursor?: string | null }) {
+    const start = args.cursor ? Number(args.cursor) : 0;
+    const end = Math.min(start + args.numItems, this.rows.length);
+    const page = this.rows.slice(start, end);
+
+    return {
+      page,
+      isDone: end >= this.rows.length,
+      continueCursor: String(end),
+      splitCursor: null,
+      pageStatus: null,
+    };
   }
 }
 
@@ -439,5 +457,132 @@ describe("backend behavior: summary quota edges", () => {
 
     const quotaRows = await db.list("summaryGenerationQuotas");
     expect(quotaRows).toHaveLength(2);
+  });
+});
+
+describe("backend behavior: admin pagination and filters", () => {
+  it("paginates integrations and applies status filter with stable cursors", async () => {
+    const db = new InMemoryDb();
+    const storage = new InMemoryStorage();
+
+    const adminUserId = await seedUser(db, {
+      clerkUserId: "clerk_admin",
+      email: "admin@test.dev",
+      isAdmin: true,
+    });
+    const memberId = await seedUser(db, {
+      clerkUserId: "clerk_member",
+      email: "member@test.dev",
+    });
+
+    await db.insert("integrations", {
+      userId: memberId,
+      provider: "calendar",
+      status: "connected",
+      scopes: ["read"],
+    });
+    await db.insert("integrations", {
+      userId: memberId,
+      provider: "health",
+      status: "connected",
+      scopes: ["read"],
+    });
+    await db.insert("integrations", {
+      userId: memberId,
+      provider: "banking",
+      status: "error",
+      scopes: ["read"],
+    });
+
+    const adminCtx = createCtx({ db, storage, subject: "clerk_admin" });
+    const memberCtx = createCtx({ db, storage, subject: "clerk_member" });
+
+    const listPaginatedIntegrations = getHandler<
+      {
+        paginationOpts: { numItems: number; cursor?: string | null };
+        status?: "connected" | "disconnected" | "error";
+      },
+      { page: StoredDoc[]; continueCursor: string; isDone: boolean }
+    >(listIntegrationsPaginated);
+
+    const firstPage = await listPaginatedIntegrations(adminCtx, {
+      status: "connected",
+      paginationOpts: { numItems: 1, cursor: null },
+    });
+
+    expect(firstPage.page).toHaveLength(1);
+    expect(firstPage.page[0]?.status).toBe("connected");
+    expect(firstPage.isDone).toBe(false);
+
+    const secondPage = await listPaginatedIntegrations(adminCtx, {
+      status: "connected",
+      paginationOpts: { numItems: 1, cursor: firstPage.continueCursor },
+    });
+
+    expect(secondPage.page).toHaveLength(1);
+    expect(secondPage.page[0]?.status).toBe("connected");
+
+    await expect(
+      listPaginatedIntegrations(memberCtx, {
+        status: "connected",
+        paginationOpts: { numItems: 1, cursor: null },
+      }),
+    ).rejects.toThrow("Forbidden: admin access required");
+
+    expect(String(adminUserId)).toContain("user:");
+  });
+
+  it("applies audit log filters and returns empty pages when no match exists", async () => {
+    const db = new InMemoryDb();
+    const storage = new InMemoryStorage();
+
+    const adminUserId = await seedUser(db, {
+      clerkUserId: "clerk_admin",
+      email: "admin@test.dev",
+      isAdmin: true,
+    });
+
+    await db.insert("auditLogs", {
+      actorUserId: adminUserId,
+      action: "create_user",
+      target: "user-a",
+      at: new Date("2025-03-01T10:00:00.000Z").getTime(),
+    });
+    await db.insert("auditLogs", {
+      actorUserId: adminUserId,
+      action: "delete_user",
+      target: "user-b",
+      at: new Date("2025-03-02T10:00:00.000Z").getTime(),
+    });
+
+    const adminCtx = createCtx({ db, storage, subject: "clerk_admin" });
+
+    const listPaginatedAuditLogs = getHandler<
+      {
+        paginationOpts: { numItems: number; cursor?: string | null };
+        actorUserId?: string;
+        action?: string;
+        fromTs?: number;
+        toTs?: number;
+      },
+      { page: StoredDoc[] }
+    >(listAuditLogsPaginated);
+
+    const filtered = await listPaginatedAuditLogs(adminCtx, {
+      action: "delete_user",
+      fromTs: new Date("2025-03-02T00:00:00.000Z").getTime(),
+      toTs: new Date("2025-03-02T23:59:59.999Z").getTime(),
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+
+    expect(filtered.page).toHaveLength(1);
+    expect(filtered.page[0]?.action).toBe("delete_user");
+
+    const empty = await listPaginatedAuditLogs(adminCtx, {
+      action: "update_summary",
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+
+    expect(empty.page).toHaveLength(0);
   });
 });

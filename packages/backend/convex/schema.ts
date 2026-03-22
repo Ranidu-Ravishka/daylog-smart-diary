@@ -36,7 +36,9 @@ export default defineSchema(
       formattedTime: v.string(),
       createdAt: v.number(),
       updatedAt: v.number(),
-    }).index("by_clerkUserId", ["clerkUserId"]),
+    })
+      .index("by_clerkUserId", ["clerkUserId"])
+      .index("by_updatedAt", ["updatedAt"]),
 
     // ── Memories (user-created moments) ──────────────────────
     memories: defineTable({
@@ -48,7 +50,9 @@ export default defineSchema(
       dayKey: v.string(), // "YYYY-MM-DD" in user timezone
     })
       .index("by_user_day", ["userId", "dayKey"])
-      .index("by_user_happenedAt", ["userId", "happenedAt"]),
+      .index("by_user_happenedAt", ["userId", "happenedAt"])
+      .index("by_happenedAt", ["happenedAt"])
+      .index("by_day_happenedAt", ["dayKey", "happenedAt"]),
 
     // ── Memory media (images/videos attached to a memory) ────
     memoryMedia: defineTable({
@@ -67,7 +71,9 @@ export default defineSchema(
       rating: v.optional(v.number()),
       manualNotes: v.optional(v.array(v.string())),
       peopleTags: v.optional(v.array(v.string())),
-    }).index("by_user_day", ["userId", "dayKey"]),
+    })
+      .index("by_user_day", ["userId", "dayKey"])
+      .index("by_dayKey", ["dayKey"]),
 
     // ── Day summaries (generated narrative + metrics) ────────
     daySummaries: defineTable({
@@ -87,7 +93,9 @@ export default defineSchema(
       generatedAt: v.number(),
     })
       .index("by_user_day", ["userId", "dayKey"])
-      .index("by_user_generatedAt", ["userId", "generatedAt"]),
+      .index("by_user_generatedAt", ["userId", "generatedAt"])
+      .index("by_generatedAt", ["generatedAt"])
+      .index("by_day_generatedAt", ["dayKey", "generatedAt"]),
 
     // ── Per-user quota counters for summary generation ──────
     summaryGenerationQuotas: defineTable({
@@ -107,9 +115,35 @@ export default defineSchema(
         v.literal("error"),
       ),
       lastSyncAt: v.optional(v.number()),
+      lastError: v.optional(v.string()),
       scopes: v.optional(v.array(v.string())),
       tokenRef: v.optional(v.string()),
-    }).index("by_user_provider", ["userId", "provider"]),
+    })
+      .index("by_user_provider", ["userId", "provider"])
+      .index("by_status", ["status"])
+      .index("by_provider", ["provider"])
+      .index("by_status_provider", ["status", "provider"]),
+
+    // ── Normalized per-day integration sync payloads ───────
+    integrationDailyData: defineTable({
+      userId: v.id("user"),
+      provider: v.string(),
+      dayKey: v.string(),
+      syncedAt: v.number(),
+      metrics: v.optional(
+        v.object({
+          steps: v.optional(v.number()),
+          sleepMinutes: v.optional(v.number()),
+          screenTimeMinutes: v.optional(v.number()),
+          spendingTotal: v.optional(v.number()),
+        }),
+      ),
+      summary: v.optional(v.string()),
+      signals: v.optional(v.array(v.string())),
+    })
+      .index("by_user_day", ["userId", "dayKey"])
+      .index("by_user_provider_day", ["userId", "provider", "dayKey"])
+      .index("by_user_provider", ["userId", "provider"]),
 
     // ── Audit logs (admin + security) ────────────────────────
     auditLogs: defineTable({
@@ -117,7 +151,11 @@ export default defineSchema(
       action: v.string(),
       target: v.optional(v.string()),
       at: v.number(),
-    }).index("by_actor", ["actorUserId"]),
+    })
+      .index("by_actor", ["actorUserId"])
+      .index("by_at", ["at"])
+      .index("by_actor_at", ["actorUserId", "at"])
+      .index("by_action_at", ["action", "at"]),
   },
   { schemaValidation: true },
 );

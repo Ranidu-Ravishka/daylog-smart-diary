@@ -89,6 +89,83 @@ export function normalizeModelOutput(payload: unknown) {
   };
 }
 
+type IntegrationDailyData = {
+  provider: string;
+  metrics?: {
+    steps?: number;
+    sleepMinutes?: number;
+    screenTimeMinutes?: number;
+    spendingTotal?: number;
+  };
+  summary?: string;
+  signals?: string[];
+  syncedAt: number;
+};
+
+function toSourceLabel(provider: string): string {
+  const labels: Record<string, string> = {
+    google_calendar: "Google Calendar",
+    google_fit: "Google Fit",
+    spotify: "Spotify",
+    apple_health: "Apple Health",
+  };
+
+  return labels[provider] ?? provider;
+}
+
+function buildIntegrationContextForModel(entries: IntegrationDailyData[]) {
+  const stepsValues = entries
+    .map((entry) => entry.metrics?.steps)
+    .filter((value): value is number => typeof value === "number");
+  const sleepValues = entries
+    .map((entry) => entry.metrics?.sleepMinutes)
+    .filter((value): value is number => typeof value === "number");
+  const screenValues = entries
+    .map((entry) => entry.metrics?.screenTimeMinutes)
+    .filter((value): value is number => typeof value === "number");
+  const spendingValues = entries
+    .map((entry) => entry.metrics?.spendingTotal)
+    .filter((value): value is number => typeof value === "number");
+
+  const flattenedSignals = entries
+    .flatMap((entry) => entry.signals ?? [])
+    .map((signal) => signal.trim())
+    .filter(Boolean);
+  const uniqueSignals = Array.from(new Set(flattenedSignals)).slice(0, 16);
+
+  const mergedMetrics = {
+    steps: stepsValues.length > 0 ? Math.max(...stepsValues) : undefined,
+    sleepMinutes: sleepValues.length > 0 ? Math.max(...sleepValues) : undefined,
+    screenTimeMinutes:
+      screenValues.length > 0 ? Math.max(...screenValues) : undefined,
+    spendingTotal:
+      spendingValues.length > 0
+        ? Math.round(
+            spendingValues.reduce((sum, value) => sum + value, 0) * 100,
+          ) / 100
+        : undefined,
+  };
+
+  const hasMergedMetrics = Object.values(mergedMetrics).some(
+    (value) => value !== undefined,
+  );
+
+  return {
+    providers: entries.map((entry) => entry.provider),
+    providerSummaries: entries
+      .map((entry) => ({
+        provider: entry.provider,
+        summary: entry.summary,
+        syncedAt: entry.syncedAt,
+      }))
+      .filter((entry) => Boolean(entry.summary))
+      .slice(0, 8),
+    keySignals: uniqueSignals,
+    mergedMetrics: hasMergedMetrics ? mergedMetrics : undefined,
+    sources: entries.map((entry) => toSourceLabel(entry.provider)),
+  };
+}
+
 async function generateSummaryWithOpenAi(dayKey: string, modelInput: string) {
   const openAiKey = convexServerEnv.openAiApiKey;
 
@@ -245,17 +322,32 @@ export const generateSummaryForDay = action({
     const day = await ctx.runQuery(api.days.getDay, {
       dayKey: args.dayKey,
     });
+    const integrationData = (await ctx.runQuery(
+      api.integrations.listMyIntegrationDailyDataForDay,
+      {
+        dayKey: args.dayKey,
+      },
+    )) as IntegrationDailyData[];
 
     const hasDayMetadata =
       day?.rating !== undefined ||
       (day?.manualNotes?.length ?? 0) > 0 ||
       (day?.peopleTags?.length ?? 0) > 0;
+    const hasIntegrationData = (integrationData?.length ?? 0) > 0;
 
-    if ((memories?.length ?? 0) === 0 && !hasDayMetadata) {
+    if (
+      (memories?.length ?? 0) === 0 &&
+      !hasDayMetadata &&
+      !hasIntegrationData
+    ) {
       throw new Error(
-        "No memories or day metadata found for this date. Add data before generating a summary.",
+        "No memories, day metadata, or integration sync data found for this date. Add data before generating a summary.",
       );
     }
+
+    const integrationContext = buildIntegrationContextForModel(
+      integrationData ?? [],
+    );
 
     await ctx.runMutation(
       (api as any).summaries.reserveSummaryGenerationSlot,
@@ -275,16 +367,47 @@ export const generateSummaryForDay = action({
         manualNotes: day?.manualNotes ?? [],
         peopleTags: day?.peopleTags ?? [],
       },
+      integrations: {
+        providers: integrationContext.providers,
+        keySignals: integrationContext.keySignals,
+        providerSummaries: integrationContext.providerSummaries,
+        metrics: integrationContext.mergedMetrics,
+      },
     });
 
     const generated = await generateSummaryWithOpenAi(args.dayKey, modelInput);
+
+    const mergedMetrics = {
+      steps:
+        generated.metrics?.steps ?? integrationContext.mergedMetrics?.steps,
+      sleepMinutes:
+        generated.metrics?.sleepMinutes ??
+        integrationContext.mergedMetrics?.sleepMinutes,
+      screenTimeMinutes:
+        generated.metrics?.screenTimeMinutes ??
+        integrationContext.mergedMetrics?.screenTimeMinutes,
+      spendingTotal:
+        generated.metrics?.spendingTotal ??
+        integrationContext.mergedMetrics?.spendingTotal,
+    };
+
+    const hasMergedMetrics = Object.values(mergedMetrics).some(
+      (value) => value !== undefined,
+    );
+    const mergedSourcesUsed = Array.from(
+      new Set([
+        ...generated.sourcesUsed,
+        ...(integrationContext.sources.length > 0 ? ["Integrations"] : []),
+        ...integrationContext.sources,
+      ]),
+    );
 
     const saved = (await ctx.runMutation((api as any).summaries.upsertSummary, {
       dayKey: args.dayKey,
       story: generated.story,
       highlights: generated.highlights,
-      metrics: generated.metrics,
-      sourcesUsed: generated.sourcesUsed,
+      metrics: hasMergedMetrics ? mergedMetrics : undefined,
+      sourcesUsed: mergedSourcesUsed,
     })) as { _id?: string; generatedAt?: number } | null;
 
     return {

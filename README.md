@@ -104,6 +104,20 @@ pnpm --filter mobile build:ci
 
 `mobile build:ci` uses Expo web export as the strongest reliable CI build-level validation in this stack (without requiring native macOS/iOS build infrastructure in GitHub-hosted runners).
 
+## Admin scalability notes
+
+- Admin list pages now use server-backed pagination instead of unbounded full-table loads.
+- Backend admin list queries include indexed pagination endpoints for users, memories, days, summaries, integrations, preferences, and audit logs.
+- Integrations status filter and audit-log actor/action/date filters now run server-side via indexed query paths.
+
+Run the same validation locally after admin/backend changes:
+
+```bash
+pnpm --filter @repo/backend test:run
+pnpm --filter admin lint
+pnpm --filter admin build
+```
+
 ## Security and secrets
 
 - Never commit `.env` or `.env.local` files with real credentials.

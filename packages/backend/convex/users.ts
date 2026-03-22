@@ -252,6 +252,15 @@ export const deleteUserAndRelatedDataByClerkId = internalMutation({
       await ctx.db.delete(quota._id);
     }
 
+    // Delete normalized integration sync data.
+    const integrationDailyData = await ctx.db
+      .query("integrationDailyData")
+      .withIndex("by_user_day", (q) => q.eq("userId", user._id))
+      .collect();
+    for (const row of integrationDailyData) {
+      await ctx.db.delete(row._id);
+    }
+
     await ctx.db.delete(user._id);
     return { success: true, deleted: true };
   },
