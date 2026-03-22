@@ -16,6 +16,7 @@ import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { useMutation } from "convex/react";
 import { api } from "@repo/backend/convex";
+import type { Id } from "@repo/backend/convex/_generated/dataModel";
 import {
   Colors,
   Spacing,
@@ -34,6 +35,8 @@ function getTodayDayKey(): string {
 
 type SelectedImage = {
   uri: string;
+  width?: number;
+  height?: number;
   uploading: boolean;
   error: boolean;
 };
@@ -41,6 +44,10 @@ type SelectedImage = {
 export default function AddMemoryScreen() {
   const router = useRouter();
   const createMemory = useMutation(api.memories.createMemory);
+  const createUploadUrl = useMutation(
+    (api as any).memories.generateMemoryMediaUploadUrl,
+  );
+  const addMemoryMedia = useMutation((api as any).memories.addMemoryMedia);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -58,9 +65,16 @@ export default function AddMemoryScreen() {
     });
 
     if (!result.canceled && result.assets[0]?.uri) {
+      const asset = result.assets[0];
       setSelectedImages((prev) => [
         ...prev,
-        { uri: result.assets[0]!.uri, uploading: false, error: false },
+        {
+          uri: asset.uri,
+          width: asset.width,
+          height: asset.height,
+          uploading: false,
+          error: false,
+        },
       ]);
     }
   };
@@ -71,13 +85,41 @@ export default function AddMemoryScreen() {
 
   const uploadImageToConvex = async (
     imageUri: string,
-    memoryId: string,
+    memoryId: Id<"memories">,
+    imageMeta?: { width?: number; height?: number },
   ): Promise<boolean> => {
     try {
-      await fetch(imageUri);
-      console.log(
-        "Image upload skipped — Convex storage HTTP endpoint not yet configured",
-      );
+      const { uploadUrl } = await createUploadUrl({});
+      const imageResponse = await fetch(imageUri);
+      const imageBlob = await imageResponse.blob();
+
+      const uploadResponse = await fetch(uploadUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": imageBlob.type || "application/octet-stream",
+        },
+        body: imageBlob,
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error(`Upload failed with status ${uploadResponse.status}`);
+      }
+
+      const uploadResult = (await uploadResponse.json()) as {
+        storageId?: string;
+      };
+      if (!uploadResult.storageId) {
+        throw new Error("Upload succeeded but no storageId was returned");
+      }
+
+      await addMemoryMedia({
+        memoryId,
+        storageId: uploadResult.storageId,
+        type: "image",
+        width: imageMeta?.width,
+        height: imageMeta?.height,
+      });
+
       return true;
     } catch (err) {
       console.error("Image upload failed:", err);
@@ -114,6 +156,10 @@ export default function AddMemoryScreen() {
           const success = await uploadImageToConvex(
             selectedImages[i]!.uri,
             memory._id,
+            {
+              width: selectedImages[i]?.width,
+              height: selectedImages[i]?.height,
+            },
           );
 
           setSelectedImages((prev) =>

@@ -2,6 +2,17 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { requireUser, requireOwnership } from "./authz";
 import { validateDayKey, clampLimit } from "./validators";
+import type { Id } from "./_generated/dataModel";
+
+// ── Generate an upload URL for memory media ─────────────────
+export const generateMemoryMediaUploadUrl = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await requireUser(ctx);
+    const uploadUrl = await ctx.storage.generateUploadUrl();
+    return { uploadUrl };
+  },
+});
 
 // ── Create a new memory ─────────────────────────────────────
 export const createMemory = mutation({
@@ -188,10 +199,54 @@ export const listMemoryMedia = query({
 
     requireOwnership(user, memory.userId);
 
-    return await ctx.db
+    const media = await ctx.db
       .query("memoryMedia")
       .withIndex("by_memory", (q) => q.eq("memoryId", args.memoryId))
       .collect();
+
+    return await Promise.all(
+      media.map(async (item) => ({
+        ...item,
+        url: await ctx.storage.getUrl(item.storageId as any),
+      })),
+    );
+  },
+});
+
+// ── List first image thumbnail URL for multiple memories ───
+export const listMemoryMediaThumbnailsForMemories = query({
+  args: { memoryIds: v.array(v.id("memories")) },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+
+    const uniqueIds = Array.from(new Set(args.memoryIds.map((id) => String(id))))
+      .map((id) => id as Id<"memories">)
+      .slice(0, 100);
+
+    const results: { memoryId: string; thumbnailUrl: string | null }[] = [];
+
+    for (const memoryId of uniqueIds) {
+      const memory = await ctx.db.get(memoryId);
+      if (!memory) continue;
+      if (String(memory.userId) !== String(user._id)) continue;
+
+      const media = await ctx.db
+        .query("memoryMedia")
+        .withIndex("by_memory", (q) => q.eq("memoryId", memory._id))
+        .collect();
+
+      const firstImage = media.find((item) => item.type === "image");
+      const thumbnailUrl = firstImage
+        ? await ctx.storage.getUrl(firstImage.storageId as any)
+        : null;
+
+      results.push({
+        memoryId: String(memoryId),
+        thumbnailUrl,
+      });
+    }
+
+    return results;
   },
 });
 

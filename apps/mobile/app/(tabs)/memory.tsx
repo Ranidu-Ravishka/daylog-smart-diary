@@ -8,6 +8,7 @@ import {
   ScrollView,
   RefreshControl,
   Alert,
+  Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -59,6 +60,43 @@ const DailyDetailView = () => {
     isAuthenticated ? { dayKey } : "skip",
   );
   const day = useQuery(api.days.getDay, isAuthenticated ? { dayKey } : "skip");
+  const memoryIds = React.useMemo(
+    () => (memories ?? []).map((memory: any) => memory._id),
+    [memories],
+  );
+  const memoryThumbnails = useQuery(
+    (api as any).memories.listMemoryMediaThumbnailsForMemories,
+    isAuthenticated ? { memoryIds } : "skip",
+  ) as { memoryId: string; thumbnailUrl: string | null }[] | undefined;
+
+  const thumbnailCacheRef = React.useRef<Map<string, string | null>>(new Map());
+
+  React.useEffect(() => {
+    if (!memoryThumbnails) return;
+    for (const entry of memoryThumbnails) {
+      thumbnailCacheRef.current.set(entry.memoryId, entry.thumbnailUrl);
+    }
+  }, [memoryThumbnails]);
+
+  const thumbnailByMemoryId = React.useMemo(() => {
+    const fromQuery = new Map(
+      (memoryThumbnails ?? []).map((entry) => [
+        entry.memoryId,
+        entry.thumbnailUrl,
+      ]),
+    );
+
+    const result = new Map<string, string | null>();
+    for (const id of memoryIds.map((item: any) => String(item))) {
+      if (fromQuery.has(id)) {
+        result.set(id, fromQuery.get(id) ?? null);
+      } else if (thumbnailCacheRef.current.has(id)) {
+        result.set(id, thumbnailCacheRef.current.get(id) ?? null);
+      }
+    }
+
+    return result;
+  }, [memoryIds, memoryThumbnails]);
 
   const upsertDay = useMutation(api.days.upsertDay);
 
@@ -244,6 +282,14 @@ const DailyDetailView = () => {
                       </Text>
                     )}
                   </View>
+                  {thumbnailByMemoryId.get(String(mem._id)) ? (
+                    <Image
+                      source={{
+                        uri: thumbnailByMemoryId.get(String(mem._id))!,
+                      }}
+                      style={styles.memoryThumb}
+                    />
+                  ) : null}
                 </View>
               ))}
             </AppCard>
@@ -501,6 +547,13 @@ const styles = StyleSheet.create({
     ...Typography.callout,
     color: c.textSecondary,
     marginTop: 2,
+  },
+  memoryThumb: {
+    width: 42,
+    height: 42,
+    borderRadius: Radius.md,
+    marginLeft: Spacing.md,
+    backgroundColor: c.surfaceSecondary,
   },
 
   // Sources
