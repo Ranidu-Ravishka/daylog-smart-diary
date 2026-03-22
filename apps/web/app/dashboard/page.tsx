@@ -115,6 +115,18 @@ export default function DashboardPage() {
     isAuthenticated ? { dayKey } : "skip",
   );
   const day = useQuery(api.days.getDay, isAuthenticated ? { dayKey } : "skip");
+  const memoryIds = (memories ?? []).map((memory) => memory._id);
+  const memoryThumbnails = useQuery(
+    api.memories.listMemoryMediaThumbnailsForMemories,
+    isAuthenticated ? { memoryIds } : "skip",
+  ) as { memoryId: string; thumbnailUrl: string | null }[] | undefined;
+
+  const thumbnailByMemoryId = new Map(
+    (memoryThumbnails ?? []).map((entry) => [
+      entry.memoryId,
+      entry.thumbnailUrl,
+    ]),
+  );
 
   const isLoading =
     isAuthLoading || (isAuthenticated && memories === undefined);
@@ -372,6 +384,7 @@ export default function DashboardPage() {
               <MemoryCard
                 key={memory._id}
                 memory={memory as MemoryData}
+                thumbnailUrl={thumbnailByMemoryId.get(String(memory._id))}
                 onEdit={handleEditMemory}
                 onDeleteSuccess={handleDeleteSuccess}
               />
