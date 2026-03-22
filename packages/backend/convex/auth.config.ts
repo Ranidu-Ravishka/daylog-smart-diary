@@ -1,4 +1,5 @@
 import { AuthConfig } from "convex/server";
+import { convexServerEnv } from "./env";
 
 export default {
   providers: [
@@ -6,7 +7,7 @@ export default {
       // Set CLERK_JWT_ISSUER_DOMAIN on the Convex Dashboard
       // (e.g. "https://your-app.clerk.accounts.dev")
       // See https://docs.convex.dev/auth/clerk#configuring-dev-and-prod-instances
-      domain: process.env.CLERK_JWT_ISSUER_DOMAIN!,
+      domain: convexServerEnv.clerkJwtIssuerDomain,
       applicationID: "convex",
     },
   ],

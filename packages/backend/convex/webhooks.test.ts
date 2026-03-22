@@ -1,5 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { parseClerkWebhookUser } from "./webhooks";
+import { beforeAll, describe, expect, it } from "vitest";
+
+let parseClerkWebhookUser: typeof import("./webhooks").parseClerkWebhookUser;
+
+beforeAll(async () => {
+  process.env.CLERK_JWT_ISSUER_DOMAIN ??= "https://clerk.accounts.dev";
+  process.env.CLERK_WEBHOOK_SECRET ??= "whsec_test_secret";
+  process.env.OPENAI_API_KEY ??= "sk-test-key";
+
+  const mod = await import("./webhooks");
+  parseClerkWebhookUser = mod.parseClerkWebhookUser;
+});
 
 describe("parseClerkWebhookUser", () => {
   it("returns primary email when present", () => {

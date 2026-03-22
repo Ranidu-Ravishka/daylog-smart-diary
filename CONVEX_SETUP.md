@@ -56,38 +56,53 @@ cp apps/admin/.env.example apps/admin/.env.local
 cp apps/mobile/.env.example apps/mobile/.env.local
 ```
 
+Never commit `.env.local` files or real credentials to git. Keep real values only in local env files and platform secret stores.
+
 **`apps/web/.env.local`:**
 
 ```dotenv
 NEXT_PUBLIC_CONVEX_URL=https://your-project.convex.cloud
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_xxx
-CLERK_SECRET_KEY=sk_test_xxx
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
+CLERK_SECRET_KEY=your_clerk_secret_key
 ```
 
 **`apps/admin/.env.local`:**
 
 ```dotenv
 NEXT_PUBLIC_CONVEX_URL=https://your-project.convex.cloud
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_xxx
-CLERK_SECRET_KEY=sk_test_xxx
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
+CLERK_SECRET_KEY=your_clerk_secret_key
 ```
 
 **`apps/mobile/.env.local`:**
 
 ```dotenv
 EXPO_PUBLIC_CONVEX_URL=https://your-project.convex.cloud
-EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_xxx
+EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
 ```
 
 **Convex Dashboard Environment Variables:**
 
 ```bash
 CLERK_JWT_ISSUER_DOMAIN=https://your-instance.clerk.accounts.dev
-CLERK_WEBHOOK_SECRET=whsec_xxx
-OPENAI_API_KEY=sk-xxxx
+CLERK_WEBHOOK_SECRET=your_clerk_webhook_secret
+OPENAI_API_KEY=your_openai_api_key
 ```
 
+These Convex variables are now strictly validated at startup in backend entry points:
+
+- `CLERK_JWT_ISSUER_DOMAIN` (must be a real https URL)
+- `CLERK_WEBHOOK_SECRET` (must start with `whsec_`)
+- `OPENAI_API_KEY` (must start with `sk-`)
+
 `OPENAI_API_KEY` is required for manual AI summary generation from the web dashboard.
+
+Admin middleware also validates at startup:
+
+- `CLERK_SECRET_KEY` (must start with `sk_test_` or `sk_live_`)
+- `NEXT_PUBLIC_CONVEX_URL` (must be a real https URL)
+
+Placeholder/example values are rejected for these startup-validated variables.
 
 ⚠️ **All three apps must use the SAME Convex URL**
 
@@ -247,6 +262,15 @@ Run `pnpm install` from the root directory.
 1. Ensure `convex dev` is running in `packages/backend`
 2. Verify all `.env.local` files have the correct `CONVEX_URL`
 3. Check that the URL is the same in all three apps
+
+### Startup env validation errors
+
+If startup fails with an `[env:convex]` or `[env:admin]` error:
+
+1. Ensure every listed variable exists and is not empty.
+2. Replace placeholder/example values with real secrets/URLs.
+3. Verify expected formats (`whsec_` for Clerk webhook secret, `sk-` for OpenAI, `sk_test_`/`sk_live_` for Clerk secret key).
+4. Restart `npx convex dev` and Next.js dev servers after updating env values.
 
 ### Type errors
 

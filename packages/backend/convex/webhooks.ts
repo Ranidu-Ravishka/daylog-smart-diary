@@ -1,6 +1,7 @@
 import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Webhook } from "svix";
+import { convexServerEnv } from "./env";
 
 type ClerkWebhookEmailAddress = {
   id?: string;
@@ -32,10 +33,7 @@ function verifyWebhookSignature(
   payloadText: string,
   headers: Headers,
 ): boolean {
-  const secret = process.env.CLERK_WEBHOOK_SECRET;
-  if (!secret) {
-    throw new Error("Missing CLERK_WEBHOOK_SECRET");
-  }
+  const secret = convexServerEnv.clerkWebhookSecret;
 
   const svixId = headers.get("svix-id");
   const svixTimestamp = headers.get("svix-timestamp");

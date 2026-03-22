@@ -6,10 +6,7 @@ import {
   requireAdmin,
   requireIdentityMatch,
 } from "./authz";
-
-declare const process: {
-  env: Record<string, string | undefined>;
-};
+import { convexServerEnv } from "./env";
 
 // ── Sync a user row from Clerk (called by the client after sign-in).
 //    Identity must match the clerkUserId arg.
@@ -119,10 +116,7 @@ export const listUsers = query({
 
 // ── Bootstrap: first-time admin setup via env-allowed Clerk IDs
 function getBootstrapAdminIds(): string[] {
-  return (process.env.ADMIN_BOOTSTRAP_CLERK_USER_IDS ?? "")
-    .split(",")
-    .map((value: string) => value.trim())
-    .filter(Boolean);
+  return convexServerEnv.adminBootstrapClerkUserIds;
 }
 
 export const bootstrapMakeMeAdmin = mutation({

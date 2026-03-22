@@ -1,5 +1,6 @@
 import { httpRouter } from "convex/server";
 import { clerkWebhook } from "./webhooks";
+import "./env";
 
 const http = httpRouter();
 

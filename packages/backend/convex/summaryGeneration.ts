@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { action, internalAction } from "./_generated/server";
 import { api } from "./_generated/api";
 import { validateDayKey } from "./validators";
+import { convexServerEnv } from "./env";
 
 const OPENAI_MAX_ATTEMPTS = 3;
 const OPENAI_BASE_BACKOFF_MS = 400;
@@ -89,10 +90,7 @@ export function normalizeModelOutput(payload: unknown) {
 }
 
 async function generateSummaryWithOpenAi(dayKey: string, modelInput: string) {
-  const openAiKey = process.env.OPENAI_API_KEY;
-  if (!openAiKey) {
-    throw new Error("Missing OPENAI_API_KEY in Convex environment");
-  }
+  const openAiKey = convexServerEnv.openAiApiKey;
 
   const callOpenAi = async () => {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {

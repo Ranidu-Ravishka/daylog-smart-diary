@@ -26,7 +26,7 @@ DayLog is a multi-app journaling platform with a shared Convex backend.
 pnpm install
 ```
 
-2. Copy env files:
+1. Copy env files:
 
 ```bash
 cp apps/web/.env.example apps/web/.env.local
@@ -35,9 +35,13 @@ cp apps/mobile/.env.example apps/mobile/.env.local
 cp packages/backend/.env.example packages/backend/.env.local
 ```
 
-3. Configure Convex and set Convex dashboard env vars.
+1. Configure Convex and set Convex dashboard env vars.
 
 See [CONVEX_SETUP.md](CONVEX_SETUP.md) for full steps.
+
+Startup now uses strict server env validation for critical backend/admin vars.
+If boot fails with env errors, see the troubleshooting section in
+[CONVEX_SETUP.md](CONVEX_SETUP.md).
 
 ## Run locally
 
@@ -78,3 +82,9 @@ pnpm lint:web
 pnpm lint:admin
 pnpm lint:mobile
 ```
+
+## Security and secrets
+
+- Never commit `.env` or `.env.local` files with real credentials.
+- Keep only placeholder values in `.env.example` files.
+- Follow the rotation checklist in [SECURITY.md](SECURITY.md).

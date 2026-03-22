@@ -1,10 +1,21 @@
-import { describe, expect, it } from "vitest";
-import {
-  OpenAiRequestError,
-  isRetryableOpenAiError,
-  isRetryableOpenAiStatus,
-  normalizeModelOutput,
-} from "./summaryGeneration";
+import { beforeAll, describe, expect, it } from "vitest";
+
+let OpenAiRequestError: typeof import("./summaryGeneration").OpenAiRequestError;
+let isRetryableOpenAiError: typeof import("./summaryGeneration").isRetryableOpenAiError;
+let isRetryableOpenAiStatus: typeof import("./summaryGeneration").isRetryableOpenAiStatus;
+let normalizeModelOutput: typeof import("./summaryGeneration").normalizeModelOutput;
+
+beforeAll(async () => {
+  process.env.CLERK_JWT_ISSUER_DOMAIN ??= "https://clerk.accounts.dev";
+  process.env.CLERK_WEBHOOK_SECRET ??= "whsec_test_secret";
+  process.env.OPENAI_API_KEY ??= "sk-test-key";
+
+  const mod = await import("./summaryGeneration");
+  OpenAiRequestError = mod.OpenAiRequestError;
+  isRetryableOpenAiError = mod.isRetryableOpenAiError;
+  isRetryableOpenAiStatus = mod.isRetryableOpenAiStatus;
+  normalizeModelOutput = mod.normalizeModelOutput;
+});
 
 describe("summary generation retry behavior", () => {
   it("marks 429 and 5xx statuses as retryable", () => {

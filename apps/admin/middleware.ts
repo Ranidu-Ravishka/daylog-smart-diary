@@ -3,6 +3,7 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { ConvexHttpClient } from "convex/browser";
 import type { NextFetchEvent, NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import { adminServerEnv } from "./src/server/env";
 
 const ADMIN_CACHE_COOKIE = "daylog_admin_cache";
 const ADMIN_CACHE_TTL_SECONDS = 60 * 5;
@@ -91,22 +92,17 @@ const handler = clerkMiddleware(async (auth, req) => {
     return NextResponse.next();
   }
 
-  const cacheSecret = process.env.CLERK_SECRET_KEY;
-  if (cacheSecret) {
-    const hasCachedAdminStatus = await readCachedAdminStatus(
-      req,
-      userId,
-      cacheSecret,
-    );
-    if (hasCachedAdminStatus) {
-      return NextResponse.next();
-    }
+  const cacheSecret = adminServerEnv.clerkSecretKey;
+  const hasCachedAdminStatus = await readCachedAdminStatus(
+    req,
+    userId,
+    cacheSecret,
+  );
+  if (hasCachedAdminStatus) {
+    return NextResponse.next();
   }
 
-  const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
-  if (!convexUrl) {
-    return NextResponse.redirect(new URL("/unauthorized", req.url));
-  }
+  const convexUrl = adminServerEnv.convexUrl;
 
   const token = await getToken({ template: "convex" });
   if (!token) {
@@ -119,10 +115,7 @@ const handler = clerkMiddleware(async (auth, req) => {
   const isAdmin = await client.query(api.users.isCurrentUserAdmin, {});
   if (isAdmin) {
     const response = NextResponse.next();
-    if (cacheSecret) {
-      return await withAdminCacheCookie(response, userId, cacheSecret);
-    }
-    return response;
+    return await withAdminCacheCookie(response, userId, cacheSecret);
   }
 
   const denied = NextResponse.redirect(new URL("/unauthorized", req.url));

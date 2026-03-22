@@ -124,6 +124,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Secret scan (high-confidence)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SECRET_PATTERN='(sk_(test|live)_[A-Za-z0-9]{20,}|pk_(test|live)_[A-Za-z0-9]{20,}|whsec_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|xox[baprs]-[A-Za-z0-9-]{16,})'
+
+          if git grep -nE "$SECRET_PATTERN" -- . ':(exclude)SECURITY.md'; then
+            echo "Potential secret detected. Remove it and rotate keys if needed."
+            exit 1
+          fi
+
       - name: Lint
         run: pnpm lint
 
