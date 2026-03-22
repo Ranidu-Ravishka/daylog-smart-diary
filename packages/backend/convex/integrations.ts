@@ -1,5 +1,11 @@
 import { v } from "convex/values";
-import { action, internalMutation, mutation, query } from "./_generated/server";
+import {
+  action,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server";
 import { requireUser, requireOwnership } from "./authz";
 import { validateDayKey } from "./validators";
 import { api, internal } from "./_generated/api";
@@ -26,6 +32,25 @@ type NormalizedIntegrationDailySync = {
   signals?: string[];
 };
 
+const OPAQUE_TOKEN_REF_PREFIX = "tokref_";
+const PROVIDER_SYNC_MAX_ATTEMPTS = 3;
+const PROVIDER_SYNC_BASE_BACKOFF_MS = 300;
+const PROVIDER_SYNC_TIMEOUT_MS = 8_000;
+const PROVIDER_SYNC_TOTAL_BUDGET_MS = 20_000;
+const SYNC_RUN_IN_PROGRESS_TTL_MS = 60_000;
+
+class ProviderRequestError extends Error {
+  status: number;
+  retryable: boolean;
+
+  constructor(status: number, message: string, retryable: boolean) {
+    super(message);
+    this.name = "ProviderRequestError";
+    this.status = status;
+    this.retryable = retryable;
+  }
+}
+
 function isSupportedProvider(
   provider: string,
 ): provider is SupportedIntegrationProvider {
@@ -45,6 +70,146 @@ function sanitizeSignals(signals: string[] | undefined) {
     .map((item) => item.trim())
     .filter(Boolean)
     .slice(0, 12);
+}
+
+function isOpaqueTokenRef(value: string): boolean {
+  return value.startsWith(OPAQUE_TOKEN_REF_PREFIX);
+}
+
+function createOpaqueTokenRef(): string {
+  const uuid =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+  return `${OPAQUE_TOKEN_REF_PREFIX}${uuid}`;
+}
+
+function isRetryableProviderStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+function isRetryableProviderError(error: unknown): boolean {
+  if (error instanceof ProviderRequestError) return error.retryable;
+  if (error instanceof TypeError) return true;
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    (error as { name?: string }).name === "AbortError"
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function sanitizeSyncError(error: unknown): string {
+  const message = error instanceof Error ? error.message : "Provider sync failed";
+  return message.slice(0, 220);
+}
+
+function jitteredBackoff(attempt: number): number {
+  const base = PROVIDER_SYNC_BASE_BACKOFF_MS * 2 ** (attempt - 1);
+  const jitter = Math.floor(Math.random() * 180);
+  return base + jitter;
+}
+
+function remainingBudget(syncStartedAt: number): number {
+  return PROVIDER_SYNC_TOTAL_BUDGET_MS - (Date.now() - syncStartedAt);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function upsertIntegrationSecret(
+  db: {
+    query: (table: "integrationSecrets") => {
+      withIndex: (
+        indexName: string,
+        apply: (q: { eq: (field: string, value: unknown) => unknown }) => unknown,
+      ) => {
+        collect: () => Promise<
+          Array<{ _id: Id<"integrationSecrets">; tokenRef: string }>
+        >;
+        unique: () => Promise<
+          | {
+              _id: Id<"integrationSecrets">;
+              tokenRef: string;
+            }
+          | null
+        >;
+      };
+    };
+    patch: (id: Id<"integrationSecrets">, value: Record<string, unknown>) => Promise<void>;
+    insert: (
+      table: "integrationSecrets",
+      value: Record<string, unknown>,
+    ) => Promise<Id<"integrationSecrets">>;
+    get: (id: Id<"integrationSecrets">) => Promise<{ tokenRef: string } | null>;
+  },
+  args: {
+    userId: Id<"user">;
+    provider: string;
+    accessToken: string;
+    existingTokenRef?: string;
+  },
+): Promise<string> {
+  const now = Date.now();
+  const tokenRef =
+    args.existingTokenRef && isOpaqueTokenRef(args.existingTokenRef)
+      ? args.existingTokenRef
+      : createOpaqueTokenRef();
+
+  const existing = await db
+    .query("integrationSecrets")
+    .withIndex("by_tokenRef", (q) => q.eq("tokenRef", tokenRef))
+    .unique();
+
+  if (existing) {
+    await db.patch(existing._id, {
+      userId: args.userId,
+      provider: args.provider,
+      accessToken: args.accessToken,
+      updatedAt: now,
+    });
+    return tokenRef;
+  }
+
+  await db.insert("integrationSecrets", {
+    userId: args.userId,
+    provider: args.provider,
+    tokenRef,
+    accessToken: args.accessToken,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  return tokenRef;
+}
+
+async function deleteIntegrationSecretByRef(
+  db: {
+    query: (table: "integrationSecrets") => {
+      withIndex: (
+        indexName: string,
+        apply: (q: { eq: (field: string, value: unknown) => unknown }) => unknown,
+      ) => {
+        unique: () => Promise<{ _id: Id<"integrationSecrets"> } | null>;
+      };
+    };
+    delete: (id: Id<"integrationSecrets">) => Promise<void>;
+  },
+  tokenRef: string | undefined,
+): Promise<void> {
+  if (!tokenRef || !isOpaqueTokenRef(tokenRef)) return;
+
+  const secret = await db
+    .query("integrationSecrets")
+    .withIndex("by_tokenRef", (q) => q.eq("tokenRef", tokenRef))
+    .unique();
+
+  if (!secret) return;
+  await db.delete(secret._id);
 }
 
 async function upsertIntegrationDailyDataDoc(
@@ -98,30 +263,71 @@ async function upsertIntegrationDailyDataDoc(
 async function fetchJson<T>(
   url: string,
   accessToken: string,
+  syncStartedAt: number,
   init?: RequestInit,
 ): Promise<T> {
-  const response = await fetch(url, {
-    ...(init ?? {}),
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
+  let lastError: unknown;
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(
-      `Provider request failed (${response.status}): ${body.slice(0, 220)}`,
-    );
+  for (let attempt = 1; attempt <= PROVIDER_SYNC_MAX_ATTEMPTS; attempt++) {
+    const budgetMs = remainingBudget(syncStartedAt);
+    if (budgetMs <= 0) {
+      throw new Error("Provider sync timed out before request could complete.");
+    }
+
+    const timeoutMs = Math.max(250, Math.min(PROVIDER_SYNC_TIMEOUT_MS, budgetMs));
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(url, {
+        ...(init ?? {}),
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          ...(init?.headers ?? {}),
+        },
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new ProviderRequestError(
+          response.status,
+          `Provider request failed (${response.status})`,
+          isRetryableProviderStatus(response.status),
+        );
+      }
+
+      return (await response.json()) as T;
+    } catch (error) {
+      lastError = error;
+      const shouldRetry =
+        attempt < PROVIDER_SYNC_MAX_ATTEMPTS &&
+        isRetryableProviderError(error) &&
+        remainingBudget(syncStartedAt) > 0;
+
+      if (!shouldRetry) {
+        throw error;
+      }
+
+      const backoffMs = Math.min(
+        jitteredBackoff(attempt),
+        Math.max(50, remainingBudget(syncStartedAt) - 50),
+      );
+      await sleep(backoffMs);
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
   }
 
-  return (await response.json()) as T;
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Provider sync failed after retries.");
 }
 
 async function syncGoogleCalendarForDay(
   accessToken: string,
   dayKey: string,
+  syncStartedAt: number,
 ): Promise<NormalizedIntegrationDailySync> {
   const { start, end } = getUtcDayRange(dayKey);
 
@@ -134,6 +340,7 @@ async function syncGoogleCalendarForDay(
   }>(
     `https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&timeMin=${encodeURIComponent(new Date(start).toISOString())}&timeMax=${encodeURIComponent(new Date(end).toISOString())}&maxResults=100`,
     accessToken,
+    syncStartedAt,
   );
 
   const events = result.items ?? [];
@@ -175,6 +382,7 @@ async function syncGoogleCalendarForDay(
 async function syncSpotifyForDay(
   accessToken: string,
   dayKey: string,
+  syncStartedAt: number,
 ): Promise<NormalizedIntegrationDailySync> {
   const { start, end } = getUtcDayRange(dayKey);
 
@@ -189,6 +397,7 @@ async function syncSpotifyForDay(
   }>(
     `https://api.spotify.com/v1/me/player/recently-played?limit=50&after=${Math.max(start - 1, 0)}`,
     accessToken,
+    syncStartedAt,
   );
 
   const plays = (result.items ?? []).filter((item) => {
@@ -226,6 +435,7 @@ async function syncSpotifyForDay(
 async function syncGoogleFitForDay(
   accessToken: string,
   dayKey: string,
+  syncStartedAt: number,
 ): Promise<NormalizedIntegrationDailySync> {
   const { start, end } = getUtcDayRange(dayKey);
 
@@ -243,6 +453,7 @@ async function syncGoogleFitForDay(
   }>(
     "https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate",
     accessToken,
+    syncStartedAt,
     {
       method: "POST",
       body: JSON.stringify({
@@ -295,16 +506,17 @@ async function syncGoogleFitForDay(
 
 async function syncProviderForDay(
   provider: SupportedIntegrationProvider,
-  tokenRef: string,
+  accessToken: string,
   dayKey: string,
+  syncStartedAt: number,
 ): Promise<NormalizedIntegrationDailySync> {
   switch (provider) {
     case "google_calendar":
-      return await syncGoogleCalendarForDay(tokenRef, dayKey);
+      return await syncGoogleCalendarForDay(accessToken, dayKey, syncStartedAt);
     case "spotify":
-      return await syncSpotifyForDay(tokenRef, dayKey);
+      return await syncSpotifyForDay(accessToken, dayKey, syncStartedAt);
     case "google_fit":
-      return await syncGoogleFitForDay(tokenRef, dayKey);
+      return await syncGoogleFitForDay(accessToken, dayKey, syncStartedAt);
     case "apple_health":
       throw new Error(
         "Apple Health sync requires client-device upload. Use syncAppleHealthDailyData from mobile.",
@@ -324,6 +536,14 @@ export const connectIntegration = mutation({
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
 
+    const nextTokenRef = args.tokenRef
+      ? await upsertIntegrationSecret(ctx.db as never, {
+          userId: user._id,
+          provider: args.provider,
+          accessToken: args.tokenRef,
+        })
+      : undefined;
+
     // Check if this provider is already connected
     const existing = await ctx.db
       .query("integrations")
@@ -338,7 +558,7 @@ export const connectIntegration = mutation({
         status: "connected" as const,
         lastError: undefined,
         scopes: args.scopes,
-        tokenRef: args.tokenRef,
+        tokenRef: nextTokenRef ?? existing.tokenRef,
         lastSyncAt: Date.now(),
       });
 
@@ -351,7 +571,7 @@ export const connectIntegration = mutation({
       status: "connected",
       lastError: undefined,
       scopes: args.scopes,
-      tokenRef: args.tokenRef,
+      tokenRef: nextTokenRef,
       lastSyncAt: Date.now(),
     });
 
@@ -378,7 +598,165 @@ export const disconnectIntegration = mutation({
       tokenRef: undefined,
     });
 
+    await deleteIntegrationSecretByRef(ctx.db as never, integration.tokenRef);
+
     return await ctx.db.get(args.integrationId);
+  },
+});
+
+export const getIntegrationAccessTokenByRefInternal = internalQuery({
+  args: {
+    tokenRef: v.string(),
+    userId: v.id("user"),
+    provider: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const secret = await ctx.db
+      .query("integrationSecrets")
+      .withIndex("by_tokenRef", (q) => q.eq("tokenRef", args.tokenRef))
+      .unique();
+
+    if (!secret) return null;
+    if (secret.userId !== args.userId || secret.provider !== args.provider) {
+      return null;
+    }
+
+    return { accessToken: secret.accessToken };
+  },
+});
+
+export const storeIntegrationSecretInternal = internalMutation({
+  args: {
+    userId: v.id("user"),
+    provider: v.string(),
+    accessToken: v.string(),
+    existingTokenRef: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    return await upsertIntegrationSecret(ctx.db as never, {
+      userId: args.userId,
+      provider: args.provider,
+      accessToken: args.accessToken,
+      existingTokenRef: args.existingTokenRef,
+    });
+  },
+});
+
+export const updateIntegrationTokenRefInternal = internalMutation({
+  args: {
+    integrationId: v.id("integrations"),
+    tokenRef: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.integrationId, { tokenRef: args.tokenRef });
+    return { success: true };
+  },
+});
+
+export const beginIntegrationSyncRunInternal = internalMutation({
+  args: {
+    userId: v.id("user"),
+    provider: v.string(),
+    dayKey: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+
+    const existingRun = await ctx.db
+      .query("integrationSyncRuns")
+      .withIndex("by_user_provider_day", (q) =>
+        q
+          .eq("userId", args.userId)
+          .eq("provider", args.provider)
+          .eq("dayKey", args.dayKey),
+      )
+      .unique();
+
+    const existingDailyData = await ctx.db
+      .query("integrationDailyData")
+      .withIndex("by_user_provider_day", (q) =>
+        q
+          .eq("userId", args.userId)
+          .eq("provider", args.provider)
+          .eq("dayKey", args.dayKey),
+      )
+      .unique();
+
+    if (
+      existingRun?.status === "in_progress" &&
+      now - existingRun.updatedAt < SYNC_RUN_IN_PROGRESS_TTL_MS
+    ) {
+      return { shouldSync: false, reason: "already_running" as const };
+    }
+
+    if (existingRun?.status === "success" && existingDailyData) {
+      return { shouldSync: false, reason: "already_synced" as const };
+    }
+
+    if (existingRun) {
+      await ctx.db.patch(existingRun._id, {
+        status: "in_progress",
+        updatedAt: now,
+        startedAt: now,
+        lastError: undefined,
+      });
+    } else {
+      await ctx.db.insert("integrationSyncRuns", {
+        userId: args.userId,
+        provider: args.provider,
+        dayKey: args.dayKey,
+        status: "in_progress",
+        startedAt: now,
+        updatedAt: now,
+        lastError: undefined,
+      });
+    }
+
+    return { shouldSync: true, reason: "ready" as const };
+  },
+});
+
+export const completeIntegrationSyncRunInternal = internalMutation({
+  args: {
+    userId: v.id("user"),
+    provider: v.string(),
+    dayKey: v.string(),
+    status: v.union(v.literal("success"), v.literal("error")),
+    lastError: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const existingRun = await ctx.db
+      .query("integrationSyncRuns")
+      .withIndex("by_user_provider_day", (q) =>
+        q
+          .eq("userId", args.userId)
+          .eq("provider", args.provider)
+          .eq("dayKey", args.dayKey),
+      )
+      .unique();
+
+    const payload = {
+      status: args.status,
+      updatedAt: Date.now(),
+      lastError: args.status === "error" ? args.lastError : undefined,
+    };
+
+    if (existingRun) {
+      await ctx.db.patch(existingRun._id, payload);
+      return { success: true };
+    }
+
+    await ctx.db.insert("integrationSyncRuns", {
+      userId: args.userId,
+      provider: args.provider,
+      dayKey: args.dayKey,
+      status: args.status,
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+      lastError: args.status === "error" ? args.lastError : undefined,
+    });
+
+    return { success: true };
   },
 });
 
@@ -480,6 +858,20 @@ export const deleteIntegration = mutation({
 
     for (const row of linkedDailyRows) {
       await ctx.db.delete(row._id);
+    }
+
+    await deleteIntegrationSecretByRef(ctx.db as never, integration.tokenRef);
+
+    const syncRuns = await ctx.db
+      .query("integrationSyncRuns")
+      .withIndex("by_user_provider", (q) =>
+        q
+          .eq("userId", integration.userId)
+          .eq("provider", integration.provider),
+      )
+      .collect();
+    for (const run of syncRuns) {
+      await ctx.db.delete(run._id);
     }
 
     await ctx.db.delete(args.integrationId);
@@ -654,6 +1046,27 @@ export const syncMyIntegrationForDay = action({
       throw new Error(`Provider "${args.provider}" is disconnected.`);
     }
 
+    const syncRunState = (await ctx.runMutation(
+      internal.integrations.beginIntegrationSyncRunInternal,
+      {
+        userId: integration.userId,
+        provider: args.provider,
+        dayKey: args.dayKey,
+      },
+    )) as { shouldSync: boolean; reason: "ready" | "already_synced" | "already_running" };
+
+    if (!syncRunState.shouldSync) {
+      return {
+        success: true,
+        provider: args.provider,
+        dayKey: args.dayKey,
+        idempotent: true,
+        skippedReason: syncRunState.reason,
+      };
+    }
+
+    const syncStartedAt = Date.now();
+
     try {
       if (!integration.tokenRef) {
         throw new Error(
@@ -661,10 +1074,45 @@ export const syncMyIntegrationForDay = action({
         );
       }
 
+      let accessToken = integration.tokenRef;
+      if (isOpaqueTokenRef(integration.tokenRef)) {
+        const secret = (await ctx.runQuery(
+          internal.integrations.getIntegrationAccessTokenByRefInternal,
+          {
+            tokenRef: integration.tokenRef,
+            userId: integration.userId,
+            provider: args.provider,
+          },
+        )) as { accessToken: string } | null;
+
+        if (!secret?.accessToken) {
+          throw new Error(
+            `Provider "${args.provider}" secret not found. Reconnect integration before syncing.`,
+          );
+        }
+
+        accessToken = secret.accessToken;
+      } else {
+        const migratedTokenRef = await ctx.runMutation(
+          internal.integrations.storeIntegrationSecretInternal,
+          {
+            userId: integration.userId,
+            provider: args.provider,
+            accessToken: integration.tokenRef,
+          },
+        );
+
+        await ctx.runMutation(internal.integrations.updateIntegrationTokenRefInternal, {
+          integrationId: integration._id,
+          tokenRef: migratedTokenRef,
+        });
+      }
+
       const normalized = await syncProviderForDay(
         args.provider,
-        integration.tokenRef,
+        accessToken,
         args.dayKey,
+        syncStartedAt,
       );
 
       await ctx.runMutation(
@@ -683,21 +1131,39 @@ export const syncMyIntegrationForDay = action({
         integrationId: integration._id,
       });
 
+      await ctx.runMutation(
+        internal.integrations.completeIntegrationSyncRunInternal,
+        {
+          userId: integration.userId,
+          provider: args.provider,
+          dayKey: args.dayKey,
+          status: "success",
+        },
+      );
+
       return {
         success: true,
         provider: args.provider,
         dayKey: args.dayKey,
       };
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Unknown integration sync error";
+      const message = sanitizeSyncError(error);
 
       await ctx.runMutation(api.integrations.markIntegrationError, {
         integrationId: integration._id,
         reason: message,
       });
+
+      await ctx.runMutation(
+        internal.integrations.completeIntegrationSyncRunInternal,
+        {
+          userId: integration.userId,
+          provider: args.provider,
+          dayKey: args.dayKey,
+          status: "error",
+          lastError: message,
+        },
+      );
 
       throw error;
     }

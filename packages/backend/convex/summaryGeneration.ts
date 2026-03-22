@@ -356,12 +356,21 @@ export const generateSummaryForDay = action({
 
     const modelInput = JSON.stringify({
       dayKey: args.dayKey,
-      memories: (memories ?? []).slice(0, 50).map((memory) => ({
-        title: memory.title,
-        description: memory.description,
-        mood: memory.mood,
-        happenedAt: memory.happenedAt,
-      })),
+      memories: (memories ?? [])
+        .slice(0, 50)
+        .map(
+          (memory: {
+            title: string;
+            description?: string;
+            mood?: string;
+            happenedAt: number;
+          }) => ({
+            title: memory.title,
+            description: memory.description,
+            mood: memory.mood,
+            happenedAt: memory.happenedAt,
+          }),
+        ),
       dayMetadata: {
         rating: day?.rating,
         manualNotes: day?.manualNotes ?? [],
