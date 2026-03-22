@@ -1,30 +1,44 @@
 "use client";
 
 import AdminGuard from "@/components/admin-guard";
+import type { SummaryId } from "@/lib/admin-ids";
 import { api } from "@repo/backend/convex";
-import type { GenericId } from "convex/values";
-import { useConvexAuth, useMutation, useQuery } from "convex/react";
+import { makeFunctionReference } from "convex/server";
+import {
+  useConvexAuth,
+  useMutation,
+  usePaginatedQuery,
+  useQuery,
+} from "convex/react";
 import { useState } from "react";
 import Link from "next/link";
 
 export default function SummariesPage() {
+  const listSummariesPaginatedRef = makeFunctionReference<"query">(
+    "admin:listSummariesPaginated",
+  );
   const { isAuthenticated } = useConvexAuth();
-  const [selectedId, setSelectedId] =
-    useState<GenericId<"daySummaries"> | null>(null);
+  const [selectedId, setSelectedId] = useState<SummaryId | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const isAdmin = useQuery(
     api.users.isCurrentUserAdmin,
     isAuthenticated ? {} : "skip",
   );
-  const summaries = useQuery(api.admin.listAllSummaries, isAdmin ? {} : "skip");
+  const {
+    results: summaries,
+    status: summariesStatus,
+    loadMore,
+  } = usePaginatedQuery(listSummariesPaginatedRef, isAdmin ? {} : "skip", {
+    initialNumItems: 25,
+  });
   const selectedSummary = useQuery(
     api.admin.adminGetSummary,
     isAdmin && selectedId ? { summaryId: selectedId } : "skip",
   );
   const deleteSummary = useMutation(api.admin.adminDeleteSummary);
 
-  const onDelete = async (summaryId: GenericId<"daySummaries">) => {
+  const onDelete = async (summaryId: SummaryId) => {
     setDeleteError(null);
     if (!window.confirm("Delete this summary record?")) return;
 
@@ -68,7 +82,7 @@ export default function SummariesPage() {
 
           <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-              {summaries === undefined ? (
+              {summariesStatus === "LoadingFirstPage" ? (
                 <div className="p-6 text-sm text-gray-600">
                   Loading summaries…
                 </div>
@@ -77,71 +91,84 @@ export default function SummariesPage() {
                   No summaries yet.
                 </div>
               ) : (
-                <div className="overflow-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="text-left font-medium px-4 py-3">
-                          Day Key
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Story (preview)
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Highlights
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Generated
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {summaries.map((row) => (
-                        <tr
-                          key={row._id}
-                          className={`cursor-pointer hover:bg-gray-50 ${selectedId === row._id ? "bg-blue-50/50" : ""}`}
-                          onClick={() => setSelectedId(row._id)}
-                        >
-                          <td className="px-4 py-3 font-mono text-xs text-gray-800">
-                            {row.dayKey}
-                          </td>
-                          <td className="max-w-xs truncate px-4 py-3 text-gray-900">
-                            {row.story.length > 80
-                              ? `${row.story.slice(0, 80)}...`
-                              : row.story}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {row.highlights.length} item(s)
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {new Date(row.generatedAt).toLocaleString()}
-                          </td>
-                          <td className="px-4 py-3">
-                            <Link
-                              href={`/summaries/edit/${row._id}`}
-                              className="inline-flex items-center rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700"
-                              onClick={(event) => event.stopPropagation()}
-                            >
-                              Edit
-                            </Link>
-                            <button
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onDelete(row._id);
-                              }}
-                              className="ml-2 inline-flex items-center rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700"
-                            >
-                              Delete
-                            </button>
-                          </td>
+                <>
+                  <div className="overflow-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-gray-50 text-gray-600">
+                        <tr>
+                          <th className="text-left font-medium px-4 py-3">
+                            Day Key
+                          </th>
+                          <th className="text-left font-medium px-4 py-3">
+                            Story (preview)
+                          </th>
+                          <th className="text-left font-medium px-4 py-3">
+                            Highlights
+                          </th>
+                          <th className="text-left font-medium px-4 py-3">
+                            Generated
+                          </th>
+                          <th className="text-left font-medium px-4 py-3">
+                            Actions
+                          </th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {summaries.map((row) => (
+                          <tr
+                            key={row._id}
+                            className={`cursor-pointer hover:bg-gray-50 ${selectedId === row._id ? "bg-blue-50/50" : ""}`}
+                            onClick={() => setSelectedId(row._id)}
+                          >
+                            <td className="px-4 py-3 font-mono text-xs text-gray-800">
+                              {row.dayKey}
+                            </td>
+                            <td className="max-w-xs truncate px-4 py-3 text-gray-900">
+                              {row.story.length > 80
+                                ? `${row.story.slice(0, 80)}...`
+                                : row.story}
+                            </td>
+                            <td className="px-4 py-3 text-gray-600">
+                              {row.highlights.length} item(s)
+                            </td>
+                            <td className="px-4 py-3 text-gray-600">
+                              {new Date(row.generatedAt).toLocaleString()}
+                            </td>
+                            <td className="px-4 py-3">
+                              <Link
+                                href={`/summaries/edit/${row._id}`}
+                                className="inline-flex items-center rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                Edit
+                              </Link>
+                              <button
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onDelete(row._id);
+                                }}
+                                className="ml-2 inline-flex items-center rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700"
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {summariesStatus === "CanLoadMore" && (
+                    <div className="border-t border-gray-100 p-4">
+                      <button
+                        onClick={() => loadMore(25)}
+                        className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
+                      >
+                        Load more summaries
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 

@@ -2,10 +2,14 @@
 
 import AdminGuard from "@/components/admin-guard";
 import { api } from "@repo/backend/convex";
-import { useConvexAuth, useQuery } from "convex/react";
+import { makeFunctionReference } from "convex/server";
+import { useConvexAuth, usePaginatedQuery, useQuery } from "convex/react";
 import { useMemo, useState } from "react";
 
 export default function AuditLogsPage() {
+  const listAuditLogsPaginatedRef = makeFunctionReference<"query">(
+    "admin:listAuditLogsPaginated",
+  );
   const { isAuthenticated } = useConvexAuth();
   const [actorFilter, setActorFilter] = useState<string>("all");
   const [actionFilter, setActionFilter] = useState<string>("all");
@@ -16,9 +20,28 @@ export default function AuditLogsPage() {
     api.users.isCurrentUserAdmin,
     isAuthenticated ? {} : "skip",
   );
-  const logs = useQuery(
-    api.admin.listAuditLogs,
-    isAdmin ? { limit: 200 } : "skip",
+  const fromTs = startDate
+    ? new Date(`${startDate}T00:00:00`).getTime()
+    : undefined;
+  const toTs = endDate
+    ? new Date(`${endDate}T23:59:59.999`).getTime()
+    : undefined;
+
+  const {
+    results: logs,
+    status,
+    loadMore,
+  } = usePaginatedQuery(
+    listAuditLogsPaginatedRef,
+    isAdmin
+      ? {
+          actorUserId: actorFilter === "all" ? undefined : actorFilter,
+          action: actionFilter === "all" ? undefined : actionFilter,
+          fromTs,
+          toTs,
+        }
+      : "skip",
+    { initialNumItems: 50 },
   );
   const users = useQuery(api.admin.listAllUsers, isAdmin ? {} : "skip");
 
@@ -43,31 +66,6 @@ export default function AuditLogsPage() {
     });
     return map;
   }, [users]);
-
-  const filteredLogs = useMemo(() => {
-    if (!logs) return [];
-
-    const start = startDate
-      ? new Date(`${startDate}T00:00:00`).getTime()
-      : null;
-    const end = endDate ? new Date(`${endDate}T23:59:59.999`).getTime() : null;
-
-    return logs.filter((row) => {
-      if (actorFilter !== "all" && String(row.actorUserId) !== actorFilter) {
-        return false;
-      }
-      if (actionFilter !== "all" && row.action !== actionFilter) {
-        return false;
-      }
-      if (start !== null && row.at < start) {
-        return false;
-      }
-      if (end !== null && row.at > end) {
-        return false;
-      }
-      return true;
-    });
-  }, [logs, actorFilter, actionFilter, startDate, endDate]);
 
   return (
     <AdminGuard>
@@ -154,58 +152,71 @@ export default function AuditLogsPage() {
           </div>
 
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-            {logs === undefined ? (
+            {status === "LoadingFirstPage" ? (
               <div className="p-6 text-sm text-gray-600">
                 Loading audit logs…
               </div>
-            ) : filteredLogs.length === 0 ? (
+            ) : logs.length === 0 ? (
               <div className="p-6 text-sm text-gray-600">
                 No audit logs match the current filters.
               </div>
             ) : (
-              <div className="overflow-auto">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-600">
-                    <tr>
-                      <th className="text-left font-medium px-4 py-3">
-                        Action
-                      </th>
-                      <th className="text-left font-medium px-4 py-3">
-                        Target
-                      </th>
-                      <th className="text-left font-medium px-4 py-3">
-                        Actor (User ID)
-                      </th>
-                      <th className="text-left font-medium px-4 py-3">
-                        Timestamp
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {filteredLogs.map((row) => (
-                      <tr key={row._id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-gray-900">
-                          {row.action}
-                        </td>
-                        <td className="px-4 py-3 text-gray-600">
-                          {row.target ?? "—"}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-xs text-gray-800">
-                          <div>{String(row.actorUserId)}</div>
-                          {userById.get(String(row.actorUserId))?.email && (
-                            <div className="text-[11px] text-gray-500">
-                              {userById.get(String(row.actorUserId))?.email}
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-gray-600">
-                          {new Date(row.at).toLocaleString()}
-                        </td>
+              <>
+                <div className="overflow-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-600">
+                      <tr>
+                        <th className="text-left font-medium px-4 py-3">
+                          Action
+                        </th>
+                        <th className="text-left font-medium px-4 py-3">
+                          Target
+                        </th>
+                        <th className="text-left font-medium px-4 py-3">
+                          Actor (User ID)
+                        </th>
+                        <th className="text-left font-medium px-4 py-3">
+                          Timestamp
+                        </th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {logs.map((row) => (
+                        <tr key={row._id} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-gray-900">
+                            {row.action}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600">
+                            {row.target ?? "—"}
+                          </td>
+                          <td className="px-4 py-3 font-mono text-xs text-gray-800">
+                            <div>{String(row.actorUserId)}</div>
+                            {userById.get(String(row.actorUserId))?.email && (
+                              <div className="text-[11px] text-gray-500">
+                                {userById.get(String(row.actorUserId))?.email}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600">
+                            {new Date(row.at).toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {status === "CanLoadMore" && (
+                  <div className="border-t border-gray-100 p-4">
+                    <button
+                      onClick={() => loadMore(50)}
+                      className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
+                    >
+                      Load more audit logs
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

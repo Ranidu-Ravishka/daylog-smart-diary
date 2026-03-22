@@ -2,6 +2,7 @@
 
 import AdminGuard from "@/components/admin-guard";
 import MemoryForm from "@/components/form/memoryForm";
+import { toEntityId, type UserId } from "@/lib/admin-ids";
 import { api } from "@repo/backend/convex";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useState } from "react";
@@ -15,7 +16,7 @@ export default function CreateMemoryPage() {
   const users = useQuery(api.admin.listAllUsers, isAdmin ? {} : "skip");
   const createMemory = useMutation(api.admin.adminCreateMemory);
 
-  const [selectedUserId, setSelectedUserId] = useState("");
+  const [selectedUserId, setSelectedUserId] = useState<UserId | "">("");
 
   return (
     <AdminGuard>
@@ -26,7 +27,11 @@ export default function CreateMemoryPage() {
           </label>
           <select
             value={selectedUserId}
-            onChange={(e) => setSelectedUserId(e.target.value)}
+            onChange={(e) =>
+              setSelectedUserId(
+                e.target.value ? toEntityId<"user">(e.target.value) : "",
+              )
+            }
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
           >
             <option value="">Select a user…</option>
@@ -52,8 +57,7 @@ export default function CreateMemoryPage() {
               throw new Error("Please select an owner user");
             }
             await createMemory({
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              userId: selectedUserId as any,
+              userId: selectedUserId,
               title: values.title,
               description: values.description || undefined,
               mood: values.mood || undefined,

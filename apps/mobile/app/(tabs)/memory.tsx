@@ -8,11 +8,13 @@ import {
   ScrollView,
   RefreshControl,
   Alert,
+  Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useMutation, useConvexAuth } from "convex/react";
 import { api } from "@repo/backend/convex";
+import { MOOD_EMOJI } from "@repo/ui/lib/constants";
 import { Colors, Spacing, Typography, Radius } from "@/constants/theme";
 import { AppCard } from "@/components/ui/app-card";
 import { SectionHeader } from "@/components/ui/section-header";
@@ -26,17 +28,6 @@ function getTodayDayKey(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
-
-const MOOD_EMOJI: Record<string, string> = {
-  happy: "😊",
-  sad: "😢",
-  excited: "🎉",
-  peaceful: "😌",
-  loved: "❤️",
-  angry: "😤",
-  anxious: "😰",
-  neutral: "😐",
-};
 
 function MemorySkeleton() {
   return (
@@ -69,6 +60,43 @@ const DailyDetailView = () => {
     isAuthenticated ? { dayKey } : "skip",
   );
   const day = useQuery(api.days.getDay, isAuthenticated ? { dayKey } : "skip");
+  const memoryIds = React.useMemo(
+    () => (memories ?? []).map((memory: any) => memory._id),
+    [memories],
+  );
+  const memoryThumbnails = useQuery(
+    (api as any).memories.listMemoryMediaThumbnailsForMemories,
+    isAuthenticated ? { memoryIds } : "skip",
+  ) as { memoryId: string; thumbnailUrl: string | null }[] | undefined;
+
+  const thumbnailCacheRef = React.useRef<Map<string, string | null>>(new Map());
+
+  React.useEffect(() => {
+    if (!memoryThumbnails) return;
+    for (const entry of memoryThumbnails) {
+      thumbnailCacheRef.current.set(entry.memoryId, entry.thumbnailUrl);
+    }
+  }, [memoryThumbnails]);
+
+  const thumbnailByMemoryId = React.useMemo(() => {
+    const fromQuery = new Map(
+      (memoryThumbnails ?? []).map((entry) => [
+        entry.memoryId,
+        entry.thumbnailUrl,
+      ]),
+    );
+
+    const result = new Map<string, string | null>();
+    for (const id of memoryIds.map((item: any) => String(item))) {
+      if (fromQuery.has(id)) {
+        result.set(id, fromQuery.get(id) ?? null);
+      } else if (thumbnailCacheRef.current.has(id)) {
+        result.set(id, thumbnailCacheRef.current.get(id) ?? null);
+      }
+    }
+
+    return result;
+  }, [memoryIds, memoryThumbnails]);
 
   const upsertDay = useMutation(api.days.upsertDay);
 
@@ -229,7 +257,7 @@ const DailyDetailView = () => {
         </View>
 
         {/* ── Today's Memories ─────────────────────────── */}
-        {memories && memories.length > 0 && (
+        {memories && memories.length > 0 ? (
           <View style={styles.section}>
             <SectionHeader title="Today's Memories" />
             <AppCard padded={false}>
@@ -254,8 +282,27 @@ const DailyDetailView = () => {
                       </Text>
                     )}
                   </View>
+                  {thumbnailByMemoryId.get(String(mem._id)) ? (
+                    <Image
+                      source={{
+                        uri: thumbnailByMemoryId.get(String(mem._id))!,
+                      }}
+                      style={styles.memoryThumb}
+                    />
+                  ) : null}
                 </View>
               ))}
+            </AppCard>
+          </View>
+        ) : (
+          <View style={styles.section}>
+            <SectionHeader title="Today's Memories" />
+            <AppCard>
+              <EmptyState
+                icon="time-outline"
+                title="No memories today"
+                subtitle="Everything is working—this day just has no memories yet. Add one to get started."
+              />
             </AppCard>
           </View>
         )}
@@ -500,6 +547,13 @@ const styles = StyleSheet.create({
     ...Typography.callout,
     color: c.textSecondary,
     marginTop: 2,
+  },
+  memoryThumb: {
+    width: 42,
+    height: 42,
+    borderRadius: Radius.md,
+    marginLeft: Spacing.md,
+    backgroundColor: c.surfaceSecondary,
   },
 
   // Sources

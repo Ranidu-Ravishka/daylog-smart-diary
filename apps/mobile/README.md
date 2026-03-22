@@ -1,50 +1,54 @@
-# Welcome to your Expo app 👋
+# DayLog Mobile App (`apps/mobile`)
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Expo + React Native client for DayLog.
 
-## Get started
+## Required environment variables
 
-1. Install dependencies
+Create `apps/mobile/.env.local` from `apps/mobile/.env.example`.
 
-   ```bash
-   npm install
-   ```
+Required:
 
-2. Start the app
+- `EXPO_PUBLIC_CONVEX_URL`
+- `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`
 
-   ```bash
-   npx expo start
-   ```
+## Local development
 
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+From repo root:
 
 ```bash
-npm run reset-project
+pnpm dev:mobile
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Useful alternatives:
 
-## Learn more
+```bash
+pnpm --filter mobile start
+pnpm --filter mobile ios
+pnpm --filter mobile android
+pnpm --filter mobile web
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+## Quality and CI commands
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+From repo root:
 
-## Join the community
+```bash
+pnpm --filter mobile check-types
+pnpm --filter mobile lint
+pnpm --filter mobile build:ci
+```
 
-Join our community of developers creating universal apps.
+`build:ci` performs Expo web export and is used by CI as a reliable build-level gate.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## Auth boundary behavior
+
+- Root auth gating is in `app/_layout.tsx`.
+- Protected trees mount only after Clerk auth is resolved.
+- Unauthenticated users route to `/sign-in` after auth resolution.
+- Convex-dependent startup logic is gated until Convex auth is ready.
+
+## Troubleshooting
+
+- Missing `EXPO_PUBLIC_CONVEX_URL` in production build logs indicates env setup is incomplete.
+- If auth appears stuck, verify Clerk publishable key and network access to Convex + Clerk.
+- If Expo bundling fails, run `pnpm install` from repo root and retry.

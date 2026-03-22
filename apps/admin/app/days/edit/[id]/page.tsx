@@ -2,13 +2,14 @@
 
 import AdminGuard from "@/components/admin-guard";
 import DayForm from "@/components/form/dayForm";
+import { idQueryArg, toEntityId } from "@/lib/admin-ids";
 import { api } from "@repo/backend/convex";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useParams } from "next/navigation";
 
 export default function EditDayPage() {
   const params = useParams<{ id: string }>();
-  const dayId = params?.id;
+  const dayId = params?.id ? toEntityId<"days">(params.id) : undefined;
   const { isAuthenticated } = useConvexAuth();
   const isAdmin = useQuery(
     api.users.isCurrentUserAdmin,
@@ -17,8 +18,7 @@ export default function EditDayPage() {
 
   const existing = useQuery(
     api.admin.adminGetDay,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    dayId && isAdmin ? { dayId: dayId as any } : "skip",
+    idQueryArg(dayId, isAdmin, "dayId"),
   );
   const updateDay = useMutation(api.admin.adminUpdateDay);
 
@@ -48,8 +48,7 @@ export default function EditDayPage() {
         successMessage="Day updated successfully."
         onSubmit={async (values) => {
           await updateDay({
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            dayId: dayId as any,
+            dayId,
             dayKey: values.dayKey,
             rating: values.rating,
             manualNotes: values.manualNotes,

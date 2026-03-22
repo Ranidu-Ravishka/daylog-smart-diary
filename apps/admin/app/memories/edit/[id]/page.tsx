@@ -2,13 +2,14 @@
 
 import AdminGuard from "@/components/admin-guard";
 import MemoryForm from "@/components/form/memoryForm";
+import { idQueryArg, toEntityId } from "@/lib/admin-ids";
 import { api } from "@repo/backend/convex";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useParams } from "next/navigation";
 
 export default function EditMemoryPage() {
   const params = useParams<{ id: string }>();
-  const memoryId = params?.id;
+  const memoryId = params?.id ? toEntityId<"memories">(params.id) : undefined;
   const { isAuthenticated } = useConvexAuth();
   const isAdmin = useQuery(
     api.users.isCurrentUserAdmin,
@@ -17,8 +18,7 @@ export default function EditMemoryPage() {
 
   const existing = useQuery(
     api.admin.adminGetMemory,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    memoryId && isAdmin ? { memoryId: memoryId as any } : "skip",
+    idQueryArg(memoryId, isAdmin, "memoryId"),
   );
   const updateMemory = useMutation(api.admin.adminUpdateMemory);
 
@@ -51,8 +51,7 @@ export default function EditMemoryPage() {
         successMessage="Memory updated successfully."
         onSubmit={async (values) => {
           await updateMemory({
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            memoryId: memoryId as any,
+            memoryId,
             title: values.title,
             description: values.description,
             mood: values.mood,

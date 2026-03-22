@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import { mutation, query, MutationCtx } from "./_generated/server";
 import { requireAdmin } from "./authz";
 import { validateDayKey, validateRating } from "./validators";
@@ -92,7 +93,20 @@ export const listAllUsers = query({
   args: {},
   handler: async (ctx) => {
     await requireAdmin(ctx);
-    return await ctx.db.query("user").collect();
+    return await ctx.db.query("user").withIndex("by_email").take(200);
+  },
+});
+
+export const listUsersPaginated = query({
+  args: {
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+    return await ctx.db
+      .query("user")
+      .withIndex("by_email")
+      .paginate(args.paginationOpts);
   },
 });
 
@@ -204,6 +218,24 @@ export const adminDeleteUser = mutation({
       await ctx.db.delete(log._id);
     }
 
+    // Cascade: delete summary quota counters for this user
+    const quotas = await ctx.db
+      .query("summaryGenerationQuotas")
+      .withIndex("by_user_day", (q) => q.eq("userId", args.userId))
+      .collect();
+    for (const quota of quotas) {
+      await ctx.db.delete(quota._id);
+    }
+
+    // Cascade: delete normalized integration sync data for this user
+    const integrationDailyData = await ctx.db
+      .query("integrationDailyData")
+      .withIndex("by_user_day", (q) => q.eq("userId", args.userId))
+      .collect();
+    for (const row of integrationDailyData) {
+      await ctx.db.delete(row._id);
+    }
+
     await ctx.db.delete(args.userId);
     await logAdminAction(ctx, admin._id, "delete_user", user.email);
     return { success: true };
@@ -245,7 +277,11 @@ export const listAllUserPreferences = query({
   args: {},
   handler: async (ctx) => {
     await requireAdmin(ctx);
-    const prefs = await ctx.db.query("userPreferences").collect();
+    const prefs = await ctx.db
+      .query("userPreferences")
+      .withIndex("by_updatedAt")
+      .order("desc")
+      .take(200);
 
     // Join user email from the user table via clerkUserId
     return await Promise.all(
@@ -259,6 +295,38 @@ export const listAllUserPreferences = query({
         return { ...pref, email: user?.email ?? null };
       }),
     );
+  },
+});
+
+export const listUserPreferencesPaginated = query({
+  args: {
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+
+    const page = await ctx.db
+      .query("userPreferences")
+      .withIndex("by_updatedAt")
+      .order("desc")
+      .paginate(args.paginationOpts);
+
+    const pageWithUserEmail = await Promise.all(
+      page.page.map(async (pref) => {
+        const user = await ctx.db
+          .query("user")
+          .withIndex("by_clerkUserId", (q) =>
+            q.eq("clerkUserId", pref.clerkUserId),
+          )
+          .unique();
+        return { ...pref, email: user?.email ?? null };
+      }),
+    );
+
+    return {
+      ...page,
+      page: pageWithUserEmail,
+    };
   },
 });
 
@@ -357,7 +425,44 @@ export const listAllMemories = query({
   args: {},
   handler: async (ctx) => {
     await requireAdmin(ctx);
-    return await ctx.db.query("memories").collect();
+    return await ctx.db
+      .query("memories")
+      .withIndex("by_happenedAt")
+      .order("desc")
+      .take(200);
+  },
+});
+
+export const listMemoriesPaginated = query({
+  args: {
+    paginationOpts: paginationOptsValidator,
+    dayKey: v.optional(v.string()),
+    userId: v.optional(v.id("user")),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+
+    if (args.userId) {
+      return await ctx.db
+        .query("memories")
+        .withIndex("by_user_happenedAt", (q) => q.eq("userId", args.userId!))
+        .order("desc")
+        .paginate(args.paginationOpts);
+    }
+
+    if (args.dayKey) {
+      return await ctx.db
+        .query("memories")
+        .withIndex("by_day_happenedAt", (q) => q.eq("dayKey", args.dayKey!))
+        .order("desc")
+        .paginate(args.paginationOpts);
+    }
+
+    return await ctx.db
+      .query("memories")
+      .withIndex("by_happenedAt")
+      .order("desc")
+      .paginate(args.paginationOpts);
   },
 });
 
@@ -463,7 +568,52 @@ export const listAllDays = query({
   args: {},
   handler: async (ctx) => {
     await requireAdmin(ctx);
-    return await ctx.db.query("days").collect();
+    return await ctx.db
+      .query("days")
+      .withIndex("by_dayKey")
+      .order("desc")
+      .take(200);
+  },
+});
+
+export const listDaysPaginated = query({
+  args: {
+    paginationOpts: paginationOptsValidator,
+    dayKey: v.optional(v.string()),
+    userId: v.optional(v.id("user")),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+
+    if (args.userId && args.dayKey) {
+      return await ctx.db
+        .query("days")
+        .withIndex("by_user_day", (q) =>
+          q.eq("userId", args.userId!).eq("dayKey", args.dayKey!),
+        )
+        .paginate(args.paginationOpts);
+    }
+
+    if (args.userId) {
+      return await ctx.db
+        .query("days")
+        .withIndex("by_user_day", (q) => q.eq("userId", args.userId!))
+        .order("desc")
+        .paginate(args.paginationOpts);
+    }
+
+    if (args.dayKey) {
+      return await ctx.db
+        .query("days")
+        .withIndex("by_dayKey", (q) => q.eq("dayKey", args.dayKey!))
+        .paginate(args.paginationOpts);
+    }
+
+    return await ctx.db
+      .query("days")
+      .withIndex("by_dayKey")
+      .order("desc")
+      .paginate(args.paginationOpts);
   },
 });
 
@@ -583,7 +733,53 @@ export const listAllSummaries = query({
   args: {},
   handler: async (ctx) => {
     await requireAdmin(ctx);
-    return await ctx.db.query("daySummaries").collect();
+    return await ctx.db
+      .query("daySummaries")
+      .withIndex("by_generatedAt")
+      .order("desc")
+      .take(200);
+  },
+});
+
+export const listSummariesPaginated = query({
+  args: {
+    paginationOpts: paginationOptsValidator,
+    dayKey: v.optional(v.string()),
+    userId: v.optional(v.id("user")),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+
+    if (args.userId && args.dayKey) {
+      return await ctx.db
+        .query("daySummaries")
+        .withIndex("by_user_day", (q) =>
+          q.eq("userId", args.userId!).eq("dayKey", args.dayKey!),
+        )
+        .paginate(args.paginationOpts);
+    }
+
+    if (args.userId) {
+      return await ctx.db
+        .query("daySummaries")
+        .withIndex("by_user_generatedAt", (q) => q.eq("userId", args.userId!))
+        .order("desc")
+        .paginate(args.paginationOpts);
+    }
+
+    if (args.dayKey) {
+      return await ctx.db
+        .query("daySummaries")
+        .withIndex("by_day_generatedAt", (q) => q.eq("dayKey", args.dayKey!))
+        .order("desc")
+        .paginate(args.paginationOpts);
+    }
+
+    return await ctx.db
+      .query("daySummaries")
+      .withIndex("by_generatedAt")
+      .order("desc")
+      .paginate(args.paginationOpts);
   },
 });
 
@@ -680,7 +876,55 @@ export const listAllIntegrations = query({
   args: {},
   handler: async (ctx) => {
     await requireAdmin(ctx);
-    return await ctx.db.query("integrations").collect();
+    return await ctx.db
+      .query("integrations")
+      .withIndex("by_provider")
+      .take(200);
+  },
+});
+
+export const listIntegrationsPaginated = query({
+  args: {
+    paginationOpts: paginationOptsValidator,
+    status: v.optional(
+      v.union(
+        v.literal("connected"),
+        v.literal("disconnected"),
+        v.literal("error"),
+      ),
+    ),
+    provider: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+
+    if (args.status && args.provider) {
+      return await ctx.db
+        .query("integrations")
+        .withIndex("by_status_provider", (q) =>
+          q.eq("status", args.status!).eq("provider", args.provider!),
+        )
+        .paginate(args.paginationOpts);
+    }
+
+    if (args.status) {
+      return await ctx.db
+        .query("integrations")
+        .withIndex("by_status", (q) => q.eq("status", args.status!))
+        .paginate(args.paginationOpts);
+    }
+
+    if (args.provider) {
+      return await ctx.db
+        .query("integrations")
+        .withIndex("by_provider", (q) => q.eq("provider", args.provider!))
+        .paginate(args.paginationOpts);
+    }
+
+    return await ctx.db
+      .query("integrations")
+      .withIndex("by_provider")
+      .paginate(args.paginationOpts);
   },
 });
 
@@ -756,7 +1000,58 @@ export const listAuditLogs = query({
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
     const limit = args.limit ?? 100;
-    return await ctx.db.query("auditLogs").order("desc").take(limit);
+    return await ctx.db
+      .query("auditLogs")
+      .withIndex("by_at")
+      .order("desc")
+      .take(limit);
+  },
+});
+
+export const listAuditLogsPaginated = query({
+  args: {
+    paginationOpts: paginationOptsValidator,
+    actorUserId: v.optional(v.id("user")),
+    action: v.optional(v.string()),
+    fromTs: v.optional(v.number()),
+    toTs: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+
+    let page;
+
+    if (args.actorUserId) {
+      page = await ctx.db
+        .query("auditLogs")
+        .withIndex("by_actor_at", (q) => q.eq("actorUserId", args.actorUserId!))
+        .order("desc")
+        .paginate(args.paginationOpts);
+    } else if (args.action) {
+      page = await ctx.db
+        .query("auditLogs")
+        .withIndex("by_action_at", (q) => q.eq("action", args.action!))
+        .order("desc")
+        .paginate(args.paginationOpts);
+    } else {
+      page = await ctx.db
+        .query("auditLogs")
+        .withIndex("by_at")
+        .order("desc")
+        .paginate(args.paginationOpts);
+    }
+
+    const filteredPage = page.page.filter((row) => {
+      if (args.action && row.action !== args.action) return false;
+      if (args.fromTs !== undefined && row.at < args.fromTs) return false;
+      if (args.toTs !== undefined && row.at > args.toTs) return false;
+      return true;
+    });
+
+    return {
+      ...page,
+      page: filteredPage,
+    };
   },
 });
 

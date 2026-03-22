@@ -1,24 +1,37 @@
 "use client";
 
 import AdminGuard from "@/components/admin-guard";
+import type { PreferenceId } from "@/lib/admin-ids";
 import { api } from "@repo/backend/convex";
-import type { GenericId } from "convex/values";
-import { useConvexAuth, useMutation, useQuery } from "convex/react";
+import { makeFunctionReference } from "convex/server";
+import {
+  useConvexAuth,
+  useMutation,
+  usePaginatedQuery,
+  useQuery,
+} from "convex/react";
 import { useState } from "react";
 import Link from "next/link";
 
 export default function PreferencesPage() {
+  const listUserPreferencesPaginatedRef = makeFunctionReference<"query">(
+    "admin:listUserPreferencesPaginated",
+  );
   const { isAuthenticated } = useConvexAuth();
-  const [selectedId, setSelectedId] =
-    useState<GenericId<"userPreferences"> | null>(null);
+  const [selectedId, setSelectedId] = useState<PreferenceId | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const isAdmin = useQuery(
     api.users.isCurrentUserAdmin,
     isAuthenticated ? {} : "skip",
   );
-  const preferences = useQuery(
-    api.admin.listAllUserPreferences,
+  const {
+    results: preferences,
+    status: preferencesStatus,
+    loadMore,
+  } = usePaginatedQuery(
+    listUserPreferencesPaginatedRef,
     isAdmin ? {} : "skip",
+    { initialNumItems: 25 },
   );
   const selectedPreference = useQuery(
     api.admin.adminGetUserPreference,
@@ -26,7 +39,7 @@ export default function PreferencesPage() {
   );
   const deletePreference = useMutation(api.admin.adminDeleteUserPreference);
 
-  const onDelete = async (preferenceId: GenericId<"userPreferences">) => {
+  const onDelete = async (preferenceId: PreferenceId) => {
     setDeleteError(null);
     if (!window.confirm("Delete this preference record?")) return;
 
@@ -70,7 +83,7 @@ export default function PreferencesPage() {
 
           <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-              {preferences === undefined ? (
+              {preferencesStatus === "LoadingFirstPage" ? (
                 <div className="p-6 text-sm text-gray-600">
                   Loading preferences…
                 </div>
@@ -79,76 +92,89 @@ export default function PreferencesPage() {
                   No preferences yet.
                 </div>
               ) : (
-                <div className="overflow-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="text-left font-medium px-4 py-3">
-                          User
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Reminder
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Focus Areas
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Updated
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {preferences.map((row) => (
-                        <tr
-                          key={row._id}
-                          className={`cursor-pointer hover:bg-gray-50 ${selectedId === row._id ? "bg-blue-50/50" : ""}`}
-                          onClick={() => setSelectedId(row._id)}
-                        >
-                          <td className="px-4 py-3">
-                            {row.email && (
-                              <div className="text-sm text-gray-900">
-                                {row.email}
-                              </div>
-                            )}
-                            <div className="font-mono text-xs text-gray-500">
-                              {row.clerkUserId}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {row.reminderType} — {row.formattedTime}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600 text-xs">
-                            [{row.focusAreas.join(", ")}]
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {new Date(row.updatedAt).toLocaleString()}
-                          </td>
-                          <td className="px-4 py-3">
-                            <Link
-                              href={`/preferences/edit/${row._id}`}
-                              className="inline-flex items-center rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700"
-                              onClick={(event) => event.stopPropagation()}
-                            >
-                              Edit
-                            </Link>
-                            <button
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onDelete(row._id);
-                              }}
-                              className="ml-2 inline-flex items-center rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700"
-                            >
-                              Delete
-                            </button>
-                          </td>
+                <>
+                  <div className="overflow-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-gray-50 text-gray-600">
+                        <tr>
+                          <th className="text-left font-medium px-4 py-3">
+                            User
+                          </th>
+                          <th className="text-left font-medium px-4 py-3">
+                            Reminder
+                          </th>
+                          <th className="text-left font-medium px-4 py-3">
+                            Focus Areas
+                          </th>
+                          <th className="text-left font-medium px-4 py-3">
+                            Updated
+                          </th>
+                          <th className="text-left font-medium px-4 py-3">
+                            Actions
+                          </th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {preferences.map((row) => (
+                          <tr
+                            key={row._id}
+                            className={`cursor-pointer hover:bg-gray-50 ${selectedId === row._id ? "bg-blue-50/50" : ""}`}
+                            onClick={() => setSelectedId(row._id)}
+                          >
+                            <td className="px-4 py-3">
+                              {row.email && (
+                                <div className="text-sm text-gray-900">
+                                  {row.email}
+                                </div>
+                              )}
+                              <div className="font-mono text-xs text-gray-500">
+                                {row.clerkUserId}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-gray-600">
+                              {row.reminderType} — {row.formattedTime}
+                            </td>
+                            <td className="px-4 py-3 text-gray-600 text-xs">
+                              [{row.focusAreas.join(", ")}]
+                            </td>
+                            <td className="px-4 py-3 text-gray-600">
+                              {new Date(row.updatedAt).toLocaleString()}
+                            </td>
+                            <td className="px-4 py-3">
+                              <Link
+                                href={`/preferences/edit/${row._id}`}
+                                className="inline-flex items-center rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                Edit
+                              </Link>
+                              <button
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onDelete(row._id);
+                                }}
+                                className="ml-2 inline-flex items-center rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700"
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {preferencesStatus === "CanLoadMore" && (
+                    <div className="border-t border-gray-100 p-4">
+                      <button
+                        onClick={() => loadMore(25)}
+                        className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
+                      >
+                        Load more preferences
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 

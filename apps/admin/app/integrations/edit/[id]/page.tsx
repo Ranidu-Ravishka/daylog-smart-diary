@@ -2,13 +2,16 @@
 
 import AdminGuard from "@/components/admin-guard";
 import IntegrationForm from "@/components/form/integrationForm";
+import { idQueryArg, toEntityId } from "@/lib/admin-ids";
 import { api } from "@repo/backend/convex";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useParams } from "next/navigation";
 
 export default function EditIntegrationPage() {
   const params = useParams<{ id: string }>();
-  const integrationId = params?.id;
+  const integrationId = params?.id
+    ? toEntityId<"integrations">(params.id)
+    : undefined;
   const { isAuthenticated } = useConvexAuth();
   const isAdmin = useQuery(
     api.users.isCurrentUserAdmin,
@@ -17,8 +20,7 @@ export default function EditIntegrationPage() {
 
   const existing = useQuery(
     api.admin.adminGetIntegration,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    integrationId && isAdmin ? { integrationId: integrationId as any } : "skip",
+    idQueryArg(integrationId, isAdmin, "integrationId"),
   );
   const updateIntegration = useMutation(api.admin.adminUpdateIntegration);
 
@@ -50,8 +52,7 @@ export default function EditIntegrationPage() {
         successMessage="Integration updated successfully."
         onSubmit={async (values) => {
           await updateIntegration({
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            integrationId: integrationId as any,
+            integrationId,
             provider: values.provider,
             status: values.status,
             scopes: values.scopes,

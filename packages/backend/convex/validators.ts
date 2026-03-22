@@ -14,9 +14,21 @@ export function validateDayKey(dayKey: string): void {
   if (!DAY_KEY_REGEX.test(dayKey)) {
     throw new Error(`Invalid dayKey "${dayKey}": must be in YYYY-MM-DD format`);
   }
-  // Verify it's a real date (e.g. reject "2024-02-31")
-  const parsed = new Date(dayKey + "T00:00:00Z");
-  if (isNaN(parsed.getTime())) {
+  // Verify it's a real date (e.g. reject "2024-02-31").
+  // JS Date will overflow invalid values (e.g. 2024-02-31 -> 2024-03-02),
+  // so we must round-trip the components in UTC.
+  const [yearStr, monthStr, dayStr] = dayKey.split("-");
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const day = Number(dayStr);
+
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  const isSameDate =
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day;
+
+  if (!isSameDate) {
     throw new Error(`Invalid dayKey "${dayKey}": not a valid calendar date`);
   }
 }

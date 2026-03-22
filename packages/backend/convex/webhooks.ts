@@ -1,6 +1,29 @@
 import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Webhook } from "svix";
+import { convexServerEnv } from "./env";
+
+type ClerkWebhookEmailAddress = {
+  id?: string;
+  email_address?: string;
+};
+
+type ClerkWebhookUserPayload = {
+  id?: string;
+  primary_email_address_id?: string;
+  email_addresses?: ClerkWebhookEmailAddress[];
+  first_name?: string;
+  last_name?: string;
+  image_url?: string;
+};
+
+type ParsedClerkWebhookUser = {
+  clerkUserId?: string;
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  imageUrl?: string;
+};
 
 // Clerk webhook endpoint to sync users into Convex.
 // Configure in the Clerk dashboard, pointing to:
@@ -10,10 +33,7 @@ function verifyWebhookSignature(
   payloadText: string,
   headers: Headers,
 ): boolean {
-  const secret = process.env.CLERK_WEBHOOK_SECRET;
-  if (!secret) {
-    throw new Error("Missing CLERK_WEBHOOK_SECRET");
-  }
+  const secret = convexServerEnv.clerkWebhookSecret;
 
   const svixId = headers.get("svix-id");
   const svixTimestamp = headers.get("svix-timestamp");
@@ -37,6 +57,33 @@ function verifyWebhookSignature(
   }
 }
 
+export function parseClerkWebhookUser(
+  user: ClerkWebhookUserPayload | null | undefined,
+): ParsedClerkWebhookUser {
+  if (!user) return {};
+
+  const clerkUserId = user.id;
+  const primaryEmailId = user.primary_email_address_id;
+  const emailAddresses = user.email_addresses;
+
+  const email =
+    emailAddresses && emailAddresses.length > 0
+      ? (
+          emailAddresses.find((entry) =>
+            primaryEmailId ? entry.id === primaryEmailId : false,
+          ) ?? emailAddresses[0]
+        )?.email_address
+      : undefined;
+
+  return {
+    clerkUserId,
+    email,
+    firstName: user.first_name,
+    lastName: user.last_name,
+    imageUrl: user.image_url,
+  };
+}
+
 export const clerkWebhook = httpAction(async (ctx, request) => {
   if (request.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
@@ -58,36 +105,20 @@ export const clerkWebhook = httpAction(async (ctx, request) => {
     return new Response("Unauthorized: invalid signature", { status: 401 });
   }
 
-  let body: any;
+  let body: unknown;
   try {
     body = JSON.parse(payloadText);
   } catch {
     return new Response("Invalid JSON", { status: 400 });
   }
 
-  const eventType = body?.type;
-  const user = body?.data;
+  const typedBody = body as { type?: string; data?: ClerkWebhookUserPayload };
+  const eventType = typedBody.type;
+  const user = typedBody.data;
 
   if ((eventType === "user.created" || eventType === "user.updated") && user) {
-    const clerkUserId: string | undefined = user.id;
-
-    // Try to pick the primary email; fall back to first email.
-    const primaryEmailId: string | undefined =
-      user.primary_email_address_id ?? undefined;
-    const emailAddresses: Array<any> | undefined =
-      user.email_addresses ?? undefined;
-
-    let email: string | undefined;
-    if (emailAddresses && emailAddresses.length > 0) {
-      const primary = emailAddresses.find(
-        (e: any) => primaryEmailId && e.id === primaryEmailId,
-      );
-      email = (primary ?? emailAddresses[0]).email_address;
-    }
-
-    const firstName: string | undefined = user.first_name ?? undefined;
-    const lastName: string | undefined = user.last_name ?? undefined;
-    const imageUrl: string | undefined = user.image_url ?? undefined;
+    const { clerkUserId, email, firstName, lastName, imageUrl } =
+      parseClerkWebhookUser(user);
 
     if (clerkUserId && email) {
       try {
@@ -106,6 +137,25 @@ export const clerkWebhook = httpAction(async (ctx, request) => {
       console.warn(
         "[clerk-webhook] Missing clerkUserId or email, skipping sync",
       );
+    }
+  }
+
+  if (eventType === "user.deleted" && user) {
+    const clerkUserId: string | undefined = user.id;
+    if (!clerkUserId) {
+      console.warn(
+        "[clerk-webhook] Missing clerk user id in user.deleted event",
+      );
+      return new Response(null, { status: 204 });
+    }
+
+    try {
+      await ctx.runMutation(internal.users.deleteUserAndRelatedDataByClerkId, {
+        clerkUserId,
+      });
+    } catch (err) {
+      console.error("[clerk-webhook] Failed to cascade-delete user data:", err);
+      return new Response("Internal error", { status: 500 });
     }
   }
 

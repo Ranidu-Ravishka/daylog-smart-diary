@@ -1,17 +1,24 @@
 "use client";
 
 import AdminGuard from "@/components/admin-guard";
+import type { MemoryId } from "@/lib/admin-ids";
 import { api } from "@repo/backend/convex";
-import type { GenericId } from "convex/values";
-import { useConvexAuth, useMutation, useQuery } from "convex/react";
-import { useMemo, useState } from "react";
+import { makeFunctionReference } from "convex/server";
+import {
+  useConvexAuth,
+  useMutation,
+  usePaginatedQuery,
+  useQuery,
+} from "convex/react";
+import { useState } from "react";
 import Link from "next/link";
 
 export default function MemoriesPage() {
-  const { isAuthenticated } = useConvexAuth();
-  const [selectedId, setSelectedId] = useState<GenericId<"memories"> | null>(
-    null,
+  const listMemoriesPaginatedRef = makeFunctionReference<"query">(
+    "admin:listMemoriesPaginated",
   );
+  const { isAuthenticated } = useConvexAuth();
+  const [selectedId, setSelectedId] = useState<MemoryId | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
 
@@ -19,19 +26,20 @@ export default function MemoriesPage() {
     api.users.isCurrentUserAdmin,
     isAuthenticated ? {} : "skip",
   );
-  const memories = useQuery(api.admin.listAllMemories, isAdmin ? {} : "skip");
+  const {
+    results: memories,
+    status: memoriesStatus,
+    loadMore,
+  } = usePaginatedQuery(listMemoriesPaginatedRef, isAdmin ? {} : "skip", {
+    initialNumItems: 25,
+  });
   const memoryDetail = useQuery(
     api.admin.adminGetMemory,
     isAdmin && selectedId ? { memoryId: selectedId } : "skip",
   );
   const deleteMemory = useMutation(api.admin.adminDeleteMemory);
 
-  const sortedMemories = useMemo(() => {
-    if (!memories) return [];
-    return [...memories].sort((a, b) => b.happenedAt - a.happenedAt);
-  }, [memories]);
-
-  const onDelete = async (memoryId: GenericId<"memories">, title: string) => {
+  const onDelete = async (memoryId: MemoryId, title: string) => {
     setDeleteError(null);
     if (!window.confirm(`Delete memory "${title}"? This cannot be undone.`)) {
       return;
@@ -78,81 +86,94 @@ export default function MemoriesPage() {
 
           <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-              {memories === undefined ? (
+              {memoriesStatus === "LoadingFirstPage" ? (
                 <div className="p-6 text-sm text-gray-600">
                   Loading memories…
                 </div>
-              ) : sortedMemories.length === 0 ? (
+              ) : memories.length === 0 ? (
                 <div className="p-6 text-sm text-gray-600">
                   No memories yet.
                 </div>
               ) : (
-                <div className="overflow-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="text-left font-medium px-4 py-3">
-                          Title
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Mood
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Day Key
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Happened At
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {sortedMemories.map((row) => (
-                        <tr
-                          key={row._id}
-                          className={`cursor-pointer hover:bg-gray-50 ${selectedId === row._id ? "bg-blue-50/50" : ""}`}
-                          onClick={() => setSelectedId(row._id)}
-                        >
-                          <td className="px-4 py-3 text-gray-900">
-                            {row.title}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {row.mood ?? "—"}
-                          </td>
-                          <td className="px-4 py-3 font-mono text-xs text-gray-800">
-                            {row.dayKey}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {new Date(row.happenedAt).toLocaleString()}
-                          </td>
-                          <td className="px-4 py-3">
-                            <Link
-                              href={`/memories/edit/${row._id}`}
-                              className="inline-flex items-center rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700"
-                              onClick={(event) => event.stopPropagation()}
-                            >
-                              Edit
-                            </Link>
-                            <button
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onDelete(row._id, row.title);
-                              }}
-                              disabled={isDeletingId === String(row._id)}
-                              className="ml-2 inline-flex items-center rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700 disabled:opacity-50"
-                            >
-                              {isDeletingId === String(row._id)
-                                ? "Deleting…"
-                                : "Delete"}
-                            </button>
-                          </td>
+                <>
+                  <div className="overflow-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-gray-50 text-gray-600">
+                        <tr>
+                          <th className="text-left font-medium px-4 py-3">
+                            Title
+                          </th>
+                          <th className="text-left font-medium px-4 py-3">
+                            Mood
+                          </th>
+                          <th className="text-left font-medium px-4 py-3">
+                            Day Key
+                          </th>
+                          <th className="text-left font-medium px-4 py-3">
+                            Happened At
+                          </th>
+                          <th className="text-left font-medium px-4 py-3">
+                            Actions
+                          </th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {memories.map((row) => (
+                          <tr
+                            key={row._id}
+                            className={`cursor-pointer hover:bg-gray-50 ${selectedId === row._id ? "bg-blue-50/50" : ""}`}
+                            onClick={() => setSelectedId(row._id)}
+                          >
+                            <td className="px-4 py-3 text-gray-900">
+                              {row.title}
+                            </td>
+                            <td className="px-4 py-3 text-gray-600">
+                              {row.mood ?? "—"}
+                            </td>
+                            <td className="px-4 py-3 font-mono text-xs text-gray-800">
+                              {row.dayKey}
+                            </td>
+                            <td className="px-4 py-3 text-gray-600">
+                              {new Date(row.happenedAt).toLocaleString()}
+                            </td>
+                            <td className="px-4 py-3">
+                              <Link
+                                href={`/memories/edit/${row._id}`}
+                                className="inline-flex items-center rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                Edit
+                              </Link>
+                              <button
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onDelete(row._id, row.title);
+                                }}
+                                disabled={isDeletingId === String(row._id)}
+                                className="ml-2 inline-flex items-center rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700 disabled:opacity-50"
+                              >
+                                {isDeletingId === String(row._id)
+                                  ? "Deleting…"
+                                  : "Delete"}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {memoriesStatus === "CanLoadMore" && (
+                    <div className="border-t border-gray-100 p-4">
+                      <button
+                        onClick={() => loadMore(25)}
+                        className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
+                      >
+                        Load more memories
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 

@@ -10,12 +10,7 @@ import { useColorScheme } from "@/hooks/use-color-scheme";
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
-  const { isSignedIn, isLoaded } = useAuth();
-
-  // Wait for Clerk to finish loading before deciding
-  if (!isLoaded) {
-    return null;
-  }
+  const { isSignedIn } = useAuth();
 
   if (!isSignedIn) {
     return <Redirect href="/sign-in" />;

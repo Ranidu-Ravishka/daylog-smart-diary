@@ -2,16 +2,31 @@
 
 import AdminGuard from "@/components/admin-guard";
 import { api } from "@repo/backend/convex";
-import { useConvexAuth, useMutation, useQuery } from "convex/react";
+import { makeFunctionReference } from "convex/server";
+import {
+  useConvexAuth,
+  useMutation,
+  usePaginatedQuery,
+  useQuery,
+} from "convex/react";
 import Link from "next/link";
 
 export default function UsersPage() {
+  const listUsersPaginatedRef = makeFunctionReference<"query">(
+    "admin:listUsersPaginated",
+  );
   const { isAuthenticated } = useConvexAuth();
   const isAdmin = useQuery(
     api.users.isCurrentUserAdmin,
     isAuthenticated ? {} : "skip",
   );
-  const users = useQuery(api.admin.listAllUsers, isAdmin ? {} : "skip");
+  const {
+    results: users,
+    status,
+    loadMore,
+  } = usePaginatedQuery(listUsersPaginatedRef, isAdmin ? {} : "skip", {
+    initialNumItems: 25,
+  });
   const deleteUser = useMutation(api.admin.adminDeleteUser);
 
   return (
@@ -35,81 +50,98 @@ export default function UsersPage() {
           </div>
 
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-            {users === undefined ? (
+            {status === "LoadingFirstPage" ? (
               <div className="p-6 text-sm text-gray-600">Loading...</div>
             ) : users.length === 0 ? (
               <div className="p-6 text-sm text-gray-600">No users yet.</div>
             ) : (
-              <div className="overflow-auto">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-600">
-                    <tr>
-                      <th className="text-left font-medium px-4 py-3">User</th>
-                      <th className="text-left font-medium px-4 py-3">
-                        First Name
-                      </th>
-                      <th className="text-left font-medium px-4 py-3">
-                        Last Name
-                      </th>
-                      <th className="text-left font-medium px-4 py-3">Admin</th>
-                      <th className="text-left font-medium px-4 py-3">
-                        Created
-                      </th>
-                      <th className="text-left font-medium px-4 py-3">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {users.map((row) => (
-                      <tr key={row._id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3">
-                          <div className="text-sm text-gray-900">
-                            {row.email}
-                          </div>
-                          <div className="font-mono text-xs text-gray-500">
-                            {row.clerkUserId}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-gray-900">
-                          {row.firstName ?? "—"}
-                        </td>
-                        <td className="px-4 py-3 text-gray-900">
-                          {row.lastName ?? "—"}
-                        </td>
-                        <td className="px-4 py-3 text-gray-600">
-                          {row.isAdmin ? "Yes" : "No"}
-                        </td>
-                        <td className="px-4 py-3 text-gray-600">
-                          {new Date(row._creationTime).toLocaleString()}
-                        </td>
-                        <td className="px-4 py-3">
-                          <Link
-                            href={`/users/edit/${row._id}`}
-                            className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-                          >
-                            Edit
-                          </Link>
-                          <button
-                            onClick={() => {
-                              if (
-                                window.confirm(
-                                  "Are you sure you want to delete this user?",
-                                )
-                              ) {
-                                deleteUser({ userId: row._id });
-                              }
-                            }}
-                            className="inline-flex items-center rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 ml-2"
-                          >
-                            Delete
-                          </button>
-                        </td>
+              <>
+                <div className="overflow-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-600">
+                      <tr>
+                        <th className="text-left font-medium px-4 py-3">
+                          User
+                        </th>
+                        <th className="text-left font-medium px-4 py-3">
+                          First Name
+                        </th>
+                        <th className="text-left font-medium px-4 py-3">
+                          Last Name
+                        </th>
+                        <th className="text-left font-medium px-4 py-3">
+                          Admin
+                        </th>
+                        <th className="text-left font-medium px-4 py-3">
+                          Created
+                        </th>
+                        <th className="text-left font-medium px-4 py-3">
+                          Actions
+                        </th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {users.map((row) => (
+                        <tr key={row._id} className="hover:bg-gray-50">
+                          <td className="px-4 py-3">
+                            <div className="text-sm text-gray-900">
+                              {row.email}
+                            </div>
+                            <div className="font-mono text-xs text-gray-500">
+                              {row.clerkUserId}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-gray-900">
+                            {row.firstName ?? "—"}
+                          </td>
+                          <td className="px-4 py-3 text-gray-900">
+                            {row.lastName ?? "—"}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600">
+                            {row.isAdmin ? "Yes" : "No"}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600">
+                            {new Date(row._creationTime).toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3">
+                            <Link
+                              href={`/users/edit/${row._id}`}
+                              className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+                            >
+                              Edit
+                            </Link>
+                            <button
+                              onClick={() => {
+                                if (
+                                  window.confirm(
+                                    "Are you sure you want to delete this user?",
+                                  )
+                                ) {
+                                  deleteUser({ userId: row._id });
+                                }
+                              }}
+                              className="inline-flex items-center rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 ml-2"
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {status === "CanLoadMore" && (
+                  <div className="border-t border-gray-100 p-4">
+                    <button
+                      onClick={() => loadMore(25)}
+                      className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
+                    >
+                      Load more users
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

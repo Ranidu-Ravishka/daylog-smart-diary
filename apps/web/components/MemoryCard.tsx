@@ -1,23 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import type { Id } from "../../../packages/backend/convex/_generated/dataModel";
 import { EllipsisVertical, Trash, Edit } from "lucide-react";
+import { MOOD_EMOJI } from "@repo/ui/lib/constants";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DeleteMemoryDialog } from "./DeleteMemoryDialog";
-
-const MOOD_EMOJI: Record<string, string> = {
-  happy: "😊",
-  sad: "😢",
-  excited: "🎉",
-  peaceful: "😌",
-  loved: "❤️",
-  angry: "😤",
-  anxious: "😰",
-  neutral: "😐",
-};
 
 export interface MemoryData {
   _id: Id<"memories">;
@@ -30,12 +21,14 @@ export interface MemoryData {
 
 interface MemoryCardProps {
   memory: MemoryData;
+  thumbnailUrl?: string | null;
   onEdit?: (memory: MemoryData) => void;
   onDeleteSuccess?: () => void;
 }
 
 export function MemoryCard({
   memory,
+  thumbnailUrl,
   onEdit,
   onDeleteSuccess,
 }: MemoryCardProps) {
@@ -72,6 +65,19 @@ export function MemoryCard({
                   {MOOD_EMOJI[memory.mood] ?? "😐"} {memory.mood}
                 </Badge>
               )}
+
+              {thumbnailUrl ? (
+                <div className="mt-3">
+                  <Image
+                    src={thumbnailUrl}
+                    alt={`${memory.title} media`}
+                    width={220}
+                    height={120}
+                    className="h-24 w-auto rounded-md border object-cover"
+                    unoptimized
+                  />
+                </div>
+              ) : null}
             </div>
 
             {/* Action Menu */}
