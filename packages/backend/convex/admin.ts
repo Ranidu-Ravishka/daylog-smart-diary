@@ -884,11 +884,14 @@ export const adminCreateIntegration = mutation({
 
     const nextTokenRef: string | undefined =
       args.tokenRef && !args.tokenRef.startsWith(OPAQUE_TOKEN_REF_PREFIX)
-        ? (await ctx.runMutation(internal.integrations.storeIntegrationSecretInternal, {
-            userId: args.userId,
-            provider: args.provider,
-            accessToken: args.tokenRef,
-          }))
+        ? await ctx.runMutation(
+            internal.integrations.storeIntegrationSecretInternal,
+            {
+              userId: args.userId,
+              provider: args.provider,
+              accessToken: args.tokenRef,
+            },
+          )
         : args.tokenRef;
 
     const id: Id<"integrations"> = await ctx.db.insert("integrations", {
@@ -993,10 +996,7 @@ export const adminUpdateIntegration = mutation({
     if (args.status !== undefined) updates.status = args.status;
     if (args.scopes !== undefined) updates.scopes = args.scopes;
     if (args.tokenRef !== undefined) {
-      if (
-        args.tokenRef &&
-        !args.tokenRef.startsWith(OPAQUE_TOKEN_REF_PREFIX)
-      ) {
+      if (args.tokenRef && !args.tokenRef.startsWith(OPAQUE_TOKEN_REF_PREFIX)) {
         const nextProvider = args.provider ?? integration.provider;
         updates.tokenRef = await ctx.runMutation(
           internal.integrations.storeIntegrationSecretInternal,

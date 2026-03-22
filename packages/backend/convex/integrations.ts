@@ -103,7 +103,8 @@ function isRetryableProviderError(error: unknown): boolean {
 }
 
 function sanitizeSyncError(error: unknown): string {
-  const message = error instanceof Error ? error.message : "Provider sync failed";
+  const message =
+    error instanceof Error ? error.message : "Provider sync failed";
   return message.slice(0, 220);
 }
 
@@ -126,21 +127,23 @@ async function upsertIntegrationSecret(
     query: (table: "integrationSecrets") => {
       withIndex: (
         indexName: string,
-        apply: (q: { eq: (field: string, value: unknown) => unknown }) => unknown,
+        apply: (q: {
+          eq: (field: string, value: unknown) => unknown;
+        }) => unknown,
       ) => {
         collect: () => Promise<
           Array<{ _id: Id<"integrationSecrets">; tokenRef: string }>
         >;
-        unique: () => Promise<
-          | {
-              _id: Id<"integrationSecrets">;
-              tokenRef: string;
-            }
-          | null
-        >;
+        unique: () => Promise<{
+          _id: Id<"integrationSecrets">;
+          tokenRef: string;
+        } | null>;
       };
     };
-    patch: (id: Id<"integrationSecrets">, value: Record<string, unknown>) => Promise<void>;
+    patch: (
+      id: Id<"integrationSecrets">,
+      value: Record<string, unknown>,
+    ) => Promise<void>;
     insert: (
       table: "integrationSecrets",
       value: Record<string, unknown>,
@@ -192,7 +195,9 @@ async function deleteIntegrationSecretByRef(
     query: (table: "integrationSecrets") => {
       withIndex: (
         indexName: string,
-        apply: (q: { eq: (field: string, value: unknown) => unknown }) => unknown,
+        apply: (q: {
+          eq: (field: string, value: unknown) => unknown;
+        }) => unknown,
       ) => {
         unique: () => Promise<{ _id: Id<"integrationSecrets"> } | null>;
       };
@@ -274,7 +279,10 @@ async function fetchJson<T>(
       throw new Error("Provider sync timed out before request could complete.");
     }
 
-    const timeoutMs = Math.max(250, Math.min(PROVIDER_SYNC_TIMEOUT_MS, budgetMs));
+    const timeoutMs = Math.max(
+      250,
+      Math.min(PROVIDER_SYNC_TIMEOUT_MS, budgetMs),
+    );
     const controller = new AbortController();
     const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -865,9 +873,7 @@ export const deleteIntegration = mutation({
     const syncRuns = await ctx.db
       .query("integrationSyncRuns")
       .withIndex("by_user_provider", (q) =>
-        q
-          .eq("userId", integration.userId)
-          .eq("provider", integration.provider),
+        q.eq("userId", integration.userId).eq("provider", integration.provider),
       )
       .collect();
     for (const run of syncRuns) {
@@ -1053,7 +1059,10 @@ export const syncMyIntegrationForDay = action({
         provider: args.provider,
         dayKey: args.dayKey,
       },
-    )) as { shouldSync: boolean; reason: "ready" | "already_synced" | "already_running" };
+    )) as {
+      shouldSync: boolean;
+      reason: "ready" | "already_synced" | "already_running";
+    };
 
     if (!syncRunState.shouldSync) {
       return {
@@ -1102,10 +1111,13 @@ export const syncMyIntegrationForDay = action({
           },
         );
 
-        await ctx.runMutation(internal.integrations.updateIntegrationTokenRefInternal, {
-          integrationId: integration._id,
-          tokenRef: migratedTokenRef,
-        });
+        await ctx.runMutation(
+          internal.integrations.updateIntegrationTokenRefInternal,
+          {
+            integrationId: integration._id,
+            tokenRef: migratedTokenRef,
+          },
+        );
       }
 
       const normalized = await syncProviderForDay(
