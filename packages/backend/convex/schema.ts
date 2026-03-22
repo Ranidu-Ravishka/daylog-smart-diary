@@ -34,6 +34,15 @@ export default defineSchema(
       dailyTime: v.string(),
       weeklyDay: v.string(),
       formattedTime: v.string(),
+      theme: v.optional(
+        v.union(v.literal("light"), v.literal("dark"), v.literal("system")),
+      ),
+      notificationsEnabled: v.optional(v.boolean()),
+      dailySummaryEnabled: v.optional(v.boolean()),
+      weeklyInsightsEnabled: v.optional(v.boolean()),
+      quietHoursEnabled: v.optional(v.boolean()),
+      autoSyncIntegrations: v.optional(v.boolean()),
+      defaultMemoryMood: v.optional(v.string()),
       createdAt: v.number(),
       updatedAt: v.number(),
     })

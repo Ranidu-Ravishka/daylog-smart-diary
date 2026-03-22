@@ -194,6 +194,15 @@ export default function QuickSetupScreen() {
         dailyTime: dailyTime.toISOString(),
         weeklyDay,
         formattedTime: formatTime(dailyTime),
+        theme: savedPreferences?.theme ?? "system",
+        notificationsEnabled: savedPreferences?.notificationsEnabled ?? true,
+        dailySummaryEnabled:
+          savedPreferences?.dailySummaryEnabled ?? reminderType === "daily",
+        weeklyInsightsEnabled:
+          savedPreferences?.weeklyInsightsEnabled ?? reminderType === "weekly",
+        quietHoursEnabled: savedPreferences?.quietHoursEnabled ?? false,
+        autoSyncIntegrations: savedPreferences?.autoSyncIntegrations ?? true,
+        defaultMemoryMood: savedPreferences?.defaultMemoryMood ?? "happy",
       });
 
       router.replace("/(tabs)");

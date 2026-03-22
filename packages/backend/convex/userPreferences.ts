@@ -7,6 +7,22 @@ import {
   requireIdentityMatch,
 } from "./authz";
 
+const preferenceThemeValidator = v.union(
+  v.literal("light"),
+  v.literal("dark"),
+  v.literal("system"),
+);
+
+const defaultPreferenceSettings = {
+  theme: "system" as const,
+  notificationsEnabled: true,
+  dailySummaryEnabled: true,
+  weeklyInsightsEnabled: true,
+  quietHoursEnabled: false,
+  autoSyncIntegrations: true,
+  defaultMemoryMood: "happy",
+};
+
 // ── Sync preferences using an explicit clerkUserId arg.
 //    Identity must match the arg (prevents horizontal escalation).
 export const syncUserPreferencesFromClerk = mutation({
@@ -17,6 +33,13 @@ export const syncUserPreferencesFromClerk = mutation({
     dailyTime: v.string(),
     weeklyDay: v.string(),
     formattedTime: v.string(),
+    theme: v.optional(preferenceThemeValidator),
+    notificationsEnabled: v.optional(v.boolean()),
+    dailySummaryEnabled: v.optional(v.boolean()),
+    weeklyInsightsEnabled: v.optional(v.boolean()),
+    quietHoursEnabled: v.optional(v.boolean()),
+    autoSyncIntegrations: v.optional(v.boolean()),
+    defaultMemoryMood: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireIdentityMatch(ctx, args.clerkUserId);
@@ -35,6 +58,31 @@ export const syncUserPreferencesFromClerk = mutation({
         dailyTime: args.dailyTime,
         weeklyDay: args.weeklyDay,
         formattedTime: args.formattedTime,
+        theme: args.theme ?? existing.theme ?? defaultPreferenceSettings.theme,
+        notificationsEnabled:
+          args.notificationsEnabled ??
+          existing.notificationsEnabled ??
+          defaultPreferenceSettings.notificationsEnabled,
+        dailySummaryEnabled:
+          args.dailySummaryEnabled ??
+          existing.dailySummaryEnabled ??
+          defaultPreferenceSettings.dailySummaryEnabled,
+        weeklyInsightsEnabled:
+          args.weeklyInsightsEnabled ??
+          existing.weeklyInsightsEnabled ??
+          defaultPreferenceSettings.weeklyInsightsEnabled,
+        quietHoursEnabled:
+          args.quietHoursEnabled ??
+          existing.quietHoursEnabled ??
+          defaultPreferenceSettings.quietHoursEnabled,
+        autoSyncIntegrations:
+          args.autoSyncIntegrations ??
+          existing.autoSyncIntegrations ??
+          defaultPreferenceSettings.autoSyncIntegrations,
+        defaultMemoryMood:
+          args.defaultMemoryMood ??
+          existing.defaultMemoryMood ??
+          defaultPreferenceSettings.defaultMemoryMood,
         updatedAt: now,
       });
 
@@ -48,6 +96,23 @@ export const syncUserPreferencesFromClerk = mutation({
       dailyTime: args.dailyTime,
       weeklyDay: args.weeklyDay,
       formattedTime: args.formattedTime,
+      theme: args.theme ?? defaultPreferenceSettings.theme,
+      notificationsEnabled:
+        args.notificationsEnabled ??
+        defaultPreferenceSettings.notificationsEnabled,
+      dailySummaryEnabled:
+        args.dailySummaryEnabled ??
+        defaultPreferenceSettings.dailySummaryEnabled,
+      weeklyInsightsEnabled:
+        args.weeklyInsightsEnabled ??
+        defaultPreferenceSettings.weeklyInsightsEnabled,
+      quietHoursEnabled:
+        args.quietHoursEnabled ?? defaultPreferenceSettings.quietHoursEnabled,
+      autoSyncIntegrations:
+        args.autoSyncIntegrations ??
+        defaultPreferenceSettings.autoSyncIntegrations,
+      defaultMemoryMood:
+        args.defaultMemoryMood ?? defaultPreferenceSettings.defaultMemoryMood,
       createdAt: now,
       updatedAt: now,
     });
@@ -104,6 +169,13 @@ export const syncMyUserPreferences = mutation({
     dailyTime: v.string(),
     weeklyDay: v.string(),
     formattedTime: v.string(),
+    theme: v.optional(preferenceThemeValidator),
+    notificationsEnabled: v.optional(v.boolean()),
+    dailySummaryEnabled: v.optional(v.boolean()),
+    weeklyInsightsEnabled: v.optional(v.boolean()),
+    quietHoursEnabled: v.optional(v.boolean()),
+    autoSyncIntegrations: v.optional(v.boolean()),
+    defaultMemoryMood: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
@@ -122,6 +194,31 @@ export const syncMyUserPreferences = mutation({
         dailyTime: args.dailyTime,
         weeklyDay: args.weeklyDay,
         formattedTime: args.formattedTime,
+        theme: args.theme ?? existing.theme ?? defaultPreferenceSettings.theme,
+        notificationsEnabled:
+          args.notificationsEnabled ??
+          existing.notificationsEnabled ??
+          defaultPreferenceSettings.notificationsEnabled,
+        dailySummaryEnabled:
+          args.dailySummaryEnabled ??
+          existing.dailySummaryEnabled ??
+          defaultPreferenceSettings.dailySummaryEnabled,
+        weeklyInsightsEnabled:
+          args.weeklyInsightsEnabled ??
+          existing.weeklyInsightsEnabled ??
+          defaultPreferenceSettings.weeklyInsightsEnabled,
+        quietHoursEnabled:
+          args.quietHoursEnabled ??
+          existing.quietHoursEnabled ??
+          defaultPreferenceSettings.quietHoursEnabled,
+        autoSyncIntegrations:
+          args.autoSyncIntegrations ??
+          existing.autoSyncIntegrations ??
+          defaultPreferenceSettings.autoSyncIntegrations,
+        defaultMemoryMood:
+          args.defaultMemoryMood ??
+          existing.defaultMemoryMood ??
+          defaultPreferenceSettings.defaultMemoryMood,
         updatedAt: now,
       });
 
@@ -135,6 +232,23 @@ export const syncMyUserPreferences = mutation({
       dailyTime: args.dailyTime,
       weeklyDay: args.weeklyDay,
       formattedTime: args.formattedTime,
+      theme: args.theme ?? defaultPreferenceSettings.theme,
+      notificationsEnabled:
+        args.notificationsEnabled ??
+        defaultPreferenceSettings.notificationsEnabled,
+      dailySummaryEnabled:
+        args.dailySummaryEnabled ??
+        defaultPreferenceSettings.dailySummaryEnabled,
+      weeklyInsightsEnabled:
+        args.weeklyInsightsEnabled ??
+        defaultPreferenceSettings.weeklyInsightsEnabled,
+      quietHoursEnabled:
+        args.quietHoursEnabled ?? defaultPreferenceSettings.quietHoursEnabled,
+      autoSyncIntegrations:
+        args.autoSyncIntegrations ??
+        defaultPreferenceSettings.autoSyncIntegrations,
+      defaultMemoryMood:
+        args.defaultMemoryMood ?? defaultPreferenceSettings.defaultMemoryMood,
       createdAt: now,
       updatedAt: now,
     });

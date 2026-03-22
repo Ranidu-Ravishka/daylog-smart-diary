@@ -11,7 +11,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useUser, useAuth } from "@clerk/clerk-expo";
-import { useQuery, useConvexAuth } from "convex/react";
+import { useRouter } from "expo-router";
+import { useMutation, useQuery, useConvexAuth } from "convex/react";
 import { api } from "@repo/backend/convex";
 import {
   Colors,
@@ -25,6 +26,7 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
 
 const c = Colors.light;
+const memoryMoodOptions = ["happy", "peaceful", "excited", "loved", "sad"];
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
 
@@ -48,6 +50,7 @@ function ProfileSkeleton() {
 
 /* ── Screen ────────────────────────────────────────────── */
 const SettingsScreen = () => {
+  const router = useRouter();
   const { user } = useUser();
   const { signOut } = useAuth();
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
@@ -60,19 +63,216 @@ const SettingsScreen = () => {
     api.userPreferences.getMyUserPreferences,
     isAuthenticated ? {} : "skip",
   );
+  const syncUserPreferences = useMutation(
+    api.userPreferences.syncMyUserPreferences,
+  );
 
   const [darkMode, setDarkMode] = useState(false);
   const [allNotifications, setAllNotifications] = useState(true);
-  const [weeklyInsights, setWeeklyInsights] = useState(true);
-  const [dailySummary, setDailySummary] = useState(true);
+  const [weeklyInsights, setWeeklyInsights] = useState(false);
+  const [dailySummary, setDailySummary] = useState(false);
   const [quietHours, setQuietHours] = useState(false);
+  const [autoSyncIntegrations, setAutoSyncIntegrations] = useState(true);
+  const [defaultMemoryMood, setDefaultMemoryMood] = useState("happy");
+  const [isUpdatingReminderPreference, setIsUpdatingReminderPreference] =
+    useState(false);
+
+  const savePreferencePatch = useCallback(
+    async (
+      patch: Partial<{
+        reminderType: "daily" | "weekly";
+        theme: "light" | "dark" | "system";
+        notificationsEnabled: boolean;
+        dailySummaryEnabled: boolean;
+        weeklyInsightsEnabled: boolean;
+        quietHoursEnabled: boolean;
+        autoSyncIntegrations: boolean;
+        defaultMemoryMood: string;
+      }>,
+    ) => {
+      if (!preferences) {
+        Alert.alert("Complete quick setup", "Set your preferences first.", [
+          {
+            text: "Open Setup",
+            onPress: () => router.push("/quick-setup"),
+          },
+          { text: "Cancel", style: "cancel" },
+        ]);
+        return false;
+      }
+
+      await syncUserPreferences({
+        focusAreas: preferences.focusAreas,
+        reminderType: patch.reminderType ?? preferences.reminderType,
+        dailyTime: preferences.dailyTime,
+        weeklyDay: preferences.weeklyDay,
+        formattedTime: preferences.formattedTime,
+        theme: patch.theme ?? preferences.theme,
+        notificationsEnabled:
+          patch.notificationsEnabled ?? preferences.notificationsEnabled,
+        dailySummaryEnabled:
+          patch.dailySummaryEnabled ?? preferences.dailySummaryEnabled,
+        weeklyInsightsEnabled:
+          patch.weeklyInsightsEnabled ?? preferences.weeklyInsightsEnabled,
+        quietHoursEnabled:
+          patch.quietHoursEnabled ?? preferences.quietHoursEnabled,
+        autoSyncIntegrations:
+          patch.autoSyncIntegrations ?? preferences.autoSyncIntegrations,
+        defaultMemoryMood:
+          patch.defaultMemoryMood ?? preferences.defaultMemoryMood,
+      });
+
+      return true;
+    },
+    [preferences, router, syncUserPreferences],
+  );
 
   useEffect(() => {
-    if (preferences) {
-      setDailySummary(preferences.reminderType === "daily");
-      setWeeklyInsights(preferences.reminderType === "weekly");
+    if (!preferences) {
+      setDarkMode(false);
+      setAllNotifications(true);
+      setDailySummary(false);
+      setWeeklyInsights(false);
+      setQuietHours(false);
+      setAutoSyncIntegrations(true);
+      setDefaultMemoryMood("happy");
+      return;
     }
+
+    setDarkMode(preferences.theme === "dark");
+    setAllNotifications(preferences.notificationsEnabled ?? true);
+    setDailySummary(preferences.reminderType === "daily");
+    setWeeklyInsights(preferences.reminderType === "weekly");
+    setQuietHours(preferences.quietHoursEnabled ?? false);
+    setAutoSyncIntegrations(preferences.autoSyncIntegrations ?? true);
+    setDefaultMemoryMood(preferences.defaultMemoryMood ?? "happy");
   }, [preferences]);
+
+  const updateReminderType = useCallback(
+    async (nextReminderType: "daily" | "weekly") => {
+      if (!preferences) {
+        Alert.alert(
+          "Complete quick setup",
+          "Set your reminder preferences first.",
+          [
+            {
+              text: "Open Setup",
+              onPress: () => router.push("/quick-setup"),
+            },
+            { text: "Cancel", style: "cancel" },
+          ],
+        );
+        return;
+      }
+
+      if (preferences.reminderType === nextReminderType) {
+        return;
+      }
+
+      const previousDaily = dailySummary;
+      const previousWeekly = weeklyInsights;
+
+      setDailySummary(nextReminderType === "daily");
+      setWeeklyInsights(nextReminderType === "weekly");
+      setIsUpdatingReminderPreference(true);
+
+      try {
+        await savePreferencePatch({
+          reminderType: nextReminderType,
+          dailySummaryEnabled: nextReminderType === "daily",
+          weeklyInsightsEnabled: nextReminderType === "weekly",
+        });
+      } catch {
+        setDailySummary(previousDaily);
+        setWeeklyInsights(previousWeekly);
+        Alert.alert(
+          "Update failed",
+          "We could not update reminder preferences. Please try again.",
+        );
+      } finally {
+        setIsUpdatingReminderPreference(false);
+      }
+    },
+    [preferences, router, dailySummary, weeklyInsights, savePreferencePatch],
+  );
+
+  const handleDarkModeToggle = useCallback(async () => {
+    const previous = darkMode;
+    const next = !darkMode;
+    setDarkMode(next);
+
+    try {
+      await savePreferencePatch({ theme: next ? "dark" : "light" });
+    } catch {
+      setDarkMode(previous);
+      Alert.alert("Update failed", "Theme preference could not be saved.");
+    }
+  }, [darkMode, savePreferencePatch]);
+
+  const handleAllNotificationsToggle = useCallback(async () => {
+    const previous = allNotifications;
+    const next = !allNotifications;
+    setAllNotifications(next);
+
+    try {
+      await savePreferencePatch({ notificationsEnabled: next });
+    } catch {
+      setAllNotifications(previous);
+      Alert.alert(
+        "Update failed",
+        "Notification preference could not be saved.",
+      );
+    }
+  }, [allNotifications, savePreferencePatch]);
+
+  const handleQuietHoursToggle = useCallback(async () => {
+    const previous = quietHours;
+    const next = !quietHours;
+    setQuietHours(next);
+
+    try {
+      await savePreferencePatch({ quietHoursEnabled: next });
+    } catch {
+      setQuietHours(previous);
+      Alert.alert(
+        "Update failed",
+        "Quiet hours preference could not be saved.",
+      );
+    }
+  }, [quietHours, savePreferencePatch]);
+
+  const handleAutoSyncIntegrationsToggle = useCallback(async () => {
+    const previous = autoSyncIntegrations;
+    const next = !autoSyncIntegrations;
+    setAutoSyncIntegrations(next);
+
+    try {
+      await savePreferencePatch({ autoSyncIntegrations: next });
+    } catch {
+      setAutoSyncIntegrations(previous);
+      Alert.alert(
+        "Update failed",
+        "Integration preference could not be saved.",
+      );
+    }
+  }, [autoSyncIntegrations, savePreferencePatch]);
+
+  const handleDefaultMemoryMoodChange = useCallback(
+    async (nextMood: string) => {
+      if (defaultMemoryMood === nextMood) return;
+
+      const previous = defaultMemoryMood;
+      setDefaultMemoryMood(nextMood);
+
+      try {
+        await savePreferencePatch({ defaultMemoryMood: nextMood });
+      } catch {
+        setDefaultMemoryMood(previous);
+        Alert.alert("Update failed", "Default memory mood could not be saved.");
+      }
+    },
+    [defaultMemoryMood, savePreferencePatch],
+  );
 
   /* ── Callbacks ────────────────────────── */
   const handleSignOut = useCallback(() => {
@@ -109,7 +309,9 @@ const SettingsScreen = () => {
   }, []);
 
   const isLoading =
-    isAuthLoading || (isAuthenticated && integrations === undefined);
+    isAuthLoading ||
+    (isAuthenticated &&
+      (integrations === undefined || preferences === undefined));
 
   if (isLoading) return <ProfileSkeleton />;
 
@@ -226,8 +428,45 @@ const SettingsScreen = () => {
             <ToggleRow
               label="Dark Mode"
               value={darkMode}
-              onToggle={() => setDarkMode((v) => !v)}
+              onToggle={() => {
+                void handleDarkModeToggle();
+              }}
+              disabled={preferences === null}
             />
+          </AppCard>
+        </View>
+
+        <View style={styles.pad}>
+          <SectionHeader title="Memory Defaults" />
+          <AppCard>
+            <Text style={styles.toggleSub}>Default mood for new memories</Text>
+            <View style={styles.moodChipsRow}>
+              {memoryMoodOptions.map((mood) => {
+                const selected = defaultMemoryMood === mood;
+                return (
+                  <TouchableOpacity
+                    key={mood}
+                    style={[
+                      styles.moodChip,
+                      selected && styles.moodChipSelected,
+                    ]}
+                    onPress={() => {
+                      void handleDefaultMemoryMoodChange(mood);
+                    }}
+                    disabled={preferences === null}
+                  >
+                    <Text
+                      style={[
+                        styles.moodChipLabel,
+                        selected && styles.moodChipLabelSelected,
+                      ]}
+                    >
+                      {mood}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </AppCard>
         </View>
 
@@ -281,29 +520,61 @@ const SettingsScreen = () => {
               label="All Notifications"
               subtitle="Master switch"
               value={allNotifications}
-              onToggle={() => setAllNotifications((v) => !v)}
+              onToggle={() => {
+                void handleAllNotificationsToggle();
+              }}
+              disabled={preferences === null}
             />
             <View style={styles.divider} />
             <ToggleRow
               label="Weekly Insights"
               value={weeklyInsights}
-              onToggle={() => setWeeklyInsights((v) => !v)}
-              disabled={!allNotifications}
+              onToggle={() => {
+                void updateReminderType("weekly");
+              }}
+              disabled={
+                !allNotifications ||
+                isUpdatingReminderPreference ||
+                preferences === null
+              }
             />
             <View style={styles.divider} />
             <ToggleRow
               label="Daily Summary"
               value={dailySummary}
-              onToggle={() => setDailySummary((v) => !v)}
-              disabled={!allNotifications}
+              onToggle={() => {
+                void updateReminderType("daily");
+              }}
+              disabled={
+                !allNotifications ||
+                isUpdatingReminderPreference ||
+                preferences === null
+              }
             />
             <View style={styles.divider} />
             <ToggleRow
               label="Quiet Hours"
               subtitle="10:00 PM — 7:00 AM"
               value={quietHours}
-              onToggle={() => setQuietHours((v) => !v)}
-              disabled={!allNotifications}
+              onToggle={() => {
+                void handleQuietHoursToggle();
+              }}
+              disabled={!allNotifications || preferences === null}
+            />
+          </AppCard>
+        </View>
+
+        <View style={styles.pad}>
+          <SectionHeader title="Integration Preferences" />
+          <AppCard>
+            <ToggleRow
+              label="Auto-sync Integrations"
+              subtitle="Automatically sync connected providers"
+              value={autoSyncIntegrations}
+              onToggle={() => {
+                void handleAutoSyncIntegrationsToggle();
+              }}
+              disabled={preferences === null}
             />
           </AppCard>
         </View>
@@ -320,6 +591,30 @@ const SettingsScreen = () => {
               <Text style={[styles.syncText, { marginTop: 4 }]}>
                 Focus areas: {preferences.focusAreas?.length ?? 0} selected
               </Text>
+              <Text style={[styles.syncText, { marginTop: 4 }]}>
+                Theme: {preferences.theme ?? "system"}
+              </Text>
+              <Text style={[styles.syncText, { marginTop: 4 }]}>
+                Default memory mood: {preferences.defaultMemoryMood ?? "happy"}
+              </Text>
+            </AppCard>
+          </View>
+        )}
+
+        {preferences === null && (
+          <View style={styles.pad}>
+            <SectionHeader title="Sync Status" />
+            <AppCard>
+              <Text style={styles.syncText}>
+                Preferences not set yet. Complete Quick Setup to sync reminders.
+              </Text>
+              <TouchableOpacity
+                onPress={() => router.push("/quick-setup")}
+                style={[styles.quickBtn, { marginTop: Spacing.md }]}
+              >
+                <Ionicons name="settings-outline" size={16} color={c.tint} />
+                <Text style={styles.quickText}>Open Quick Setup</Text>
+              </TouchableOpacity>
             </AppCard>
           </View>
         )}
@@ -450,6 +745,32 @@ const styles = StyleSheet.create({
     ...Typography.caption1,
     color: c.textTertiary,
     marginTop: 2,
+  },
+  moodChipsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+  },
+  moodChip: {
+    borderWidth: 1,
+    borderColor: c.divider,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    backgroundColor: c.background,
+  },
+  moodChipSelected: {
+    backgroundColor: c.tintLight,
+    borderColor: c.tint,
+  },
+  moodChipLabel: {
+    ...Typography.caption1,
+    color: c.textSecondary,
+    textTransform: "capitalize",
+  },
+  moodChipLabelSelected: {
+    color: c.tint,
   },
 
   /* Integration rows */
