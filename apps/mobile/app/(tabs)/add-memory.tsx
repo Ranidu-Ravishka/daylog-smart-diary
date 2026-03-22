@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -14,7 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import { useMutation } from "convex/react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "@repo/backend/convex";
 import {
   Colors,
@@ -44,11 +44,17 @@ type MemoryId = string;
 
 export default function AddMemoryScreen() {
   const router = useRouter();
+  const { isAuthenticated } = useConvexAuth();
   const createMemory = useMutation(api.memories.createMemory);
   const createUploadUrl = useMutation(
     (api as any).memories.generateMemoryMediaUploadUrl,
   );
   const addMemoryMedia = useMutation((api as any).memories.addMemoryMedia);
+  const preferences = useQuery(
+    api.userPreferences.getMyUserPreferences,
+    isAuthenticated ? {} : "skip",
+  );
+  const hasSelectedMoodManually = useRef(false);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -56,6 +62,13 @@ export default function AddMemoryScreen() {
   const [mood, setMood] = useState("happy");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (hasSelectedMoodManually.current) return;
+    const preferredMood = preferences?.defaultMemoryMood?.trim();
+    if (!preferredMood) return;
+    setMood(preferredMood);
+  }, [preferences?.defaultMemoryMood]);
 
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -174,7 +187,8 @@ export default function AddMemoryScreen() {
       setTitle("");
       setDescription("");
       setSelectedImages([]);
-      setMood("happy");
+      setMood(preferences?.defaultMemoryMood ?? "happy");
+      hasSelectedMoodManually.current = false;
 
       Alert.alert("Memory Saved", "Your memory has been captured!", [
         { text: "OK", onPress: () => router.replace("/(tabs)") },
@@ -258,7 +272,10 @@ export default function AddMemoryScreen() {
                 <TouchableOpacity
                   key={item.id}
                   style={[styles.moodBtn, isSelected && styles.moodBtnSelected]}
-                  onPress={() => setMood(item.id)}
+                  onPress={() => {
+                    hasSelectedMoodManually.current = true;
+                    setMood(item.id);
+                  }}
                   disabled={isSubmitting}
                   activeOpacity={0.7}
                 >

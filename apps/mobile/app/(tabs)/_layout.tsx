@@ -3,7 +3,8 @@ import React from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 
 import { useAuth } from "@clerk/clerk-expo";
-import { useConvexAuth } from "convex/react";
+import { useConvexAuth, useQuery } from "convex/react";
+import { api } from "@repo/backend/convex";
 import { HapticTab } from "@/components/haptic-tab";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
@@ -14,10 +15,21 @@ export default function TabLayout() {
   const colorScheme = useColorScheme();
   const { isLoaded, isSignedIn } = useAuth();
   const { isLoading: isConvexAuthLoading, isAuthenticated } = useConvexAuth();
+  const launchPreferences = useQuery(
+    api.userPreferences.getMyUserPreferences,
+    isAuthenticated ? {} : "skip",
+  );
+  const isPreferencesLoading =
+    isAuthenticated && launchPreferences === undefined;
 
   const theme = Colors[colorScheme ?? "light"];
 
-  if (!isLoaded || isConvexAuthLoading) {
+  if (
+    !isLoaded ||
+    isConvexAuthLoading ||
+    isPreferencesLoading ||
+    (isSignedIn && !isAuthenticated)
+  ) {
     return (
       <View
         style={[styles.loadingContainer, { backgroundColor: theme.background }]}
@@ -27,7 +39,7 @@ export default function TabLayout() {
     );
   }
 
-  if (!isSignedIn || !isAuthenticated) {
+  if (!isSignedIn) {
     return <Redirect href="/sign-in" />;
   }
 

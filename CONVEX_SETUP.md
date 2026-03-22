@@ -169,18 +169,17 @@ apps/
   web/                  # Next.js web app
     app/
       providers.tsx     # Convex provider setup
-      convex-demo.tsx   # Example usage
+      dashboard/        # Main authenticated experience
 
   admin/                # Next.js admin app
     app/
       providers.tsx     # Convex provider setup
-      convex-demo.tsx   # Example usage
+      admin/            # Admin pages
 
   mobile/               # Expo mobile app
     app/
       _layout.tsx       # Convex provider setup
-    components/
-      convex-demo.tsx   # Example usage
+      (tabs)/           # Main mobile experience
 ```
 
 ## 💡 Using Convex in Your Apps
@@ -223,17 +222,11 @@ const handleAction = () => {
 
 ## 🧪 Testing the Setup
 
-After starting all apps, visit:
+After starting all apps, verify authenticated flows load Convex-backed data:
 
-1. **Web:** [http://localhost:3000](http://localhost:3000) - Import and use `ConvexDemo` component
-2. **Admin:** [http://localhost:3001](http://localhost:3001) - Import and use `ConvexDemo` component
-3. **Mobile:** Use Expo Go app or simulator - Import `ConvexDemo` from components
-
-Each app has a demo component showing:
-
-- ✅ Live query from Convex
-- ✅ Mutation capabilities
-- ✅ Shared backend connection
+1. **Web:** [http://localhost:3000](http://localhost:3000) → sign in and open dashboard
+2. **Admin:** [http://localhost:3001](http://localhost:3001) → sign in and open admin pages
+3. **Mobile:** Use Expo Go/simulator → sign in and open tab screens
 
 ## 📝 Adding New Convex Functions
 

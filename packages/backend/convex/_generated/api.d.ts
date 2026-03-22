@@ -12,6 +12,7 @@ import type * as admin from "../admin.js";
 import type * as authz from "../authz.js";
 import type * as content from "../content.js";
 import type * as days from "../days.js";
+import type * as env from "../env.js";
 import type * as http from "../http.js";
 import type * as integrations from "../integrations.js";
 import type * as memories from "../memories.js";
@@ -34,6 +35,7 @@ declare const fullApi: ApiFromModules<{
   authz: typeof authz;
   content: typeof content;
   days: typeof days;
+  env: typeof env;
   http: typeof http;
   integrations: typeof integrations;
   memories: typeof memories;
