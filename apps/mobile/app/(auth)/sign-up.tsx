@@ -19,6 +19,20 @@ import { Ionicons } from "@expo/vector-icons";
 
 WebBrowser.maybeCompleteAuthSession();
 
+type ClerkErrorLike = {
+  errors?: {
+    message?: string;
+    code?: string;
+  }[];
+};
+
+function getClerkError(error: unknown): ClerkErrorLike {
+  if (typeof error === "object" && error !== null && "errors" in error) {
+    return error as ClerkErrorLike;
+  }
+  return {};
+}
+
 export default function SignUpScreen() {
   const router = useRouter();
   const { isLoaded: authLoaded, isSignedIn } = useAuth();
@@ -265,10 +279,11 @@ export default function SignUpScreen() {
       setErrorMessage(
         "✅ New verification code sent! Please check your email.",
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Resend error:", error);
+      const clerkError = getClerkError(error);
       setErrorMessage(
-        error.errors?.[0]?.message ||
+        clerkError.errors?.[0]?.message ||
           "Failed to resend code. Please try again.",
       );
     } finally {

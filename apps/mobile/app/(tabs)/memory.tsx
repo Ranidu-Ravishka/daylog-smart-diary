@@ -14,6 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useMutation, useConvexAuth } from "convex/react";
 import { api } from "@repo/backend/convex";
+import type { GenericId } from "convex/values";
 import { MOOD_EMOJI } from "@repo/ui/lib/constants";
 import { Colors, Spacing, Typography, Radius } from "@/constants/theme";
 import { AppCard } from "@/components/ui/app-card";
@@ -23,6 +24,40 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { AppButton } from "@/components/ui/app-button";
 
 const c = Colors.light;
+
+type MemoryDoc = {
+  _id: GenericId<"memories">;
+  title: string;
+  description?: string;
+  mood?: string;
+};
+
+type MemoryThumbnailDoc = {
+  memoryId: string;
+  thumbnailUrl: string | null;
+};
+
+function isMemoryDoc(value: unknown): value is MemoryDoc {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate._id === "string" &&
+    typeof candidate.title === "string" &&
+    (candidate.description === undefined ||
+      typeof candidate.description === "string") &&
+    (candidate.mood === undefined || typeof candidate.mood === "string")
+  );
+}
+
+function isMemoryThumbnailDoc(value: unknown): value is MemoryThumbnailDoc {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.memoryId === "string" &&
+    (candidate.thumbnailUrl === null ||
+      typeof candidate.thumbnailUrl === "string")
+  );
+}
 
 function getTodayDayKey(): string {
   const now = new Date();
@@ -59,20 +94,27 @@ const DailyDetailView = () => {
     api.memories.listMemoriesByDay,
     isAuthenticated ? { dayKey } : "skip",
   );
+  const resolvedMemories = React.useMemo(() => {
+    if (!Array.isArray(memories)) return [];
+    return memories.filter(isMemoryDoc);
+  }, [memories]);
   const day = useQuery(api.days.getDay, isAuthenticated ? { dayKey } : "skip");
   const memoryIds = React.useMemo(
-    () => (memories ?? []).map((memory: any) => memory._id),
-    [memories],
+    () => resolvedMemories.map((memory) => memory._id),
+    [resolvedMemories],
   );
-  const memoryThumbnails = useQuery(
-    (api as any).memories.listMemoryMediaThumbnailsForMemories,
+  const rawMemoryThumbnails = useQuery(
+    api.memories.listMemoryMediaThumbnailsForMemories,
     isAuthenticated ? { memoryIds } : "skip",
-  ) as { memoryId: string; thumbnailUrl: string | null }[] | undefined;
+  );
+  const memoryThumbnails = React.useMemo(() => {
+    if (!Array.isArray(rawMemoryThumbnails)) return [];
+    return rawMemoryThumbnails.filter(isMemoryThumbnailDoc);
+  }, [rawMemoryThumbnails]);
 
   const thumbnailCacheRef = React.useRef<Map<string, string | null>>(new Map());
 
   React.useEffect(() => {
-    if (!memoryThumbnails) return;
     for (const entry of memoryThumbnails) {
       thumbnailCacheRef.current.set(entry.memoryId, entry.thumbnailUrl);
     }
@@ -80,14 +122,11 @@ const DailyDetailView = () => {
 
   const thumbnailByMemoryId = React.useMemo(() => {
     const fromQuery = new Map(
-      (memoryThumbnails ?? []).map((entry) => [
-        entry.memoryId,
-        entry.thumbnailUrl,
-      ]),
+      memoryThumbnails.map((entry) => [entry.memoryId, entry.thumbnailUrl]),
     );
 
     const result = new Map<string, string | null>();
-    for (const id of memoryIds.map((item: any) => String(item))) {
+    for (const id of memoryIds.map((item: string) => String(item))) {
       if (fromQuery.has(id)) {
         result.set(id, fromQuery.get(id) ?? null);
       } else if (thumbnailCacheRef.current.has(id)) {
@@ -170,7 +209,9 @@ const DailyDetailView = () => {
   const handleRemovePerson = useCallback(
     async (index: number) => {
       try {
-        const updatedTags = peopleTags.filter((_, i) => i !== index);
+        const updatedTags = peopleTags.filter(
+          (_: string, i: number) => i !== index,
+        );
         await upsertDay({ dayKey, peopleTags: updatedTags });
       } catch (err) {
         console.error("Failed to remove person:", err);
@@ -182,7 +223,7 @@ const DailyDetailView = () => {
   if (isLoading) return <MemorySkeleton />;
 
   const moodFromMemories =
-    memories && memories.length > 0 ? (memories[0]?.mood ?? null) : null;
+    resolvedMemories.length > 0 ? (resolvedMemories[0]?.mood ?? null) : null;
 
   const sourcesUsed = summary?.sourcesUsed ?? [];
 
@@ -257,16 +298,16 @@ const DailyDetailView = () => {
         </View>
 
         {/* ── Today's Memories ─────────────────────────── */}
-        {memories && memories.length > 0 ? (
+        {resolvedMemories.length > 0 ? (
           <View style={styles.section}>
             <SectionHeader title="Today's Memories" />
             <AppCard padded={false}>
-              {memories.map((mem: any, idx: number) => (
+              {resolvedMemories.map((mem: MemoryDoc, idx: number) => (
                 <View
                   key={mem._id}
                   style={[
                     styles.memoryRow,
-                    idx < memories.length - 1 && styles.memoryBorder,
+                    idx < resolvedMemories.length - 1 && styles.memoryBorder,
                   ]}
                 >
                   <View style={styles.moodDot}>

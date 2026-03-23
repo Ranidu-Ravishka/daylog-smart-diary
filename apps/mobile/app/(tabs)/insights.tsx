@@ -39,6 +39,44 @@ const MOOD_VALUES: Record<string, number> = {
   neutral: 50,
 };
 
+type MemoryDoc = {
+  _id: string;
+  dayKey: string;
+  mood?: string;
+};
+
+type SummaryDoc = {
+  _id: string;
+  dayKey: string;
+  story: string;
+  highlights: string[];
+  metrics?: {
+    steps?: number;
+    sleepMinutes?: number;
+  };
+};
+
+function isMemoryDoc(value: unknown): value is MemoryDoc {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate._id === "string" &&
+    typeof candidate.dayKey === "string" &&
+    (candidate.mood === undefined || typeof candidate.mood === "string")
+  );
+}
+
+function isSummaryDoc(value: unknown): value is SummaryDoc {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate._id === "string" &&
+    typeof candidate.dayKey === "string" &&
+    typeof candidate.story === "string" &&
+    Array.isArray(candidate.highlights)
+  );
+}
+
 function InsightsSkeleton() {
   return (
     <SafeAreaView style={styles.safe}>
@@ -83,10 +121,17 @@ const InsightsScreen = () => {
   const isLoading =
     isAuthLoading || (isAuthenticated && memories === undefined);
 
-  if (isLoading) return <InsightsSkeleton />;
+  const resolvedSummaries = React.useMemo(() => {
+    if (!Array.isArray(summaries)) return [];
+    return summaries.filter(isSummaryDoc);
+  }, [summaries]);
 
-  const resolvedSummaries = summaries ?? [];
-  const resolvedMemories = memories ?? [];
+  const resolvedMemories = React.useMemo(() => {
+    if (!Array.isArray(memories)) return [];
+    return memories.filter(isMemoryDoc);
+  }, [memories]);
+
+  if (isLoading) return <InsightsSkeleton />;
 
   // Derive mood trends (last 7 days)
   const dayLabels = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
@@ -98,14 +143,12 @@ const InsightsScreen = () => {
     const dayOfWeek =
       dayLabels[date.getDay() === 0 ? 6 : date.getDay() - 1] ?? "?";
 
-    const dayMemories = resolvedMemories.filter(
-      (m: any) => m.dayKey === dayKey,
-    );
+    const dayMemories = resolvedMemories.filter((m) => m.dayKey === dayKey);
     let value = 50;
     if (dayMemories.length > 0) {
       const moodScores = dayMemories
-        .filter((m: any) => m.mood)
-        .map((m: any) => MOOD_VALUES[m.mood] ?? 50);
+        .filter((m) => m.mood)
+        .map((m) => MOOD_VALUES[m.mood ?? "neutral"] ?? 50);
       if (moodScores.length > 0) {
         value = Math.round(
           moodScores.reduce((a: number, b: number) => a + b, 0) /
@@ -129,7 +172,7 @@ const InsightsScreen = () => {
 
   // Mood distribution
   const moodCounts: Record<string, number> = {};
-  resolvedMemories.forEach((m: any) => {
+  resolvedMemories.forEach((m) => {
     if (m.mood) {
       moodCounts[m.mood] = (moodCounts[m.mood] ?? 0) + 1;
     }
@@ -337,27 +380,29 @@ const InsightsScreen = () => {
           <View style={styles.section}>
             <SectionHeader title="Recent Stories" />
             <AppCard padded={false}>
-              {resolvedSummaries.slice(0, 5).map((s: any, idx: number) => (
-                <View
-                  key={s._id}
-                  style={[
-                    styles.storyRow,
-                    idx < Math.min(resolvedSummaries.length, 5) - 1 &&
-                      styles.storyBorder,
-                  ]}
-                >
-                  <Text style={styles.storyDate}>{s.dayKey}</Text>
-                  <Text style={styles.storyText} numberOfLines={2}>
-                    {s.story}
-                  </Text>
-                  {s.highlights && s.highlights.length > 0 && (
-                    <Text style={styles.storyHighlights}>
-                      {s.highlights.length} highlight
-                      {s.highlights.length > 1 ? "s" : ""}
+              {resolvedSummaries
+                .slice(0, 5)
+                .map((s: SummaryDoc, idx: number) => (
+                  <View
+                    key={s._id}
+                    style={[
+                      styles.storyRow,
+                      idx < Math.min(resolvedSummaries.length, 5) - 1 &&
+                        styles.storyBorder,
+                    ]}
+                  >
+                    <Text style={styles.storyDate}>{s.dayKey}</Text>
+                    <Text style={styles.storyText} numberOfLines={2}>
+                      {s.story}
                     </Text>
-                  )}
-                </View>
-              ))}
+                    {s.highlights && s.highlights.length > 0 && (
+                      <Text style={styles.storyHighlights}>
+                        {s.highlights.length} highlight
+                        {s.highlights.length > 1 ? "s" : ""}
+                      </Text>
+                    )}
+                  </View>
+                ))}
             </AppCard>
           </View>
         )}

@@ -15,6 +15,20 @@ import { useRouter } from "expo-router";
 import { useSignIn } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 
+type ClerkErrorLike = {
+  errors?: {
+    code?: string;
+    message?: string;
+  }[];
+};
+
+function getClerkError(err: unknown): ClerkErrorLike {
+  if (typeof err === "object" && err !== null && "errors" in err) {
+    return err as ClerkErrorLike;
+  }
+  return {};
+}
+
 export default function ForgotPasswordScreen() {
   const router = useRouter();
   const { signIn } = useSignIn();
@@ -69,18 +83,20 @@ export default function ForgotPasswordScreen() {
           setStep("code");
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Reset password error:", err);
+      const clerkError = getClerkError(err);
+      const errorCode = clerkError.errors?.[0]?.code;
+      const errorMessage = clerkError.errors?.[0]?.message;
 
       // Handle specific error cases
-      if (err.errors?.[0]?.code === "form_identifier_not_found") {
+      if (errorCode === "form_identifier_not_found") {
         setError("No account found with this email address");
-      } else if (err.errors?.[0]?.message?.includes("rate limit")) {
+      } else if (errorMessage?.includes("rate limit")) {
         setError("Too many attempts. Please try again in a few minutes.");
       } else {
         setError(
-          err.errors?.[0]?.message ||
-            "Failed to send reset email. Please try again.",
+          errorMessage || "Failed to send reset email. Please try again.",
         );
       }
     } finally {
@@ -116,20 +132,20 @@ export default function ForgotPasswordScreen() {
       } else {
         setError("Invalid or expired code. Please try again.");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Verify code error:", err);
+      const clerkError = getClerkError(err);
+      const errorCode = clerkError.errors?.[0]?.code;
+      const errorMessage = clerkError.errors?.[0]?.message;
 
-      if (err.errors?.[0]?.code === "form_code_incorrect") {
+      if (errorCode === "form_code_incorrect") {
         setError("Incorrect verification code");
-      } else if (err.errors?.[0]?.code === "form_param_format_invalid") {
+      } else if (errorCode === "form_param_format_invalid") {
         setError("Invalid code format");
-      } else if (err.errors?.[0]?.message?.includes("expired")) {
+      } else if (errorMessage?.includes("expired")) {
         setError("Verification code has expired. Please request a new one.");
       } else {
-        setError(
-          err.errors?.[0]?.message ||
-            "Failed to verify code. Please try again.",
-        );
+        setError(errorMessage || "Failed to verify code. Please try again.");
       }
     } finally {
       setIsPending(false);
@@ -178,16 +194,15 @@ export default function ForgotPasswordScreen() {
       } else {
         setError("Failed to reset password. Please try again.");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Reset password error:", err);
+      const clerkError = getClerkError(err);
+      const errorMessage = clerkError.errors?.[0]?.message;
 
-      if (err.errors?.[0]?.message?.includes("weak")) {
+      if (errorMessage?.includes("weak")) {
         setError("Password is too weak. Please use a stronger password.");
       } else {
-        setError(
-          err.errors?.[0]?.message ||
-            "Failed to reset password. Please try again.",
-        );
+        setError(errorMessage || "Failed to reset password. Please try again.");
       }
     } finally {
       setIsPending(false);
@@ -212,10 +227,12 @@ export default function ForgotPasswordScreen() {
       });
 
       setSuccess("New verification code sent to your email");
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Resend code error:", err);
+      const clerkError = getClerkError(err);
       setError(
-        err.errors?.[0]?.message || "Failed to resend code. Please try again.",
+        clerkError.errors?.[0]?.message ||
+          "Failed to resend code. Please try again.",
       );
     } finally {
       setIsPending(false);

@@ -1,5 +1,10 @@
 import { v } from "convex/values";
-import { mutation, query, internalMutation } from "./_generated/server";
+import {
+  mutation,
+  query,
+  internalMutation,
+  type MutationCtx,
+} from "./_generated/server";
 import {
   getCurrentUser,
   requireUser,
@@ -7,6 +12,7 @@ import {
   requireIdentityMatch,
 } from "./authz";
 import { convexServerEnv } from "./env";
+import { deleteUserCascadeData } from "./cascadeCleanup";
 
 // ── Sync a user row from Clerk (called by the client after sign-in).
 //    Identity must match the clerkUserId arg.
@@ -42,7 +48,7 @@ export const syncUserFromClerkWebhook = internalMutation({
 
 // ── Shared logic for syncing a user record from Clerk data.
 async function syncUserRecord(
-  ctx: { db: any },
+  ctx: Pick<MutationCtx, "db">,
   args: {
     clerkUserId: string;
     email: string;
@@ -53,9 +59,7 @@ async function syncUserRecord(
 ) {
   const existing = await ctx.db
     .query("user")
-    .withIndex("by_clerkUserId", (q: any) =>
-      q.eq("clerkUserId", args.clerkUserId),
-    )
+    .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", args.clerkUserId))
     .unique();
 
   if (existing) {
@@ -174,108 +178,10 @@ export const deleteUserAndRelatedDataByClerkId = internalMutation({
       return { success: true, deleted: false };
     }
 
-    // Delete all memories and their attached media/storage blobs.
-    const memories = await ctx.db
-      .query("memories")
-      .withIndex("by_user_day", (q) => q.eq("userId", user._id))
-      .collect();
-
-    for (const memory of memories) {
-      const media = await ctx.db
-        .query("memoryMedia")
-        .withIndex("by_memory", (q) => q.eq("memoryId", memory._id))
-        .collect();
-
-      for (const m of media) {
-        try {
-          await ctx.storage.delete(m.storageId as any);
-        } catch {
-          // Storage blob may already be gone — continue cleanup.
-        }
-        await ctx.db.delete(m._id);
-      }
-
-      await ctx.db.delete(memory._id);
-    }
-
-    // Delete days.
-    const days = await ctx.db
-      .query("days")
-      .withIndex("by_user_day", (q) => q.eq("userId", user._id))
-      .collect();
-    for (const day of days) {
-      await ctx.db.delete(day._id);
-    }
-
-    // Delete summaries.
-    const summaries = await ctx.db
-      .query("daySummaries")
-      .withIndex("by_user_day", (q) => q.eq("userId", user._id))
-      .collect();
-    for (const summary of summaries) {
-      await ctx.db.delete(summary._id);
-    }
-
-    // Delete integrations.
-    const integrations = await ctx.db
-      .query("integrations")
-      .withIndex("by_user_provider", (q) => q.eq("userId", user._id))
-      .collect();
-    for (const integration of integrations) {
-      await ctx.db.delete(integration._id);
-    }
-
-    // Delete preferences keyed by Clerk user id.
-    const preferences = await ctx.db
-      .query("userPreferences")
-      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", user.clerkUserId))
-      .collect();
-    for (const preference of preferences) {
-      await ctx.db.delete(preference._id);
-    }
-
-    // Delete audit logs where this user acted.
-    const auditLogs = await ctx.db
-      .query("auditLogs")
-      .withIndex("by_actor", (q) => q.eq("actorUserId", user._id))
-      .collect();
-    for (const log of auditLogs) {
-      await ctx.db.delete(log._id);
-    }
-
-    // Delete summary quota counters.
-    const quotas = await ctx.db
-      .query("summaryGenerationQuotas")
-      .withIndex("by_user_day", (q) => q.eq("userId", user._id))
-      .collect();
-    for (const quota of quotas) {
-      await ctx.db.delete(quota._id);
-    }
-
-    // Delete normalized integration sync data.
-    const integrationDailyData = await ctx.db
-      .query("integrationDailyData")
-      .withIndex("by_user_day", (q) => q.eq("userId", user._id))
-      .collect();
-    for (const row of integrationDailyData) {
-      await ctx.db.delete(row._id);
-    }
-
-    const integrationSecrets = await ctx.db
-      .query("integrationSecrets")
-      .withIndex("by_user_provider", (q) => q.eq("userId", user._id))
-      .collect();
-    for (const secret of integrationSecrets) {
-      await ctx.db.delete(secret._id);
-    }
-
-    const integrationSyncRuns = await ctx.db
-      .query("integrationSyncRuns")
-      .withIndex("by_user_provider", (q) => q.eq("userId", user._id))
-      .collect();
-    for (const run of integrationSyncRuns) {
-      await ctx.db.delete(run._id);
-    }
+    await deleteUserCascadeData(ctx, {
+      userId: user._id,
+      clerkUserId: user.clerkUserId,
+    });
 
     await ctx.db.delete(user._id);
     return { success: true, deleted: true };

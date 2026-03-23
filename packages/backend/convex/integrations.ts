@@ -218,7 +218,7 @@ async function deleteIntegrationSecretByRef(
 }
 
 async function upsertIntegrationDailyDataDoc(
-  db: any,
+  db: unknown,
   args: {
     userId: Id<"user">;
     provider: string;
@@ -233,9 +233,64 @@ async function upsertIntegrationDailyDataDoc(
     signals?: string[];
   },
 ) {
-  const existing = await db
+  const typedDb = db as {
+    query: (table: "integrationDailyData") => {
+      withIndex: (
+        indexName: "by_user_provider_day",
+        apply: (q: {
+          eq: (
+            field: string,
+            value: unknown,
+          ) => {
+            eq: (
+              field: string,
+              value: unknown,
+            ) => {
+              eq: (field: string, value: unknown) => unknown;
+            };
+          };
+        }) => unknown,
+      ) => {
+        unique: () => Promise<{ _id: Id<"integrationDailyData"> } | null>;
+      };
+    };
+    patch: (
+      id: Id<"integrationDailyData">,
+      value: {
+        metrics?: {
+          steps?: number;
+          sleepMinutes?: number;
+          screenTimeMinutes?: number;
+          spendingTotal?: number;
+        };
+        summary?: string;
+        signals?: string[];
+        syncedAt: number;
+      },
+    ) => Promise<void>;
+    get: (id: Id<"integrationDailyData">) => Promise<unknown>;
+    insert: (
+      table: "integrationDailyData",
+      value: {
+        userId: Id<"user">;
+        provider: string;
+        dayKey: string;
+        metrics?: {
+          steps?: number;
+          sleepMinutes?: number;
+          screenTimeMinutes?: number;
+          spendingTotal?: number;
+        };
+        summary?: string;
+        signals?: string[];
+        syncedAt: number;
+      },
+    ) => Promise<Id<"integrationDailyData">>;
+  };
+
+  const existing = await typedDb
     .query("integrationDailyData")
-    .withIndex("by_user_provider_day", (q: any) =>
+    .withIndex("by_user_provider_day", (q) =>
       q
         .eq("userId", args.userId)
         .eq("provider", args.provider)
@@ -251,18 +306,18 @@ async function upsertIntegrationDailyDataDoc(
   };
 
   if (existing) {
-    await db.patch(existing._id, payload);
-    return await db.get(existing._id);
+    await typedDb.patch(existing._id, payload);
+    return await typedDb.get(existing._id);
   }
 
-  const id = await db.insert("integrationDailyData", {
+  const id = await typedDb.insert("integrationDailyData", {
     userId: args.userId,
     provider: args.provider,
     dayKey: args.dayKey,
     ...payload,
   });
 
-  return await db.get(id);
+  return await typedDb.get(id);
 }
 
 async function fetchJson<T>(

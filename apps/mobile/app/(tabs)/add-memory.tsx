@@ -16,6 +16,7 @@ import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "@repo/backend/convex";
+import type { GenericId } from "convex/values";
 import {
   Colors,
   Spacing,
@@ -40,16 +41,16 @@ type SelectedImage = {
   error: boolean;
 };
 
-type MemoryId = string;
+type MemoryId = GenericId<"memories">;
 
 export default function AddMemoryScreen() {
   const router = useRouter();
   const { isAuthenticated } = useConvexAuth();
   const createMemory = useMutation(api.memories.createMemory);
   const createUploadUrl = useMutation(
-    (api as any).memories.generateMemoryMediaUploadUrl,
+    api.memories.generateMemoryMediaUploadUrl,
   );
-  const addMemoryMedia = useMutation((api as any).memories.addMemoryMedia);
+  const addMemoryMedia = useMutation(api.memories.addMemoryMedia);
   const preferences = useQuery(
     api.userPreferences.getMyUserPreferences,
     isAuthenticated ? {} : "skip",
@@ -193,9 +194,13 @@ export default function AddMemoryScreen() {
       Alert.alert("Memory Saved", "Your memory has been captured!", [
         { text: "OK", onPress: () => router.replace("/(tabs)") },
       ]);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Failed to create memory:", err);
-      setError(err?.message ?? "Something went wrong. Please try again.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong. Please try again.",
+      );
     } finally {
       setIsSubmitting(false);
     }

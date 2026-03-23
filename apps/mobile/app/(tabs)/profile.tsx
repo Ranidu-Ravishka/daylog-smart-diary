@@ -29,6 +29,10 @@ const c = Colors.light;
 const memoryMoodOptions = ["happy", "peaceful", "excited", "loved", "sad"];
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
+type IntegrationDoc = {
+  provider: string;
+  status: "connected" | "disconnected" | "error";
+};
 
 /* ── Skeleton ──────────────────────────────────────────── */
 function ProfileSkeleton() {
@@ -332,17 +336,19 @@ const SettingsScreen = () => {
     google_fit: "Google Fit",
   };
 
-  const integrationItems = (integrations ?? []).map((integration: any) => ({
-    title: integrationNames[integration.provider] ?? integration.provider,
-    subtitle:
-      integration.status === "connected"
-        ? "Connected"
-        : integration.status === "error"
-          ? "Error"
-          : "Disconnected",
-    icon: integrationIcons[integration.provider] ?? ("link" as IoniconName),
-    connected: integration.status === "connected",
-  }));
+  const integrationItems = ((integrations ?? []) as IntegrationDoc[]).map(
+    (integration: IntegrationDoc) => ({
+      title: integrationNames[integration.provider] ?? integration.provider,
+      subtitle:
+        integration.status === "connected"
+          ? "Connected"
+          : integration.status === "error"
+            ? "Error"
+            : "Disconnected",
+      icon: integrationIcons[integration.provider] ?? ("link" as IoniconName),
+      connected: integration.status === "connected",
+    }),
+  );
 
   /* ── Toggle row helper ───────────────── */
   const ToggleRow = ({
