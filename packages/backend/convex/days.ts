@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { requireUser, requireOwnership } from "./authz";
 import { validateDayKey, validateRating, clampLimit } from "./validators";
+import { deleteDayCascadeData } from "./cascadeCleanup";
 
 // ── Get or create a day record ──────────────────────────────
 export const upsertDay = mutation({
@@ -140,39 +141,10 @@ export const deleteDay = mutation({
 
     requireOwnership(user, day.userId);
 
-    // Cascade: delete summaries for this day
-    const summaries = await ctx.db
-      .query("daySummaries")
-      .withIndex("by_user_day", (q) =>
-        q.eq("userId", day.userId).eq("dayKey", day.dayKey),
-      )
-      .collect();
-    for (const summary of summaries) {
-      await ctx.db.delete(summary._id);
-    }
-
-    // Cascade: delete memories for this day (and their media)
-    const memories = await ctx.db
-      .query("memories")
-      .withIndex("by_user_day", (q) =>
-        q.eq("userId", day.userId).eq("dayKey", day.dayKey),
-      )
-      .collect();
-    for (const memory of memories) {
-      const media = await ctx.db
-        .query("memoryMedia")
-        .withIndex("by_memory", (q) => q.eq("memoryId", memory._id))
-        .collect();
-      for (const m of media) {
-        try {
-          await ctx.storage.delete(m.storageId as any);
-        } catch {
-          // Storage blob may already be gone — continue cleanup
-        }
-        await ctx.db.delete(m._id);
-      }
-      await ctx.db.delete(memory._id);
-    }
+    await deleteDayCascadeData(ctx, {
+      userId: day.userId,
+      dayKey: day.dayKey,
+    });
 
     await ctx.db.delete(args.dayId);
     return { success: true };

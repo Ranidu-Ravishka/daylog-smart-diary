@@ -10,13 +10,13 @@
 
 import type * as admin from "../admin.js";
 import type * as authz from "../authz.js";
+import type * as cascadeCleanup from "../cascadeCleanup.js";
 import type * as content from "../content.js";
 import type * as days from "../days.js";
 import type * as env from "../env.js";
 import type * as http from "../http.js";
 import type * as integrations from "../integrations.js";
 import type * as memories from "../memories.js";
-import type * as myFunctions from "../myFunctions.js";
 import type * as summaries from "../summaries.js";
 import type * as summaryGeneration from "../summaryGeneration.js";
 import type * as userPreferences from "../userPreferences.js";
@@ -33,13 +33,13 @@ import type {
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
   authz: typeof authz;
+  cascadeCleanup: typeof cascadeCleanup;
   content: typeof content;
   days: typeof days;
   env: typeof env;
   http: typeof http;
   integrations: typeof integrations;
   memories: typeof memories;
-  myFunctions: typeof myFunctions;
   summaries: typeof summaries;
   summaryGeneration: typeof summaryGeneration;
   userPreferences: typeof userPreferences;

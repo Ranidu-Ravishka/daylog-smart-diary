@@ -159,7 +159,9 @@ pnpm dev:mobile
 packages/
   backend/              # Shared Convex backend
     convex/
-      myFunctions.ts    # Your Convex functions
+      memories.ts       # Memory CRUD functions
+      days.ts           # Daily metadata functions
+      summaryGeneration.ts  # AI summary actions
       schema.ts         # Database schema
       _generated/       # Auto-generated types and API
         api.d.ts
@@ -194,29 +196,28 @@ import { useQuery, useMutation, useAction } from "convex/react";
 ### Query Data
 
 ```typescript
-const data = useQuery(api.myFunctions.myQuery, {
-  first: 42,
-  second: "hello",
+const memories = useQuery(api.memories.listRecentMemories, {
+  limit: 10,
 });
 ```
 
 ### Mutate Data
 
 ```typescript
-const myMutation = useMutation(api.myFunctions.myMutation);
+const updateDayRating = useMutation(api.days.updateDayRating);
 
 const handleClick = () => {
-  myMutation({ first: 1, second: "test" });
+  updateDayRating({ dayKey: "2026-03-23", rating: 4 });
 };
 ```
 
 ### Run Actions
 
 ```typescript
-const myAction = useAction(api.myFunctions.myAction);
+const generateSummary = useAction(api.summaryGeneration.generateSummaryForDay);
 
 const handleAction = () => {
-  myAction({ first: 1, second: "test" });
+  generateSummary({ dayKey: "2026-03-23" });
 };
 ```
 

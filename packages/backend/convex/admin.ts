@@ -5,6 +5,11 @@ import { requireAdmin } from "./authz";
 import { validateDayKey, validateRating } from "./validators";
 import { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
+import {
+  deleteDayCascadeData,
+  deleteMemoryMediaByMemoryId,
+  deleteUserCascadeData,
+} from "./cascadeCleanup";
 
 const OPAQUE_TOKEN_REF_PREFIX = "tokref_";
 
@@ -155,107 +160,10 @@ export const adminDeleteUser = mutation({
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("User not found");
 
-    // Cascade: delete all memories and their media
-    const memories = await ctx.db
-      .query("memories")
-      .withIndex("by_user_day", (q) => q.eq("userId", args.userId))
-      .collect();
-    for (const memory of memories) {
-      const media = await ctx.db
-        .query("memoryMedia")
-        .withIndex("by_memory", (q) => q.eq("memoryId", memory._id))
-        .collect();
-      for (const m of media) {
-        try {
-          await ctx.storage.delete(m.storageId as any);
-        } catch {
-          // Storage blob may already be gone — continue cleanup
-        }
-        await ctx.db.delete(m._id);
-      }
-      await ctx.db.delete(memory._id);
-    }
-
-    // Cascade: delete all days
-    const days = await ctx.db
-      .query("days")
-      .withIndex("by_user_day", (q) => q.eq("userId", args.userId))
-      .collect();
-    for (const day of days) {
-      await ctx.db.delete(day._id);
-    }
-
-    // Cascade: delete all day summaries
-    const summaries = await ctx.db
-      .query("daySummaries")
-      .withIndex("by_user_day", (q) => q.eq("userId", args.userId))
-      .collect();
-    for (const summary of summaries) {
-      await ctx.db.delete(summary._id);
-    }
-
-    // Cascade: delete all integrations
-    const integrations = await ctx.db
-      .query("integrations")
-      .withIndex("by_user_provider", (q) => q.eq("userId", args.userId))
-      .collect();
-    for (const integration of integrations) {
-      await ctx.db.delete(integration._id);
-    }
-
-    // Cascade: delete user preferences (keyed by clerkUserId)
-    const prefs = await ctx.db
-      .query("userPreferences")
-      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", user.clerkUserId))
-      .collect();
-    for (const pref of prefs) {
-      await ctx.db.delete(pref._id);
-    }
-
-    // Cascade: delete audit logs by this user
-    const auditLogs = await ctx.db
-      .query("auditLogs")
-      .withIndex("by_actor", (q) => q.eq("actorUserId", args.userId))
-      .collect();
-    for (const log of auditLogs) {
-      await ctx.db.delete(log._id);
-    }
-
-    // Cascade: delete summary quota counters for this user
-    const quotas = await ctx.db
-      .query("summaryGenerationQuotas")
-      .withIndex("by_user_day", (q) => q.eq("userId", args.userId))
-      .collect();
-    for (const quota of quotas) {
-      await ctx.db.delete(quota._id);
-    }
-
-    // Cascade: delete normalized integration sync data for this user
-    const integrationDailyData = await ctx.db
-      .query("integrationDailyData")
-      .withIndex("by_user_day", (q) => q.eq("userId", args.userId))
-      .collect();
-    for (const row of integrationDailyData) {
-      await ctx.db.delete(row._id);
-    }
-
-    // Cascade: delete integration secrets for this user
-    const integrationSecrets = await ctx.db
-      .query("integrationSecrets")
-      .withIndex("by_user_provider", (q) => q.eq("userId", args.userId))
-      .collect();
-    for (const secret of integrationSecrets) {
-      await ctx.db.delete(secret._id);
-    }
-
-    // Cascade: delete integration sync runs for this user
-    const integrationSyncRuns = await ctx.db
-      .query("integrationSyncRuns")
-      .withIndex("by_user_provider", (q) => q.eq("userId", args.userId))
-      .collect();
-    for (const run of integrationSyncRuns) {
-      await ctx.db.delete(run._id);
-    }
+    await deleteUserCascadeData(ctx, {
+      userId: args.userId,
+      clerkUserId: user.clerkUserId,
+    });
 
     await ctx.db.delete(args.userId);
     await logAdminAction(ctx, admin._id, "delete_user", user.email);
@@ -537,19 +445,7 @@ export const adminDeleteMemory = mutation({
     const memory = await ctx.db.get(args.memoryId);
     if (!memory) throw new Error("Memory not found");
 
-    // Cascade delete media (DB rows + storage blobs)
-    const media = await ctx.db
-      .query("memoryMedia")
-      .withIndex("by_memory", (q) => q.eq("memoryId", args.memoryId))
-      .collect();
-    for (const m of media) {
-      try {
-        await ctx.storage.delete(m.storageId as any);
-      } catch {
-        // Storage blob may already be gone — continue cleanup
-      }
-      await ctx.db.delete(m._id);
-    }
+    await deleteMemoryMediaByMemoryId(ctx, args.memoryId);
 
     await ctx.db.delete(args.memoryId);
     await logAdminAction(ctx, admin._id, "delete_memory", memory.title);
@@ -682,39 +578,10 @@ export const adminDeleteDay = mutation({
     const day = await ctx.db.get(args.dayId);
     if (!day) throw new Error("Day not found");
 
-    // Cascade: delete summaries for this day
-    const summaries = await ctx.db
-      .query("daySummaries")
-      .withIndex("by_user_day", (q) =>
-        q.eq("userId", day.userId).eq("dayKey", day.dayKey),
-      )
-      .collect();
-    for (const summary of summaries) {
-      await ctx.db.delete(summary._id);
-    }
-
-    // Cascade: delete memories for this day (and their media)
-    const memories = await ctx.db
-      .query("memories")
-      .withIndex("by_user_day", (q) =>
-        q.eq("userId", day.userId).eq("dayKey", day.dayKey),
-      )
-      .collect();
-    for (const memory of memories) {
-      const media = await ctx.db
-        .query("memoryMedia")
-        .withIndex("by_memory", (q) => q.eq("memoryId", memory._id))
-        .collect();
-      for (const m of media) {
-        try {
-          await ctx.storage.delete(m.storageId as any);
-        } catch {
-          // Storage blob may already be gone — continue cleanup
-        }
-        await ctx.db.delete(m._id);
-      }
-      await ctx.db.delete(memory._id);
-    }
+    await deleteDayCascadeData(ctx, {
+      userId: day.userId,
+      dayKey: day.dayKey,
+    });
 
     await ctx.db.delete(args.dayId);
     await logAdminAction(ctx, admin._id, "delete_day", day.dayKey);

@@ -14,6 +14,7 @@ import { useRouter } from "expo-router";
 import { useUser } from "@clerk/clerk-expo";
 import { useQuery, useConvexAuth } from "convex/react";
 import { api } from "@repo/backend/convex";
+import type { GenericId } from "convex/values";
 import { MOOD_EMOJI } from "@repo/ui/lib/constants";
 import {
   Colors,
@@ -95,9 +96,11 @@ const HomeScreen = () => {
     api.summaries.getSummaryByDay,
     isAuthenticated ? { dayKey: todayKey } : "skip",
   );
-  const memoryIds = (recentMemories ?? []).map((memory) => memory._id);
+  const memoryIds = (recentMemories ?? []).map(
+    (memory: { _id: GenericId<"memories"> }) => memory._id,
+  );
   const memoryThumbnails = useQuery(
-    (api as any).memories.listMemoryMediaThumbnailsForMemories,
+    api.memories.listMemoryMediaThumbnailsForMemories,
     isAuthenticated ? { memoryIds } : "skip",
   ) as { memoryId: string; thumbnailUrl: string | null }[] | undefined;
 
@@ -119,7 +122,7 @@ const HomeScreen = () => {
     );
 
     const result = new Map<string, string | null>();
-    for (const id of memoryIds.map((item) => String(item))) {
+    for (const id of memoryIds.map((item: string) => String(item))) {
       if (fromQuery.has(id)) {
         result.set(id, fromQuery.get(id) ?? null);
       } else if (thumbnailCacheRef.current.has(id)) {
@@ -136,7 +139,9 @@ const HomeScreen = () => {
   if (isLoading) return <HomeScreenSkeleton />;
 
   const memories = recentMemories ?? [];
-  const todayMemories = memories.filter((m) => m.dayKey === todayKey);
+  const todayMemories = memories.filter(
+    (m: { dayKey: string }) => m.dayKey === todayKey,
+  );
   const userName = user?.firstName ?? "there";
 
   const onRefresh = () => {
@@ -204,7 +209,7 @@ const HomeScreen = () => {
                 <Text style={styles.summaryText}>{todaySummary.story}</Text>
                 {todaySummary.highlights.length > 0 && (
                   <View style={styles.highlightsWrap}>
-                    {todaySummary.highlights.map((h, i) => (
+                    {todaySummary.highlights.map((h: string, i: number) => (
                       <View key={i} style={styles.highlightChip}>
                         <Text style={styles.highlightText}>{h}</Text>
                       </View>
@@ -251,7 +256,15 @@ const HomeScreen = () => {
               <TouchableOpacity
                 key={i}
                 style={styles.actionItem}
-                onPress={() => router.push(a.route as any)}
+                onPress={() =>
+                  router.push(
+                    a.route as
+                      | "/add-memory"
+                      | "/memory"
+                      | "/insights"
+                      | "/profile",
+                  )
+                }
                 activeOpacity={0.7}
               >
                 <View style={styles.actionIcon}>
@@ -282,43 +295,54 @@ const HomeScreen = () => {
             </AppCard>
           ) : (
             <AppCard padded={false}>
-              {memories.map((mem, idx) => (
-                <View
-                  key={mem._id}
-                  style={[
-                    styles.memoryRow,
-                    idx < memories.length - 1 && styles.memoryBorder,
-                  ]}
-                >
-                  <View style={styles.moodDot}>
-                    <Text style={{ fontSize: 16 }}>
-                      {MOOD_EMOJI[mem.mood ?? ""] ?? "📝"}
-                    </Text>
+              {memories.map(
+                (
+                  mem: {
+                    _id: string;
+                    mood?: string;
+                    title: string;
+                    happenedAt: number;
+                    dayKey: string;
+                  },
+                  idx: number,
+                ) => (
+                  <View
+                    key={mem._id}
+                    style={[
+                      styles.memoryRow,
+                      idx < memories.length - 1 && styles.memoryBorder,
+                    ]}
+                  >
+                    <View style={styles.moodDot}>
+                      <Text style={{ fontSize: 16 }}>
+                        {MOOD_EMOJI[mem.mood ?? ""] ?? "📝"}
+                      </Text>
+                    </View>
+                    <View style={styles.memoryInfo}>
+                      <Text style={styles.memoryTitle} numberOfLines={1}>
+                        {mem.title}
+                      </Text>
+                      {mem.mood && (
+                        <Text style={styles.memoryMood}>{mem.mood}</Text>
+                      )}
+                    </View>
+                    {thumbnailByMemoryId.get(String(mem._id)) ? (
+                      <Image
+                        source={{
+                          uri: thumbnailByMemoryId.get(String(mem._id))!,
+                        }}
+                        style={styles.memoryThumb}
+                      />
+                    ) : null}
+                    <View style={styles.memoryTime}>
+                      <Text style={styles.timeText}>
+                        {formatMemoryTime(mem.happenedAt)}
+                      </Text>
+                      <Text style={styles.dayText}>{mem.dayKey}</Text>
+                    </View>
                   </View>
-                  <View style={styles.memoryInfo}>
-                    <Text style={styles.memoryTitle} numberOfLines={1}>
-                      {mem.title}
-                    </Text>
-                    {mem.mood && (
-                      <Text style={styles.memoryMood}>{mem.mood}</Text>
-                    )}
-                  </View>
-                  {thumbnailByMemoryId.get(String(mem._id)) ? (
-                    <Image
-                      source={{
-                        uri: thumbnailByMemoryId.get(String(mem._id))!,
-                      }}
-                      style={styles.memoryThumb}
-                    />
-                  ) : null}
-                  <View style={styles.memoryTime}>
-                    <Text style={styles.timeText}>
-                      {formatMemoryTime(mem.happenedAt)}
-                    </Text>
-                    <Text style={styles.dayText}>{mem.dayKey}</Text>
-                  </View>
-                </View>
-              ))}
+                ),
+              )}
             </AppCard>
           )}
         </View>
