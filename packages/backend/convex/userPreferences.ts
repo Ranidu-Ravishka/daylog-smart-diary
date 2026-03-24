@@ -19,9 +19,38 @@ const defaultPreferenceSettings = {
   dailySummaryEnabled: true,
   weeklyInsightsEnabled: true,
   quietHoursEnabled: false,
+  quietHoursStart: "22:00",
+  quietHoursEnd: "07:00",
   autoSyncIntegrations: true,
   defaultMemoryMood: "happy",
 };
+
+const canonicalFocusAreaIds = new Set([0, 1, 2, 3, 4]);
+
+function normalizeFocusAreas(focusAreas: number[]): number[] {
+  const normalized: number[] = [];
+
+  for (const focusAreaId of focusAreas) {
+    const mappedFocusAreaId = focusAreaId === 5 ? 4 : focusAreaId;
+    if (!canonicalFocusAreaIds.has(mappedFocusAreaId)) continue;
+    if (!normalized.includes(mappedFocusAreaId)) {
+      normalized.push(mappedFocusAreaId);
+    }
+  }
+
+  return normalized;
+}
+
+function normalizePreferenceDoc<T extends { focusAreas: number[] } | null>(
+  preferenceDoc: T,
+): T {
+  if (!preferenceDoc) return preferenceDoc;
+
+  return {
+    ...preferenceDoc,
+    focusAreas: normalizeFocusAreas(preferenceDoc.focusAreas),
+  };
+}
 
 // ── Sync preferences using an explicit clerkUserId arg.
 //    Identity must match the arg (prevents horizontal escalation).
@@ -38,11 +67,14 @@ export const syncUserPreferencesFromClerk = mutation({
     dailySummaryEnabled: v.optional(v.boolean()),
     weeklyInsightsEnabled: v.optional(v.boolean()),
     quietHoursEnabled: v.optional(v.boolean()),
+    quietHoursStart: v.optional(v.string()),
+    quietHoursEnd: v.optional(v.string()),
     autoSyncIntegrations: v.optional(v.boolean()),
     defaultMemoryMood: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireIdentityMatch(ctx, args.clerkUserId);
+    const normalizedFocusAreas = normalizeFocusAreas(args.focusAreas);
 
     const existing = await ctx.db
       .query("userPreferences")
@@ -53,7 +85,7 @@ export const syncUserPreferencesFromClerk = mutation({
 
     if (existing) {
       await ctx.db.patch(existing._id, {
-        focusAreas: args.focusAreas,
+        focusAreas: normalizedFocusAreas,
         reminderType: args.reminderType,
         dailyTime: args.dailyTime,
         weeklyDay: args.weeklyDay,
@@ -75,6 +107,14 @@ export const syncUserPreferencesFromClerk = mutation({
           args.quietHoursEnabled ??
           existing.quietHoursEnabled ??
           defaultPreferenceSettings.quietHoursEnabled,
+        quietHoursStart:
+          args.quietHoursStart ??
+          existing.quietHoursStart ??
+          defaultPreferenceSettings.quietHoursStart,
+        quietHoursEnd:
+          args.quietHoursEnd ??
+          existing.quietHoursEnd ??
+          defaultPreferenceSettings.quietHoursEnd,
         autoSyncIntegrations:
           args.autoSyncIntegrations ??
           existing.autoSyncIntegrations ??
@@ -91,7 +131,7 @@ export const syncUserPreferencesFromClerk = mutation({
 
     const id = await ctx.db.insert("userPreferences", {
       clerkUserId: args.clerkUserId,
-      focusAreas: args.focusAreas,
+      focusAreas: normalizedFocusAreas,
       reminderType: args.reminderType,
       dailyTime: args.dailyTime,
       weeklyDay: args.weeklyDay,
@@ -108,6 +148,10 @@ export const syncUserPreferencesFromClerk = mutation({
         defaultPreferenceSettings.weeklyInsightsEnabled,
       quietHoursEnabled:
         args.quietHoursEnabled ?? defaultPreferenceSettings.quietHoursEnabled,
+      quietHoursStart:
+        args.quietHoursStart ?? defaultPreferenceSettings.quietHoursStart,
+      quietHoursEnd:
+        args.quietHoursEnd ?? defaultPreferenceSettings.quietHoursEnd,
       autoSyncIntegrations:
         args.autoSyncIntegrations ??
         defaultPreferenceSettings.autoSyncIntegrations,
@@ -130,10 +174,12 @@ export const getUserPreferencesByClerkId = query({
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
 
-    return await ctx.db
+    const preferenceDoc = await ctx.db
       .query("userPreferences")
       .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", args.clerkUserId))
       .unique();
+
+    return normalizePreferenceDoc(preferenceDoc);
   },
 });
 
@@ -142,7 +188,10 @@ export const listUserPreferences = query({
   args: {},
   handler: async (ctx) => {
     await requireAdmin(ctx);
-    return await ctx.db.query("userPreferences").collect();
+    const preferenceDocs = await ctx.db.query("userPreferences").collect();
+    return preferenceDocs.map((preferenceDoc) =>
+      normalizePreferenceDoc(preferenceDoc),
+    );
   },
 });
 
@@ -154,10 +203,12 @@ export const getMyUserPreferences = query({
     const user = await getCurrentUser(ctx);
     if (!user) return null;
 
-    return await ctx.db
+    const preferenceDoc = await ctx.db
       .query("userPreferences")
       .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", user.clerkUserId))
       .unique();
+
+    return normalizePreferenceDoc(preferenceDoc);
   },
 });
 
@@ -174,11 +225,14 @@ export const syncMyUserPreferences = mutation({
     dailySummaryEnabled: v.optional(v.boolean()),
     weeklyInsightsEnabled: v.optional(v.boolean()),
     quietHoursEnabled: v.optional(v.boolean()),
+    quietHoursStart: v.optional(v.string()),
+    quietHoursEnd: v.optional(v.string()),
     autoSyncIntegrations: v.optional(v.boolean()),
     defaultMemoryMood: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
+    const normalizedFocusAreas = normalizeFocusAreas(args.focusAreas);
 
     const existing = await ctx.db
       .query("userPreferences")
@@ -189,7 +243,7 @@ export const syncMyUserPreferences = mutation({
 
     if (existing) {
       await ctx.db.patch(existing._id, {
-        focusAreas: args.focusAreas,
+        focusAreas: normalizedFocusAreas,
         reminderType: args.reminderType,
         dailyTime: args.dailyTime,
         weeklyDay: args.weeklyDay,
@@ -211,6 +265,14 @@ export const syncMyUserPreferences = mutation({
           args.quietHoursEnabled ??
           existing.quietHoursEnabled ??
           defaultPreferenceSettings.quietHoursEnabled,
+        quietHoursStart:
+          args.quietHoursStart ??
+          existing.quietHoursStart ??
+          defaultPreferenceSettings.quietHoursStart,
+        quietHoursEnd:
+          args.quietHoursEnd ??
+          existing.quietHoursEnd ??
+          defaultPreferenceSettings.quietHoursEnd,
         autoSyncIntegrations:
           args.autoSyncIntegrations ??
           existing.autoSyncIntegrations ??
@@ -227,7 +289,7 @@ export const syncMyUserPreferences = mutation({
 
     const id = await ctx.db.insert("userPreferences", {
       clerkUserId: user.clerkUserId,
-      focusAreas: args.focusAreas,
+      focusAreas: normalizedFocusAreas,
       reminderType: args.reminderType,
       dailyTime: args.dailyTime,
       weeklyDay: args.weeklyDay,
@@ -244,6 +306,10 @@ export const syncMyUserPreferences = mutation({
         defaultPreferenceSettings.weeklyInsightsEnabled,
       quietHoursEnabled:
         args.quietHoursEnabled ?? defaultPreferenceSettings.quietHoursEnabled,
+      quietHoursStart:
+        args.quietHoursStart ?? defaultPreferenceSettings.quietHoursStart,
+      quietHoursEnd:
+        args.quietHoursEnd ?? defaultPreferenceSettings.quietHoursEnd,
       autoSyncIntegrations:
         args.autoSyncIntegrations ??
         defaultPreferenceSettings.autoSyncIntegrations,

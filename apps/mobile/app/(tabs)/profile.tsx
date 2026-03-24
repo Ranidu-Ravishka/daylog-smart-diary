@@ -7,13 +7,32 @@ import {
   TouchableOpacity,
   Switch,
   Alert,
+  Modal,
+  Platform,
+  TouchableWithoutFeedback,
 } from "react-native";
+import * as WebBrowser from "expo-web-browser";
+import DateTimePicker, {
+  type DateTimePickerEvent,
+} from "@react-native-community/datetimepicker";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useUser, useAuth } from "@clerk/clerk-expo";
-import { useRouter } from "expo-router";
-import { useMutation, useQuery, useConvexAuth } from "convex/react";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useAction, useMutation, useQuery, useConvexAuth } from "convex/react";
 import { api } from "@repo/backend/convex";
+import {
+  INTEGRATION_PROVIDER_META,
+  MEMORY_MOOD_OPTIONS,
+  SETTINGS_DEFAULTS,
+} from "@repo/ui/lib/constants";
+import type { GenericId } from "convex/values";
+import {
+  ensureReminderPermissions,
+  getReminderRuntimeState,
+  syncReminderNotifications,
+  type ReminderRuntimeState,
+} from "@/lib/reminder-notifications";
 import {
   Colors,
   Spacing,
@@ -26,13 +45,83 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
 
 const c = Colors.light;
-const memoryMoodOptions = ["happy", "peaceful", "excited", "loved", "sad"];
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
 type IntegrationDoc = {
+  _id: GenericId<"integrations">;
   provider: string;
   status: "connected" | "disconnected" | "error";
+  lastSyncAt?: number;
+  lastError?: string;
 };
+
+type IntegrationSyncRunDoc = {
+  provider: string;
+  dayKey: string;
+  status: "in_progress" | "success" | "error";
+  updatedAt: number;
+  lastError?: string;
+};
+
+function getTodayDayKey(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function isOAuthProvider(provider: string): boolean {
+  return (
+    provider === "google_calendar" ||
+    provider === "google_fit" ||
+    provider === "spotify"
+  );
+}
+
+function format24hTo12h(time: string): string {
+  const [rawHour, rawMinute] = time.split(":").map(Number);
+  if (!Number.isFinite(rawHour) || !Number.isFinite(rawMinute)) return time;
+
+  const ampm = rawHour >= 12 ? "PM" : "AM";
+  const hour12 = rawHour % 12 || 12;
+  return `${hour12}:${String(rawMinute).padStart(2, "0")} ${ampm}`;
+}
+
+function parseTimeToDate(time: string): Date {
+  const [hourRaw, minuteRaw] = time.split(":").map(Number);
+  const date = new Date();
+
+  if (
+    Number.isFinite(hourRaw) &&
+    Number.isFinite(minuteRaw) &&
+    hourRaw >= 0 &&
+    hourRaw <= 23 &&
+    minuteRaw >= 0 &&
+    minuteRaw <= 59
+  ) {
+    date.setHours(hourRaw, minuteRaw, 0, 0);
+    return date;
+  }
+
+  date.setHours(22, 0, 0, 0);
+  return date;
+}
+
+function formatDateTo24h(value: Date): string {
+  return `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
+}
+
+function snapToQuarterHour(value: Date): Date {
+  const snapped = new Date(value);
+  const minutes = snapped.getMinutes();
+  const snappedMinutes = Math.round(minutes / 15) * 15;
+
+  if (snappedMinutes === 60) {
+    snapped.setHours(snapped.getHours() + 1, 0, 0, 0);
+    return snapped;
+  }
+
+  snapped.setMinutes(snappedMinutes, 0, 0);
+  return snapped;
+}
 
 /* ── Skeleton ──────────────────────────────────────────── */
 function ProfileSkeleton() {
@@ -55,20 +144,41 @@ function ProfileSkeleton() {
 /* ── Screen ────────────────────────────────────────────── */
 const SettingsScreen = () => {
   const router = useRouter();
+  const searchParams = useLocalSearchParams<{
+    integrationProvider?: string;
+    integrationStatus?: string;
+    integrationMessage?: string;
+  }>();
   const { user } = useUser();
   const { signOut } = useAuth();
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
+  const todayDayKey = getTodayDayKey();
 
+  const supportedProviders = useQuery(
+    api.integrations.listSupportedProviders,
+    isAuthenticated ? {} : "skip",
+  );
   const integrations = useQuery(
     api.integrations.listMyIntegrations,
     isAuthenticated ? {} : "skip",
-  );
+  ) as IntegrationDoc[] | undefined;
+  const syncRuns = useQuery(
+    api.integrations.listMyIntegrationSyncRunsForDay,
+    isAuthenticated ? { dayKey: todayDayKey } : "skip",
+  ) as IntegrationSyncRunDoc[] | undefined;
   const preferences = useQuery(
     api.userPreferences.getMyUserPreferences,
     isAuthenticated ? {} : "skip",
   );
+  const connectIntegration = useMutation(api.integrations.connectIntegration);
+  const disconnectIntegration = useMutation(
+    api.integrations.disconnectIntegration,
+  );
   const syncUserPreferences = useMutation(
     api.userPreferences.syncMyUserPreferences,
+  );
+  const syncMyIntegrationForDay = useAction(
+    api.integrations.syncMyIntegrationForDay,
   );
 
   const [darkMode, setDarkMode] = useState(false);
@@ -76,10 +186,57 @@ const SettingsScreen = () => {
   const [weeklyInsights, setWeeklyInsights] = useState(false);
   const [dailySummary, setDailySummary] = useState(false);
   const [quietHours, setQuietHours] = useState(false);
+  const [quietHoursStart, setQuietHoursStart] = useState<string>(
+    SETTINGS_DEFAULTS.quietHoursStart,
+  );
+  const [quietHoursEnd, setQuietHoursEnd] = useState<string>(
+    SETTINGS_DEFAULTS.quietHoursEnd,
+  );
+  const [showQuietHoursPicker, setShowQuietHoursPicker] = useState(false);
+  const [quietHoursPickerTarget, setQuietHoursPickerTarget] = useState<
+    "start" | "end" | null
+  >(null);
+  const [quietHoursPickerValue, setQuietHoursPickerValue] = useState<Date>(
+    parseTimeToDate(SETTINGS_DEFAULTS.quietHoursStart),
+  );
   const [autoSyncIntegrations, setAutoSyncIntegrations] = useState(true);
-  const [defaultMemoryMood, setDefaultMemoryMood] = useState("happy");
+  const [defaultMemoryMood, setDefaultMemoryMood] = useState<string>(
+    SETTINGS_DEFAULTS.defaultMemoryMood,
+  );
   const [isUpdatingReminderPreference, setIsUpdatingReminderPreference] =
     useState(false);
+  const [providerPendingAction, setProviderPendingAction] = useState<
+    Record<string, "connect" | "disconnect" | "sync" | undefined>
+  >({});
+  const [integrationFeedback, setIntegrationFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+  const [reminderRuntime, setReminderRuntime] = useState<
+    ReminderRuntimeState | undefined
+  >();
+
+  const syncReminderRuntimeFromPreferences = useCallback(
+    async (
+      nextPreferences: {
+        reminderType: "daily" | "weekly";
+        dailyTime: string;
+        weeklyDay: string;
+        formattedTime: string;
+        notificationsEnabled?: boolean;
+        dailySummaryEnabled?: boolean;
+        weeklyInsightsEnabled?: boolean;
+        quietHoursEnabled?: boolean;
+        quietHoursStart?: string;
+        quietHoursEnd?: string;
+      } | null,
+    ) => {
+      const runtime = await syncReminderNotifications(nextPreferences);
+      setReminderRuntime(runtime);
+      return runtime;
+    },
+    [],
+  );
 
   const savePreferencePatch = useCallback(
     async (
@@ -90,6 +247,8 @@ const SettingsScreen = () => {
         dailySummaryEnabled: boolean;
         weeklyInsightsEnabled: boolean;
         quietHoursEnabled: boolean;
+        quietHoursStart: string;
+        quietHoursEnd: string;
         autoSyncIntegrations: boolean;
         defaultMemoryMood: string;
       }>,
@@ -120,15 +279,39 @@ const SettingsScreen = () => {
           patch.weeklyInsightsEnabled ?? preferences.weeklyInsightsEnabled,
         quietHoursEnabled:
           patch.quietHoursEnabled ?? preferences.quietHoursEnabled,
+        quietHoursStart: patch.quietHoursStart ?? preferences.quietHoursStart,
+        quietHoursEnd: patch.quietHoursEnd ?? preferences.quietHoursEnd,
         autoSyncIntegrations:
           patch.autoSyncIntegrations ?? preferences.autoSyncIntegrations,
         defaultMemoryMood:
           patch.defaultMemoryMood ?? preferences.defaultMemoryMood,
       });
 
+      await syncReminderRuntimeFromPreferences({
+        reminderType: patch.reminderType ?? preferences.reminderType,
+        dailyTime: preferences.dailyTime,
+        weeklyDay: preferences.weeklyDay,
+        formattedTime: preferences.formattedTime,
+        notificationsEnabled:
+          patch.notificationsEnabled ?? preferences.notificationsEnabled,
+        dailySummaryEnabled:
+          patch.dailySummaryEnabled ?? preferences.dailySummaryEnabled,
+        weeklyInsightsEnabled:
+          patch.weeklyInsightsEnabled ?? preferences.weeklyInsightsEnabled,
+        quietHoursEnabled:
+          patch.quietHoursEnabled ?? preferences.quietHoursEnabled,
+        quietHoursStart: patch.quietHoursStart ?? preferences.quietHoursStart,
+        quietHoursEnd: patch.quietHoursEnd ?? preferences.quietHoursEnd,
+      });
+
       return true;
     },
-    [preferences, router, syncUserPreferences],
+    [
+      preferences,
+      router,
+      syncReminderRuntimeFromPreferences,
+      syncUserPreferences,
+    ],
   );
 
   useEffect(() => {
@@ -138,8 +321,10 @@ const SettingsScreen = () => {
       setDailySummary(false);
       setWeeklyInsights(false);
       setQuietHours(false);
-      setAutoSyncIntegrations(true);
-      setDefaultMemoryMood("happy");
+      setQuietHoursStart(SETTINGS_DEFAULTS.quietHoursStart);
+      setQuietHoursEnd(SETTINGS_DEFAULTS.quietHoursEnd);
+      setAutoSyncIntegrations(SETTINGS_DEFAULTS.autoSyncIntegrations);
+      setDefaultMemoryMood(SETTINGS_DEFAULTS.defaultMemoryMood);
       return;
     }
 
@@ -148,9 +333,61 @@ const SettingsScreen = () => {
     setDailySummary(preferences.reminderType === "daily");
     setWeeklyInsights(preferences.reminderType === "weekly");
     setQuietHours(preferences.quietHoursEnabled ?? false);
-    setAutoSyncIntegrations(preferences.autoSyncIntegrations ?? true);
-    setDefaultMemoryMood(preferences.defaultMemoryMood ?? "happy");
+    setQuietHoursStart(
+      preferences.quietHoursStart ?? SETTINGS_DEFAULTS.quietHoursStart,
+    );
+    setQuietHoursEnd(
+      preferences.quietHoursEnd ?? SETTINGS_DEFAULTS.quietHoursEnd,
+    );
+    setAutoSyncIntegrations(
+      preferences.autoSyncIntegrations ??
+        SETTINGS_DEFAULTS.autoSyncIntegrations,
+    );
+    setDefaultMemoryMood(
+      preferences.defaultMemoryMood ?? SETTINGS_DEFAULTS.defaultMemoryMood,
+    );
   }, [preferences]);
+
+  useEffect(() => {
+    if (!searchParams.integrationStatus || !searchParams.integrationMessage) {
+      return;
+    }
+
+    const providerKey = searchParams.integrationProvider;
+    const providerLabel = providerKey
+      ? (INTEGRATION_PROVIDER_META[
+          providerKey as keyof typeof INTEGRATION_PROVIDER_META
+        ]?.label ?? providerKey)
+      : "Integration";
+    const wasSuccess = searchParams.integrationStatus === "success";
+    const alertTitle = wasSuccess
+      ? `${providerLabel} connected`
+      : `${providerLabel} connection failed`;
+    const alertMessage = wasSuccess
+      ? `${searchParams.integrationMessage}\n\nYou can now tap Sync now in Integrations.`
+      : `${searchParams.integrationMessage}\n\nPlease try Connect again.`;
+
+    setIntegrationFeedback({
+      type: wasSuccess ? "success" : "error",
+      message: searchParams.integrationMessage,
+    });
+
+    Alert.alert(alertTitle, alertMessage);
+
+    router.replace("/(tabs)/profile");
+  }, [
+    router,
+    searchParams.integrationMessage,
+    searchParams.integrationProvider,
+    searchParams.integrationStatus,
+  ]);
+
+  useEffect(() => {
+    void (async () => {
+      const runtime = await getReminderRuntimeState();
+      setReminderRuntime(runtime);
+    })();
+  }, []);
 
   const updateReminderType = useCallback(
     async (nextReminderType: "daily" | "weekly") => {
@@ -218,6 +455,18 @@ const SettingsScreen = () => {
     const next = !allNotifications;
     setAllNotifications(next);
 
+    if (next) {
+      const permission = await ensureReminderPermissions();
+      if (permission !== "granted") {
+        setAllNotifications(previous);
+        Alert.alert(
+          "Notifications permission required",
+          "Enable notifications in device settings to receive reminders.",
+        );
+        return;
+      }
+    }
+
     try {
       await savePreferencePatch({ notificationsEnabled: next });
     } catch {
@@ -244,6 +493,87 @@ const SettingsScreen = () => {
       );
     }
   }, [quietHours, savePreferencePatch]);
+
+  const applyQuietHoursTime = useCallback(
+    async (target: "start" | "end", value: Date) => {
+      if (preferences === null) return;
+
+      const snapped = snapToQuarterHour(value);
+      const formatted = formatDateTo24h(snapped);
+
+      if (target === "start") {
+        const previous = quietHoursStart;
+        setQuietHoursStart(formatted);
+        try {
+          await savePreferencePatch({ quietHoursStart: formatted });
+        } catch {
+          setQuietHoursStart(previous);
+          Alert.alert(
+            "Update failed",
+            "Quiet hours start time could not be saved.",
+          );
+        }
+        return;
+      }
+
+      const previous = quietHoursEnd;
+      setQuietHoursEnd(formatted);
+      try {
+        await savePreferencePatch({ quietHoursEnd: formatted });
+      } catch {
+        setQuietHoursEnd(previous);
+        Alert.alert(
+          "Update failed",
+          "Quiet hours end time could not be saved.",
+        );
+      }
+    },
+    [preferences, quietHoursEnd, quietHoursStart, savePreferencePatch],
+  );
+
+  const openQuietHoursPicker = useCallback(
+    (target: "start" | "end") => {
+      if (!quietHours || !allNotifications || preferences === null) return;
+
+      const sourceTime = target === "start" ? quietHoursStart : quietHoursEnd;
+      setQuietHoursPickerTarget(target);
+      setQuietHoursPickerValue(parseTimeToDate(sourceTime));
+      setShowQuietHoursPicker(true);
+    },
+    [allNotifications, preferences, quietHours, quietHoursEnd, quietHoursStart],
+  );
+
+  const handleQuietHoursPickerChange = useCallback(
+    (event: DateTimePickerEvent, selectedDate?: Date) => {
+      if (Platform.OS === "android") {
+        if (event.type === "dismissed") {
+          setShowQuietHoursPicker(false);
+          return;
+        }
+
+        if (selectedDate && quietHoursPickerTarget) {
+          void applyQuietHoursTime(quietHoursPickerTarget, selectedDate);
+        }
+        setShowQuietHoursPicker(false);
+        return;
+      }
+
+      if (selectedDate) {
+        setQuietHoursPickerValue(snapToQuarterHour(selectedDate));
+      }
+    },
+    [applyQuietHoursTime, quietHoursPickerTarget],
+  );
+
+  const handleQuietHoursPickerDone = useCallback(() => {
+    if (!quietHoursPickerTarget) {
+      setShowQuietHoursPicker(false);
+      return;
+    }
+
+    void applyQuietHoursTime(quietHoursPickerTarget, quietHoursPickerValue);
+    setShowQuietHoursPicker(false);
+  }, [applyQuietHoursTime, quietHoursPickerTarget, quietHoursPickerValue]);
 
   const handleAutoSyncIntegrationsToggle = useCallback(async () => {
     const previous = autoSyncIntegrations;
@@ -287,10 +617,16 @@ const SettingsScreen = () => {
   }, [signOut]);
 
   const handleExportData = useCallback(() => {
-    Alert.alert(
-      "Export Data",
-      "Data export will be available in a future update.",
-    );
+    const webAppUrl =
+      process.env.EXPO_PUBLIC_WEB_APP_URL ?? "http://localhost:3000";
+    const exportUrl = `${webAppUrl.replace(/\/$/, "")}/dashboard/export`;
+
+    void WebBrowser.openBrowserAsync(exportUrl).catch(() => {
+      Alert.alert(
+        "Export unavailable",
+        "Could not open the export page right now. Please try again.",
+      );
+    });
   }, []);
 
   const handleDeleteAccount = useCallback(() => {
@@ -302,20 +638,176 @@ const SettingsScreen = () => {
         {
           text: "Delete",
           style: "destructive",
-          onPress: () =>
-            Alert.alert(
-              "Contact Support",
-              "Please contact support to delete your account.",
-            ),
+          onPress: () => {
+            void (async () => {
+              try {
+                if (!user) {
+                  Alert.alert(
+                    "Delete failed",
+                    "No signed-in user found. Please sign in again.",
+                  );
+                  return;
+                }
+
+                await user.delete();
+                await signOut();
+              } catch {
+                Alert.alert(
+                  "Delete failed",
+                  "We could not delete your account right now. Please try again.",
+                );
+              }
+            })();
+          },
         },
       ],
     );
+  }, [signOut, user]);
+
+  const handleOpenAboutLink = useCallback((path: string) => {
+    const webAppUrl =
+      process.env.EXPO_PUBLIC_WEB_APP_URL ?? "http://localhost:3000";
+    const targetUrl = `${webAppUrl.replace(/\/$/, "")}${path}`;
+
+    void WebBrowser.openBrowserAsync(targetUrl).catch(() => {
+      Alert.alert("Link unavailable", "Could not open this page right now.");
+    });
   }, []);
+
+  const setProviderAction = useCallback(
+    (
+      provider: string,
+      action: "connect" | "disconnect" | "sync" | undefined,
+    ) => {
+      setProviderPendingAction((prev) => ({ ...prev, [provider]: action }));
+    },
+    [],
+  );
+
+  const handleConnectIntegration = useCallback(
+    async (provider: string) => {
+      setProviderAction(provider, "connect");
+      setIntegrationFeedback(null);
+
+      try {
+        if (isOAuthProvider(provider)) {
+          const webAppUrl =
+            process.env.EXPO_PUBLIC_WEB_APP_URL ?? "http://localhost:3000";
+          const startUrl = `${webAppUrl}/api/integrations/oauth/${provider}/start?returnTo=${encodeURIComponent("/integrations/oauth/complete?mode=mobile")}`;
+
+          await WebBrowser.openBrowserAsync(startUrl);
+
+          const label =
+            INTEGRATION_PROVIDER_META[
+              provider as keyof typeof INTEGRATION_PROVIDER_META
+            ]?.label ?? provider;
+
+          setIntegrationFeedback({
+            type: "success",
+            message: `${label} OAuth flow opened in browser. Finish sign-in there, then return to app.`,
+          });
+          return;
+        }
+
+        await connectIntegration({ provider, scopes: [] });
+        const label =
+          INTEGRATION_PROVIDER_META[
+            provider as keyof typeof INTEGRATION_PROVIDER_META
+          ]?.label ?? provider;
+
+        setIntegrationFeedback({
+          type: "success",
+          message: `${label} connected successfully.`,
+        });
+      } catch (error) {
+        setIntegrationFeedback({
+          type: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : `Failed to connect ${provider}`,
+        });
+      } finally {
+        setProviderAction(provider, undefined);
+      }
+    },
+    [connectIntegration, setProviderAction],
+  );
+
+  const handleDisconnectIntegration = useCallback(
+    async (provider: string, integrationId: GenericId<"integrations">) => {
+      setProviderAction(provider, "disconnect");
+      setIntegrationFeedback(null);
+
+      try {
+        await disconnectIntegration({ integrationId });
+        const label =
+          INTEGRATION_PROVIDER_META[
+            provider as keyof typeof INTEGRATION_PROVIDER_META
+          ]?.label ?? provider;
+        setIntegrationFeedback({
+          type: "success",
+          message: `${label} disconnected.`,
+        });
+      } catch (error) {
+        setIntegrationFeedback({
+          type: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : `Failed to disconnect ${provider}`,
+        });
+      } finally {
+        setProviderAction(provider, undefined);
+      }
+    },
+    [disconnectIntegration, setProviderAction],
+  );
+
+  const handleSyncIntegration = useCallback(
+    async (provider: string) => {
+      setProviderAction(provider, "sync");
+      setIntegrationFeedback(null);
+
+      try {
+        const result = await syncMyIntegrationForDay({
+          provider,
+          dayKey: todayDayKey,
+        });
+
+        if (result?.idempotent) {
+          setIntegrationFeedback({
+            type: "success",
+            message:
+              result.skippedReason === "already_synced"
+                ? "Already synced for today."
+                : "Sync is already in progress.",
+          });
+        } else {
+          setIntegrationFeedback({
+            type: "success",
+            message: "Sync completed successfully.",
+          });
+        }
+      } catch (error) {
+        setIntegrationFeedback({
+          type: "error",
+          message: error instanceof Error ? error.message : "Sync failed.",
+        });
+      } finally {
+        setProviderAction(provider, undefined);
+      }
+    },
+    [setProviderAction, syncMyIntegrationForDay, todayDayKey],
+  );
 
   const isLoading =
     isAuthLoading ||
     (isAuthenticated &&
-      (integrations === undefined || preferences === undefined));
+      (integrations === undefined ||
+        preferences === undefined ||
+        supportedProviders === undefined ||
+        syncRuns === undefined));
 
   if (isLoading) return <ProfileSkeleton />;
 
@@ -336,19 +828,19 @@ const SettingsScreen = () => {
     google_fit: "Google Fit",
   };
 
-  const integrationItems = ((integrations ?? []) as IntegrationDoc[]).map(
-    (integration: IntegrationDoc) => ({
-      title: integrationNames[integration.provider] ?? integration.provider,
-      subtitle:
-        integration.status === "connected"
-          ? "Connected"
-          : integration.status === "error"
-            ? "Error"
-            : "Disconnected",
-      icon: integrationIcons[integration.provider] ?? ("link" as IoniconName),
-      connected: integration.status === "connected",
-    }),
+  const integrationByProvider = new Map(
+    (integrations ?? []).map((integration) => [
+      integration.provider,
+      integration,
+    ]),
   );
+  const syncRunByProvider = new Map(
+    (syncRuns ?? []).map((syncRun) => [syncRun.provider, syncRun]),
+  );
+  const providerList =
+    supportedProviders && supportedProviders.length > 0
+      ? supportedProviders
+      : Object.keys(INTEGRATION_PROVIDER_META);
 
   /* ── Toggle row helper ───────────────── */
   const ToggleRow = ({
@@ -382,10 +874,17 @@ const SettingsScreen = () => {
   );
 
   /* ── About links ─────────────────────── */
-  const aboutLinks: { title: string; icon: IoniconName }[] = [
-    { title: "Help Center", icon: "help-circle-outline" },
-    { title: "Privacy Policy", icon: "shield-checkmark-outline" },
-    { title: "Terms of Service", icon: "document-text-outline" },
+  const aboutLinks: { title: string; icon: IoniconName; path: string }[] = [
+    {
+      title: "Privacy Policy",
+      icon: "shield-checkmark-outline",
+      path: "/privacy",
+    },
+    {
+      title: "Terms of Service",
+      icon: "document-text-outline",
+      path: "/terms",
+    },
   ];
 
   return (
@@ -447,7 +946,7 @@ const SettingsScreen = () => {
           <AppCard>
             <Text style={styles.toggleSub}>Default mood for new memories</Text>
             <View style={styles.moodChipsRow}>
-              {memoryMoodOptions.map((mood) => {
+              {MEMORY_MOOD_OPTIONS.map((mood) => {
                 const selected = defaultMemoryMood === mood;
                 return (
                   <TouchableOpacity
@@ -480,41 +979,156 @@ const SettingsScreen = () => {
         <View style={styles.pad}>
           <SectionHeader title="Integrations" />
           <AppCard>
-            {integrationItems.length === 0 ? (
-              <View style={styles.emptyRow}>
-                <Ionicons
-                  name="link-outline"
-                  size={18}
-                  color={c.textTertiary}
-                />
-                <Text style={styles.emptyText}>No integrations connected</Text>
+            {integrationFeedback ? (
+              <View
+                style={[
+                  styles.integrationFeedback,
+                  integrationFeedback.type === "success"
+                    ? styles.integrationFeedbackSuccess
+                    : styles.integrationFeedbackError,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.integrationFeedbackText,
+                    integrationFeedback.type === "success"
+                      ? { color: c.success }
+                      : { color: c.error },
+                  ]}
+                >
+                  {integrationFeedback.message}
+                </Text>
               </View>
-            ) : (
-              integrationItems.map((item, i) => (
-                <View key={i}>
-                  {i > 0 && <View style={styles.divider} />}
+            ) : null}
+
+            {providerList.map((provider, index) => {
+              const integration = integrationByProvider.get(provider);
+              const syncRun = syncRunByProvider.get(provider);
+              const status = integration?.status ?? "disconnected";
+              const pending = providerPendingAction[provider];
+              const isSyncing =
+                pending === "sync" || syncRun?.status === "in_progress";
+
+              const label =
+                INTEGRATION_PROVIDER_META[
+                  provider as keyof typeof INTEGRATION_PROVIDER_META
+                ]?.label ??
+                integrationNames[provider] ??
+                provider;
+              const description =
+                INTEGRATION_PROVIDER_META[
+                  provider as keyof typeof INTEGRATION_PROVIDER_META
+                ]?.description ?? "";
+
+              return (
+                <View key={provider}>
+                  {index > 0 && <View style={styles.divider} />}
                   <View style={styles.integrationRow}>
-                    <Ionicons name={item.icon} size={20} color={c.icon} />
-                    <View style={{ flex: 1, marginLeft: Spacing.md }}>
-                      <Text style={styles.integrationTitle}>{item.title}</Text>
-                      <Text
-                        style={[
-                          styles.integrationSub,
-                          item.connected && { color: c.success },
-                        ]}
-                      >
-                        {item.subtitle}
-                      </Text>
-                    </View>
                     <Ionicons
-                      name="chevron-forward"
-                      size={16}
-                      color={c.textTertiary}
+                      name={integrationIcons[provider] ?? "link"}
+                      size={20}
+                      color={c.icon}
                     />
+                    <View style={{ flex: 1, marginLeft: Spacing.md }}>
+                      <View style={styles.integrationHeadingRow}>
+                        <Text style={styles.integrationTitle}>{label}</Text>
+                        <View
+                          style={[
+                            styles.integrationStatusBadge,
+                            status === "connected"
+                              ? styles.integrationStatusConnected
+                              : status === "error"
+                                ? styles.integrationStatusError
+                                : styles.integrationStatusDisconnected,
+                          ]}
+                        >
+                          <Text style={styles.integrationStatusText}>
+                            {status}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {!!description && (
+                        <Text style={styles.integrationSub}>{description}</Text>
+                      )}
+
+                      <Text style={styles.integrationSubMuted}>
+                        Last sync:{" "}
+                        {integration?.lastSyncAt
+                          ? new Date(integration.lastSyncAt).toLocaleString()
+                          : "Never"}
+                      </Text>
+
+                      {syncRun?.status ? (
+                        <Text style={styles.integrationSubMuted}>
+                          Today: {syncRun.status}
+                          {syncRun.lastError ? ` — ${syncRun.lastError}` : ""}
+                        </Text>
+                      ) : null}
+
+                      {integration?.lastError ? (
+                        <Text style={styles.integrationErrorText}>
+                          Error: {integration.lastError}
+                        </Text>
+                      ) : null}
+
+                      <View style={styles.integrationActionsRow}>
+                        {status !== "connected" ? (
+                          <TouchableOpacity
+                            style={styles.integrationPrimaryBtn}
+                            onPress={() => {
+                              void handleConnectIntegration(provider);
+                            }}
+                            disabled={pending !== undefined}
+                            activeOpacity={0.75}
+                          >
+                            <Text style={styles.integrationPrimaryBtnText}>
+                              {pending === "connect"
+                                ? "Connecting..."
+                                : "Connect"}
+                            </Text>
+                          </TouchableOpacity>
+                        ) : (
+                          <>
+                            <TouchableOpacity
+                              style={styles.integrationSecondaryBtn}
+                              onPress={() => {
+                                if (!integration) return;
+                                void handleDisconnectIntegration(
+                                  provider,
+                                  integration._id,
+                                );
+                              }}
+                              disabled={pending !== undefined}
+                              activeOpacity={0.75}
+                            >
+                              <Text style={styles.integrationSecondaryBtnText}>
+                                {pending === "disconnect"
+                                  ? "Disconnecting..."
+                                  : "Disconnect"}
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={styles.integrationPrimaryBtn}
+                              onPress={() => {
+                                void handleSyncIntegration(provider);
+                              }}
+                              disabled={pending !== undefined || isSyncing}
+                              activeOpacity={0.75}
+                            >
+                              <Text style={styles.integrationPrimaryBtnText}>
+                                {isSyncing ? "Syncing..." : "Sync now"}
+                              </Text>
+                            </TouchableOpacity>
+                          </>
+                        )}
+                      </View>
+                    </View>
                   </View>
                 </View>
-              ))
-            )}
+              );
+            })}
           </AppCard>
         </View>
 
@@ -560,13 +1174,79 @@ const SettingsScreen = () => {
             <View style={styles.divider} />
             <ToggleRow
               label="Quiet Hours"
-              subtitle="10:00 PM — 7:00 AM"
+              subtitle={`${format24hTo12h(quietHoursStart)} — ${format24hTo12h(quietHoursEnd)}`}
               value={quietHours}
               onToggle={() => {
                 void handleQuietHoursToggle();
               }}
               disabled={!allNotifications || preferences === null}
             />
+            <View style={styles.divider} />
+            <View style={styles.quietHoursConfigRow}>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    styles.toggleLabel,
+                    (!quietHours ||
+                      !allNotifications ||
+                      preferences === null) && {
+                      opacity: 0.45,
+                    },
+                  ]}
+                >
+                  Quiet hours start
+                </Text>
+                <Text style={styles.toggleSub}>
+                  Tap to choose time (15-min steps)
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.quietHoursChip}
+                onPress={() => {
+                  openQuietHoursPicker("start");
+                }}
+                disabled={
+                  !quietHours || !allNotifications || preferences === null
+                }
+              >
+                <Text style={styles.quietHoursChipText}>
+                  {format24hTo12h(quietHoursStart)}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.divider} />
+            <View style={styles.quietHoursConfigRow}>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    styles.toggleLabel,
+                    (!quietHours ||
+                      !allNotifications ||
+                      preferences === null) && {
+                      opacity: 0.45,
+                    },
+                  ]}
+                >
+                  Quiet hours end
+                </Text>
+                <Text style={styles.toggleSub}>
+                  Tap to choose time (15-min steps)
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.quietHoursChip}
+                onPress={() => {
+                  openQuietHoursPicker("end");
+                }}
+                disabled={
+                  !quietHours || !allNotifications || preferences === null
+                }
+              >
+                <Text style={styles.quietHoursChipText}>
+                  {format24hTo12h(quietHoursEnd)}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </AppCard>
         </View>
 
@@ -601,8 +1281,32 @@ const SettingsScreen = () => {
                 Theme: {preferences.theme ?? "system"}
               </Text>
               <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Default memory mood: {preferences.defaultMemoryMood ?? "happy"}
+                Default memory mood:{" "}
+                {preferences.defaultMemoryMood ??
+                  SETTINGS_DEFAULTS.defaultMemoryMood}
               </Text>
+              <Text style={[styles.syncText, { marginTop: 4 }]}>
+                Notification permission:{" "}
+                {reminderRuntime?.permissionStatus ?? "unknown"}
+              </Text>
+              <Text style={[styles.syncText, { marginTop: 4 }]}>
+                Reminder delivery:{" "}
+                {reminderRuntime?.deliveryEnabled ? "active" : "paused"}
+              </Text>
+              <Text style={[styles.syncText, { marginTop: 4 }]}>
+                Quiet hours: {format24hTo12h(quietHoursStart)} —{" "}
+                {format24hTo12h(quietHoursEnd)}
+              </Text>
+              <Text style={[styles.syncText, { marginTop: 4 }]}>
+                Scheduled reminders: {reminderRuntime?.scheduledCount ?? 0}
+              </Text>
+              {reminderRuntime?.error ? (
+                <Text
+                  style={[styles.syncText, { marginTop: 4, color: c.error }]}
+                >
+                  Reminder error: {reminderRuntime.error}
+                </Text>
+              ) : null}
             </AppCard>
           </View>
         )}
@@ -636,7 +1340,11 @@ const SettingsScreen = () => {
             {aboutLinks.map((item, i) => (
               <View key={i}>
                 <View style={styles.divider} />
-                <TouchableOpacity style={styles.aboutRow} activeOpacity={0.6}>
+                <TouchableOpacity
+                  style={styles.aboutRow}
+                  activeOpacity={0.6}
+                  onPress={() => handleOpenAboutLink(item.path)}
+                >
                   <Ionicons name={item.icon} size={18} color={c.icon} />
                   <Text style={styles.aboutText}>{item.title}</Text>
                   <Ionicons
@@ -663,6 +1371,46 @@ const SettingsScreen = () => {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      {showQuietHoursPicker && Platform.OS === "ios" && (
+        <Modal transparent animationType="slide" visible={showQuietHoursPicker}>
+          <TouchableWithoutFeedback
+            onPress={() => setShowQuietHoursPicker(false)}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.pickerContainer}>
+                <View style={styles.pickerHeader}>
+                  <TouchableOpacity
+                    onPress={() => setShowQuietHoursPicker(false)}
+                  >
+                    <Text style={styles.pickerCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.pickerTitle}>Select time</Text>
+                  <TouchableOpacity onPress={handleQuietHoursPickerDone}>
+                    <Text style={styles.pickerDoneText}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <DateTimePicker
+                  value={quietHoursPickerValue}
+                  mode="time"
+                  display="spinner"
+                  onChange={handleQuietHoursPickerChange}
+                />
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
+      )}
+
+      {showQuietHoursPicker && Platform.OS === "android" && (
+        <DateTimePicker
+          value={quietHoursPickerValue}
+          mode="time"
+          display="default"
+          onChange={handleQuietHoursPickerChange}
+        />
+      )}
     </SafeAreaView>
   );
 };
@@ -752,6 +1500,59 @@ const styles = StyleSheet.create({
     color: c.textTertiary,
     marginTop: 2,
   },
+  quietHoursConfigRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: Spacing.xs,
+    gap: Spacing.md,
+  },
+  quietHoursChip: {
+    borderWidth: 1,
+    borderColor: c.divider,
+    backgroundColor: c.surfaceSecondary,
+    borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  quietHoursChipText: {
+    ...Typography.caption1,
+    color: c.text,
+    fontWeight: "600",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  pickerContainer: {
+    backgroundColor: c.surface,
+    borderTopLeftRadius: Radius.lg,
+    borderTopRightRadius: Radius.lg,
+    paddingBottom: Spacing.lg,
+  },
+  pickerHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: c.divider,
+  },
+  pickerTitle: {
+    ...Typography.bodyMedium,
+    color: c.text,
+  },
+  pickerCancelText: {
+    ...Typography.callout,
+    color: c.textSecondary,
+  },
+  pickerDoneText: {
+    ...Typography.callout,
+    color: c.tint,
+    fontWeight: "600",
+  },
   moodChipsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -782,17 +1583,103 @@ const styles = StyleSheet.create({
   /* Integration rows */
   integrationRow: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     paddingVertical: Spacing.sm,
+  },
+  integrationHeadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: Spacing.sm,
   },
   integrationTitle: {
     ...Typography.body,
     color: c.text,
   },
   integrationSub: {
+    ...Typography.callout,
+    color: c.textSecondary,
+    marginTop: 4,
+  },
+  integrationSubMuted: {
+    ...Typography.caption1,
+    color: c.textTertiary,
+    marginTop: 4,
+  },
+  integrationErrorText: {
+    ...Typography.caption1,
+    color: c.error,
+    marginTop: 4,
+  },
+  integrationStatusBadge: {
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderWidth: 1,
+  },
+  integrationStatusConnected: {
+    backgroundColor: "#ECFDF3",
+    borderColor: "#BBF7D0",
+  },
+  integrationStatusError: {
+    backgroundColor: "#FEF2F2",
+    borderColor: "#FECACA",
+  },
+  integrationStatusDisconnected: {
+    backgroundColor: c.surfaceSecondary,
+    borderColor: c.divider,
+  },
+  integrationStatusText: {
     ...Typography.caption1,
     color: c.textSecondary,
-    marginTop: 2,
+    textTransform: "capitalize",
+  },
+  integrationActionsRow: {
+    flexDirection: "row",
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
+  },
+  integrationPrimaryBtn: {
+    backgroundColor: c.tint,
+    borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  integrationPrimaryBtnText: {
+    ...Typography.caption1,
+    color: "#FFFFFF",
+    fontWeight: "600",
+  },
+  integrationSecondaryBtn: {
+    borderWidth: 1,
+    borderColor: c.divider,
+    backgroundColor: c.background,
+    borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  integrationSecondaryBtnText: {
+    ...Typography.caption1,
+    color: c.text,
+    fontWeight: "600",
+  },
+  integrationFeedback: {
+    borderRadius: Radius.sm,
+    borderWidth: 1,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  integrationFeedbackSuccess: {
+    borderColor: "#BBF7D0",
+    backgroundColor: "#F0FDF4",
+  },
+  integrationFeedbackError: {
+    borderColor: "#FECACA",
+    backgroundColor: "#FEF2F2",
+  },
+  integrationFeedbackText: {
+    ...Typography.caption1,
   },
   emptyRow: {
     flexDirection: "row",

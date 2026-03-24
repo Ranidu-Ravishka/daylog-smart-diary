@@ -10,6 +10,7 @@ import { IconSymbol } from "@/components/ui/icon-symbol";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { syncReminderNotifications } from "@/lib/reminder-notifications";
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
@@ -23,6 +24,12 @@ export default function TabLayout() {
     isAuthenticated && launchPreferences === undefined;
 
   const theme = Colors[colorScheme ?? "light"];
+
+  React.useEffect(() => {
+    if (!isAuthenticated || launchPreferences === undefined) return;
+
+    void syncReminderNotifications(launchPreferences);
+  }, [isAuthenticated, launchPreferences]);
 
   if (
     !isLoaded ||

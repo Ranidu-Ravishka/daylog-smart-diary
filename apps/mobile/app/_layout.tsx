@@ -4,6 +4,7 @@ import {
   DefaultTheme,
   ThemeProvider,
 } from "@react-navigation/native";
+import * as Notifications from "expo-notifications";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import "react-native-reanimated";
@@ -15,6 +16,15 @@ import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { ClerkProvider, useAuth, useUser } from "@clerk/clerk-expo";
 import { api } from "@repo/backend/convex";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 const defaultConvexUrl = "http://localhost:4334";
 const configuredConvexUrl = process.env.EXPO_PUBLIC_CONVEX_URL;
@@ -145,6 +155,10 @@ export default function RootLayout() {
           <RootAuthBoundary>
             <Stack>
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen
+                name="oauth-complete"
+                options={{ headerShown: false }}
+              />
               <Stack.Screen
                 name="(auth)/sign-in"
                 options={{ headerShown: false }}

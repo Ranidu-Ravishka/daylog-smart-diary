@@ -41,6 +41,8 @@ export default defineSchema(
       dailySummaryEnabled: v.optional(v.boolean()),
       weeklyInsightsEnabled: v.optional(v.boolean()),
       quietHoursEnabled: v.optional(v.boolean()),
+      quietHoursStart: v.optional(v.string()),
+      quietHoursEnd: v.optional(v.string()),
       autoSyncIntegrations: v.optional(v.boolean()),
       defaultMemoryMood: v.optional(v.string()),
       createdAt: v.number(),

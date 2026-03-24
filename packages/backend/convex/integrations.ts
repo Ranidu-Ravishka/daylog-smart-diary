@@ -899,6 +899,23 @@ export const listMyIntegrations = query({
   },
 });
 
+export const listMyIntegrationSyncRunsForDay = query({
+  args: { dayKey: v.string() },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    validateDayKey(args.dayKey);
+
+    const rows = await ctx.db
+      .query("integrationSyncRuns")
+      .withIndex("by_user_provider", (q) => q.eq("userId", user._id))
+      .collect();
+
+    return rows
+      .filter((row) => row.dayKey === args.dayKey)
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+  },
+});
+
 // ── Delete an integration entirely ──────────────────────────
 export const deleteIntegration = mutation({
   args: { integrationId: v.id("integrations") },

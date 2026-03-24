@@ -9,6 +9,7 @@ import {
   Platform,
   Modal,
   TouchableWithoutFeedback,
+  Alert,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -20,6 +21,11 @@ import { ThemedText } from "@/components/themed-text";
 import { useAuth, useUser } from "@clerk/clerk-expo";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "@repo/backend/convex";
+import { FOCUS_AREAS, SETTINGS_DEFAULTS } from "@repo/ui/lib/constants";
+import {
+  ensureReminderPermissions,
+  syncReminderNotifications,
+} from "@/lib/reminder-notifications";
 
 export default function QuickSetupScreen() {
   const router = useRouter();
@@ -104,13 +110,7 @@ export default function QuickSetupScreen() {
     setLoadedFromSaved(false);
   };
 
-  const focusOptions = [
-    { id: 1, label: "Daily productivity", icon: "time" },
-    { id: 2, label: "Health & fitness", icon: "fitness" },
-    { id: 3, label: "Social connections", icon: "people" },
-    { id: 4, label: "Personal growth", icon: "trending-up" },
-    { id: 5, label: "Just explore everything", icon: "compass" },
-  ];
+  const focusOptions = FOCUS_AREAS;
 
   const reminderOptions = [
     { id: "daily", label: "Daily summary at" },
@@ -188,22 +188,48 @@ export default function QuickSetupScreen() {
 
     setIsSaving(true);
     try {
-      await syncUserPreferences({
+      const permissionStatus = await ensureReminderPermissions();
+      const notificationsEnabled =
+        permissionStatus === "granted"
+          ? (savedPreferences?.notificationsEnabled ?? true)
+          : false;
+
+      if (permissionStatus !== "granted") {
+        Alert.alert(
+          "Notifications disabled",
+          "Notifications are disabled on this device. You can enable them later in Settings.",
+        );
+      }
+
+      const updatedPreferences = await syncUserPreferences({
         focusAreas: selectedFocus,
         reminderType,
         dailyTime: dailyTime.toISOString(),
         weeklyDay,
         formattedTime: formatTime(dailyTime),
-        theme: savedPreferences?.theme ?? "system",
-        notificationsEnabled: savedPreferences?.notificationsEnabled ?? true,
+        theme: savedPreferences?.theme ?? SETTINGS_DEFAULTS.theme,
+        notificationsEnabled,
         dailySummaryEnabled:
           savedPreferences?.dailySummaryEnabled ?? reminderType === "daily",
         weeklyInsightsEnabled:
           savedPreferences?.weeklyInsightsEnabled ?? reminderType === "weekly",
-        quietHoursEnabled: savedPreferences?.quietHoursEnabled ?? false,
-        autoSyncIntegrations: savedPreferences?.autoSyncIntegrations ?? true,
-        defaultMemoryMood: savedPreferences?.defaultMemoryMood ?? "happy",
+        quietHoursEnabled:
+          savedPreferences?.quietHoursEnabled ??
+          SETTINGS_DEFAULTS.quietHoursEnabled,
+        quietHoursStart:
+          savedPreferences?.quietHoursStart ??
+          SETTINGS_DEFAULTS.quietHoursStart,
+        quietHoursEnd:
+          savedPreferences?.quietHoursEnd ?? SETTINGS_DEFAULTS.quietHoursEnd,
+        autoSyncIntegrations:
+          savedPreferences?.autoSyncIntegrations ??
+          SETTINGS_DEFAULTS.autoSyncIntegrations,
+        defaultMemoryMood:
+          savedPreferences?.defaultMemoryMood ??
+          SETTINGS_DEFAULTS.defaultMemoryMood,
       });
+
+      await syncReminderNotifications(updatedPreferences);
 
       router.replace("/(tabs)");
     } catch (error) {

@@ -10,6 +10,7 @@ Required:
 
 - `EXPO_PUBLIC_CONVEX_URL`
 - `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`
+- `EXPO_PUBLIC_WEB_APP_URL` (web app base URL used for OAuth connect flow)
 
 ## Local development
 

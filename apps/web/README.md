@@ -11,6 +11,9 @@ Required:
 - `NEXT_PUBLIC_CONVEX_URL`
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
 - `CLERK_SECRET_KEY`
+- `NEXT_PUBLIC_APP_URL` (for OAuth callback URL generation)
+- `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (Google Calendar/Fit OAuth)
+- `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` (Spotify OAuth)
 
 ## Local development
 
