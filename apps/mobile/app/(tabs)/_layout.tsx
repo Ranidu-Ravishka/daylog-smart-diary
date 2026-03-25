@@ -3,13 +3,14 @@ import React from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 
 import { useAuth } from "@clerk/clerk-expo";
-import { useConvexAuth, useQuery } from "convex/react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "@repo/backend/convex";
 import { HapticTab } from "@/components/haptic-tab";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { startForegroundLocationTracker } from "@/lib/foreground-location-tracker";
 import { syncReminderNotifications } from "@/lib/reminder-notifications";
 
 export default function TabLayout() {
@@ -20,8 +21,16 @@ export default function TabLayout() {
     api.userPreferences.getMyUserPreferences,
     isAuthenticated ? {} : "skip",
   );
+  const upsertMyIntegrationDailyData = useMutation(
+    api.integrations.upsertMyIntegrationDailyData,
+  );
+  const updateMyLocationTrackingState = useMutation(
+    api.userPreferences.updateMyLocationTrackingState,
+  );
   const isPreferencesLoading =
     isAuthenticated && launchPreferences === undefined;
+  const locationTrackingEnabled =
+    launchPreferences?.locationTrackingEnabled ?? false;
 
   const theme = Colors[colorScheme ?? "light"];
 
@@ -30,6 +39,67 @@ export default function TabLayout() {
 
     void syncReminderNotifications(launchPreferences);
   }, [isAuthenticated, launchPreferences]);
+
+  React.useEffect(() => {
+    if (!isAuthenticated || launchPreferences === undefined) return;
+
+    if (!locationTrackingEnabled) {
+      return;
+    }
+
+    let stopTracker: (() => void) | undefined;
+    let isCancelled = false;
+
+    void (async () => {
+      stopTracker = await startForegroundLocationTracker({
+        onUpload: async (payload) => {
+          await upsertMyIntegrationDailyData({
+            provider: "location",
+            dayKey: payload.dayKey,
+            summary: payload.summary,
+            signals: payload.signals,
+          });
+
+          await updateMyLocationTrackingState({
+            locationTrackingEnabled: true,
+            locationPermissionStatus: "granted",
+            locationLastUpdatedAt: payload.observedAt,
+            locationLastArea: payload.areaLabel,
+          });
+        },
+        onStatusUpdate: (status) => {
+          if (status.permissionStatus === "denied") {
+            void updateMyLocationTrackingState({
+              locationTrackingEnabled: false,
+              locationPermissionStatus: "denied",
+            });
+            return;
+          }
+
+          if (status.permissionStatus === "unknown") {
+            void updateMyLocationTrackingState({
+              locationPermissionStatus: "unknown",
+            });
+          }
+        },
+      });
+
+      if (isCancelled) {
+        stopTracker?.();
+      }
+    })();
+
+    return () => {
+      isCancelled = true;
+      stopTracker?.();
+    };
+  }, [
+    isAuthenticated,
+    launchPreferences,
+    locationTrackingEnabled,
+    updateMyLocationTrackingState,
+    upsertMyIntegrationDailyData,
+  ]);
 
   if (
     !isLoaded ||

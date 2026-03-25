@@ -108,6 +108,7 @@ function toSourceLabel(provider: string): string {
     google_fit: "Google Fit",
     spotify: "Spotify",
     apple_health: "Apple Health",
+    location: "Location (foreground)",
   };
 
   return labels[provider] ?? provider;

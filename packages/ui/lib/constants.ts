@@ -37,6 +37,7 @@ export const SETTINGS_DEFAULTS = {
   quietHoursEnd: "07:00",
   autoSyncIntegrations: true,
   defaultMemoryMood: "happy",
+  locationTrackingEnabled: false,
 } as const;
 
 export const INTEGRATION_PROVIDERS = [

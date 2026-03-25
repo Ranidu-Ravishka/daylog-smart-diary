@@ -1,6 +1,6 @@
 # DayLog Engineering Workflow (Current State + Delivery Plan)
 
-Project: DayLog – Smart Diary  
+Project: DayLog – AI-Assisted Journal  
 Module: PUSL3190 Computing Project
 
 This workflow is based on the **actual repository implementation** in:
@@ -21,7 +21,13 @@ DayLog is a monorepo journaling platform with:
 - **Admin operations**: CRUD and metrics across core domain tables.
 - **Security baseline**: Clerk auth, ownership checks, env validation, webhook signature verification.
 
-Current status: **strong MVP with incomplete integration + notification flows**.
+Current status: **strong MVP with implemented summary + integrations + mobile controls, plus clear boundary notes for future items**.
+
+### Implementation boundary (important)
+
+- Implemented now: memories, mood tags, day rating, OpenAI daily summaries, Spotify/Google Calendar/Google Fit sync, Apple Health daily upload path, mobile integration controls, and optional foreground location tracking.
+- Not implemented now: background location tracking and call-log ingestion.
+- Product copy and demos must present background location and call logs only as future scope.
 
 ---
 
@@ -309,14 +315,14 @@ A task is done only when:
 
 ### P0 (must finish)
 
-1. **Integration connect/sync UX**
-   - Add real connect/disconnect/sync controls in web or mobile using existing backend APIs.
-2. **Reminder execution path**
-   - Implement actual scheduling/notification delivery (current state stores preference only).
-3. **Web settings parity**
+1. **Reminder execution path hardening**
+   - Verify reliable reminder scheduling and delivery behavior across app restarts.
+2. **Web settings parity**
    - Expose existing backend preference fields in web settings UI.
-4. **Fix broken/incorrect UX promises**
-   - Add `privacy`/`terms` pages or remove dead links.
+3. **Frontend reliability tests**
+   - Add smoke-level tests for critical mobile and web journaling flows.
+4. **Demo-data and narration readiness**
+   - Prepare a deterministic demo script showing memory capture → integration sync → mobile summary generation.
 
 ### P1 (high value)
 
@@ -329,16 +335,18 @@ A task is done only when:
 
 ### P2 (nice to have after MVP stability)
 
-1. Location tagging (privacy-aware opt-in).
-2. Richer export formats (CSV/PDF).
-3. Dashboard/insight polish and advanced analytics.
+1. Background location intelligence (privacy-aware opt-in).
+2. Call log ingestion (explicit opt-in and strong privacy controls).
+3. Richer export formats (CSV/PDF).
+4. Dashboard/insight polish and advanced analytics.
 
 ---
 
 ## 16) Current Known Gaps (explicit)
 
-- Integration backend exists but end-user connect/sync UI is mostly absent.
-- Reminder preferences are saved but no notification scheduler exists.
+- Background location tracking is not implemented.
+- Call-log ingestion is not implemented.
+- Reminder preferences and scheduling are implemented, but delivery reliability still needs end-to-end hardening checks.
 - Mobile theme toggles are largely preference-level; many screens remain fixed `Colors.light`.
 - Frontend automated tests are missing.
 - Some docs are stale (e.g., `preferences.ts` reference in backend README while file is `userPreferences.ts`).

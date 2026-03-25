@@ -18,6 +18,12 @@ export default function PrivacyPage() {
             authentication, memories you write, and reflection preferences
             required to operate the app.
           </p>
+          <p>
+            DayLog can collect optional foreground location signals only when
+            you explicitly enable location tracking in mobile settings and keep
+            the app open. DayLog does not collect background location traces or
+            call-log data.
+          </p>
         </section>
 
         <section className="space-y-2">

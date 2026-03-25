@@ -15,7 +15,7 @@ const features = [
     icon: Sparkles,
     title: "AI-Powered Summaries",
     description:
-      "Get auto-generated narratives of your day. Our AI weaves your memories, mood, and activities into a meaningful story.",
+      "Generate a daily narrative from your memories, mood, day notes, and any connected integration context.",
   },
   {
     icon: Camera,
@@ -27,7 +27,7 @@ const features = [
     icon: BarChart3,
     title: "Insights & Trends",
     description:
-      "Discover patterns in your mood, habits, and activities. Track personal growth with analytics.",
+      "Discover patterns in your mood and journaling habits with practical daily and weekly insights.",
   },
   {
     icon: Shield,
@@ -192,8 +192,8 @@ export default function Home() {
             Start reflecting today
           </h2>
           <p className="mt-4 text-muted-foreground">
-            Join thousands building a daily journaling habit. It takes less than
-            2&nbsp;minutes a day.
+            Build a daily journaling habit. It takes less than 2&nbsp;minutes a
+            day.
           </p>
           <SignedOut>
             <Button size="lg" className="mt-8" asChild>

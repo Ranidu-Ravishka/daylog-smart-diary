@@ -45,6 +45,16 @@ export default defineSchema(
       quietHoursEnd: v.optional(v.string()),
       autoSyncIntegrations: v.optional(v.boolean()),
       defaultMemoryMood: v.optional(v.string()),
+      locationTrackingEnabled: v.optional(v.boolean()),
+      locationPermissionStatus: v.optional(
+        v.union(
+          v.literal("unknown"),
+          v.literal("granted"),
+          v.literal("denied"),
+        ),
+      ),
+      locationLastUpdatedAt: v.optional(v.number()),
+      locationLastArea: v.optional(v.string()),
       createdAt: v.number(),
       updatedAt: v.number(),
     })

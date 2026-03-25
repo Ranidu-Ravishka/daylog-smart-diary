@@ -33,6 +33,9 @@ import {
   syncReminderNotifications,
   type ReminderRuntimeState,
 } from "@/lib/reminder-notifications";
+import { collectAppleHealthDailyDataForDay } from "../../lib/apple-health-sync";
+import { collectAndroidScreenTimeDailyDataForDay } from "../../lib/android-screen-time-sync";
+import { collectIosScreenTimeDailyDataForDay } from "../../lib/ios-screen-time-sync";
 import {
   Colors,
   Spacing,
@@ -180,6 +183,15 @@ const SettingsScreen = () => {
   const syncMyIntegrationForDay = useAction(
     api.integrations.syncMyIntegrationForDay,
   );
+  const syncAppleHealthDailyData = useMutation(
+    api.integrations.syncAppleHealthDailyData,
+  );
+  const upsertMyIntegrationDailyData = useMutation(
+    api.integrations.upsertMyIntegrationDailyData,
+  );
+  const updateMyLocationTrackingState = useMutation(
+    api.userPreferences.updateMyLocationTrackingState,
+  );
 
   const [darkMode, setDarkMode] = useState(false);
   const [allNotifications, setAllNotifications] = useState(true);
@@ -203,6 +215,8 @@ const SettingsScreen = () => {
   const [defaultMemoryMood, setDefaultMemoryMood] = useState<string>(
     SETTINGS_DEFAULTS.defaultMemoryMood,
   );
+  const [locationTrackingEnabled, setLocationTrackingEnabled] =
+    useState<boolean>(SETTINGS_DEFAULTS.locationTrackingEnabled);
   const [isUpdatingReminderPreference, setIsUpdatingReminderPreference] =
     useState(false);
   const [providerPendingAction, setProviderPendingAction] = useState<
@@ -325,6 +339,7 @@ const SettingsScreen = () => {
       setQuietHoursEnd(SETTINGS_DEFAULTS.quietHoursEnd);
       setAutoSyncIntegrations(SETTINGS_DEFAULTS.autoSyncIntegrations);
       setDefaultMemoryMood(SETTINGS_DEFAULTS.defaultMemoryMood);
+      setLocationTrackingEnabled(SETTINGS_DEFAULTS.locationTrackingEnabled);
       return;
     }
 
@@ -345,6 +360,10 @@ const SettingsScreen = () => {
     );
     setDefaultMemoryMood(
       preferences.defaultMemoryMood ?? SETTINGS_DEFAULTS.defaultMemoryMood,
+    );
+    setLocationTrackingEnabled(
+      preferences.locationTrackingEnabled ??
+        SETTINGS_DEFAULTS.locationTrackingEnabled,
     );
   }, [preferences]);
 
@@ -608,6 +627,50 @@ const SettingsScreen = () => {
     [defaultMemoryMood, savePreferencePatch],
   );
 
+  const handleLocationTrackingToggle = useCallback(async () => {
+    if (!preferences) {
+      Alert.alert("Complete quick setup", "Set your preferences first.", [
+        {
+          text: "Open Setup",
+          onPress: () => router.push("/quick-setup"),
+        },
+        { text: "Cancel", style: "cancel" },
+      ]);
+      return;
+    }
+
+    const previous = locationTrackingEnabled;
+    const next = !locationTrackingEnabled;
+    setLocationTrackingEnabled(next);
+
+    try {
+      await updateMyLocationTrackingState({
+        locationTrackingEnabled: next,
+        locationPermissionStatus: next
+          ? (preferences.locationPermissionStatus ?? "unknown")
+          : "unknown",
+      });
+
+      setIntegrationFeedback({
+        type: "success",
+        message: next
+          ? "Foreground location tracking enabled. DayLog will only collect coarse location while the app is open."
+          : "Foreground location tracking disabled.",
+      });
+    } catch {
+      setLocationTrackingEnabled(previous);
+      Alert.alert(
+        "Update failed",
+        "Location tracking preference could not be saved.",
+      );
+    }
+  }, [
+    locationTrackingEnabled,
+    preferences,
+    router,
+    updateMyLocationTrackingState,
+  ]);
+
   /* ── Callbacks ────────────────────────── */
   const handleSignOut = useCallback(() => {
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
@@ -770,10 +833,84 @@ const SettingsScreen = () => {
       setIntegrationFeedback(null);
 
       try {
+        if (provider === "apple_health") {
+          const appleHealthData =
+            await collectAppleHealthDailyDataForDay(todayDayKey);
+
+          await syncAppleHealthDailyData({
+            dayKey: todayDayKey,
+            metrics: appleHealthData.metrics,
+            summary: appleHealthData.summary,
+            signals: appleHealthData.signals,
+          });
+
+          setIntegrationFeedback({
+            type: "success",
+            message: "Apple Health data synced from this device.",
+          });
+
+          return;
+        }
+
         const result = await syncMyIntegrationForDay({
           provider,
           dayKey: todayDayKey,
         });
+
+        let screenTimeMessage = "";
+        if (provider === "google_fit" && Platform.OS === "android") {
+          try {
+            const screenTimeData =
+              await collectAndroidScreenTimeDailyDataForDay(todayDayKey);
+
+            await upsertMyIntegrationDailyData({
+              provider: "google_fit",
+              dayKey: todayDayKey,
+              metrics: {
+                screenTimeMinutes: screenTimeData.metrics.screenTimeMinutes,
+              },
+              summary: screenTimeData.summary,
+              signals: screenTimeData.signals,
+            });
+
+            if (screenTimeData.metrics.screenTimeMinutes) {
+              screenTimeMessage = ` Screen time included (${screenTimeData.metrics.screenTimeMinutes} min).`;
+            }
+          } catch (error) {
+            const message =
+              error instanceof Error
+                ? error.message
+                : "Screen time data unavailable.";
+            screenTimeMessage = ` Google Fit synced, but screen time was not added: ${message}`;
+          }
+        }
+
+        if (provider === "google_fit" && Platform.OS === "ios") {
+          try {
+            const screenTimeData =
+              await collectIosScreenTimeDailyDataForDay(todayDayKey);
+
+            await upsertMyIntegrationDailyData({
+              provider: "google_fit",
+              dayKey: todayDayKey,
+              metrics: {
+                screenTimeMinutes: screenTimeData.metrics.screenTimeMinutes,
+              },
+              summary: screenTimeData.summary,
+              signals: screenTimeData.signals,
+            });
+
+            if (screenTimeData.metrics.screenTimeMinutes) {
+              screenTimeMessage = ` Screen time included (${screenTimeData.metrics.screenTimeMinutes} min).`;
+            }
+          } catch (error) {
+            const message =
+              error instanceof Error
+                ? error.message
+                : "Screen time data unavailable.";
+            screenTimeMessage = ` Google Fit synced, but iOS screen time was not added: ${message}`;
+          }
+        }
 
         if (result?.idempotent) {
           setIntegrationFeedback({
@@ -786,7 +923,7 @@ const SettingsScreen = () => {
         } else {
           setIntegrationFeedback({
             type: "success",
-            message: "Sync completed successfully.",
+            message: `Sync completed successfully.${screenTimeMessage}`,
           });
         }
       } catch (error) {
@@ -798,8 +935,29 @@ const SettingsScreen = () => {
         setProviderAction(provider, undefined);
       }
     },
-    [setProviderAction, syncMyIntegrationForDay, todayDayKey],
+    [
+      setProviderAction,
+      upsertMyIntegrationDailyData,
+      syncAppleHealthDailyData,
+      syncMyIntegrationForDay,
+      todayDayKey,
+    ],
   );
+
+  const handleShowAppleHealthSetup = useCallback(() => {
+    if (Platform.OS !== "ios") {
+      Alert.alert(
+        "Apple Health is iOS only",
+        "Apple Health sync is available only on iOS devices.",
+      );
+      return;
+    }
+
+    Alert.alert(
+      "Apple Health setup",
+      "Use an iOS development build (not Expo Go), install react-native-health, enable HealthKit entitlements, then tap Sync now.",
+    );
+  }, []);
 
   const isLoading =
     isAuthLoading ||
@@ -979,6 +1137,11 @@ const SettingsScreen = () => {
         <View style={styles.pad}>
           <SectionHeader title="Integrations" />
           <AppCard>
+            <Text style={styles.integrationSubMuted}>
+              Connected providers can contribute daily context to AI summaries
+              after you sync them.
+            </Text>
+
             {integrationFeedback ? (
               <View
                 style={[
@@ -1032,24 +1195,59 @@ const SettingsScreen = () => {
                     <View style={{ flex: 1, marginLeft: Spacing.md }}>
                       <View style={styles.integrationHeadingRow}>
                         <Text style={styles.integrationTitle}>{label}</Text>
-                        <View
-                          style={[
-                            styles.integrationStatusBadge,
-                            status === "connected"
-                              ? styles.integrationStatusConnected
-                              : status === "error"
-                                ? styles.integrationStatusError
-                                : styles.integrationStatusDisconnected,
-                          ]}
-                        >
-                          <Text style={styles.integrationStatusText}>
-                            {status}
-                          </Text>
+                        <View style={styles.integrationHeadingBadges}>
+                          {provider === "apple_health" && (
+                            <View
+                              style={[
+                                styles.integrationStatusBadge,
+                                styles.integrationStatusSetupRequired,
+                              ]}
+                            >
+                              <Text style={styles.integrationStatusText}>
+                                {Platform.OS === "ios"
+                                  ? "setup required"
+                                  : "iOS only"}
+                              </Text>
+                            </View>
+                          )}
+
+                          <View
+                            style={[
+                              styles.integrationStatusBadge,
+                              status === "connected"
+                                ? styles.integrationStatusConnected
+                                : status === "error"
+                                  ? styles.integrationStatusError
+                                  : styles.integrationStatusDisconnected,
+                            ]}
+                          >
+                            <Text style={styles.integrationStatusText}>
+                              {status}
+                            </Text>
+                          </View>
                         </View>
                       </View>
 
                       {!!description && (
                         <Text style={styles.integrationSub}>{description}</Text>
+                      )}
+
+                      {provider === "apple_health" && (
+                        <View style={styles.appleHealthHintCard}>
+                          <Text style={styles.appleHealthHintText}>
+                            {Platform.OS === "ios"
+                              ? "Requires iOS native build + HealthKit setup for real device data."
+                              : "Apple Health sync is only available on iOS devices."}
+                          </Text>
+                          <TouchableOpacity
+                            onPress={handleShowAppleHealthSetup}
+                            activeOpacity={0.75}
+                          >
+                            <Text style={styles.appleHealthHintAction}>
+                              How to enable
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
                       )}
 
                       <Text style={styles.integrationSubMuted}>
@@ -1262,6 +1460,32 @@ const SettingsScreen = () => {
               }}
               disabled={preferences === null}
             />
+            <View style={styles.divider} />
+            <ToggleRow
+              label="Foreground Location Tracking"
+              subtitle={
+                preferences?.locationPermissionStatus === "denied"
+                  ? "Permission denied. Enable location in system settings and turn this back on."
+                  : "Collect coarse location only while the app is open."
+              }
+              value={locationTrackingEnabled}
+              onToggle={() => {
+                void handleLocationTrackingToggle();
+              }}
+              disabled={preferences === null}
+            />
+            <Text style={styles.integrationSubMuted}>
+              Permission: {preferences?.locationPermissionStatus ?? "unknown"}
+            </Text>
+            <Text style={styles.integrationSubMuted}>
+              Last update:{" "}
+              {preferences?.locationLastUpdatedAt
+                ? new Date(preferences.locationLastUpdatedAt).toLocaleString()
+                : "Never"}
+            </Text>
+            <Text style={styles.integrationSubMuted}>
+              Last area: {preferences?.locationLastArea ?? "Not available"}
+            </Text>
           </AppCard>
         </View>
 
@@ -1284,6 +1508,20 @@ const SettingsScreen = () => {
                 Default memory mood:{" "}
                 {preferences.defaultMemoryMood ??
                   SETTINGS_DEFAULTS.defaultMemoryMood}
+              </Text>
+              <Text style={[styles.syncText, { marginTop: 4 }]}>
+                Foreground location:{" "}
+                {locationTrackingEnabled ? "enabled" : "disabled"}
+              </Text>
+              <Text style={[styles.syncText, { marginTop: 4 }]}>
+                Location permission:{" "}
+                {preferences.locationPermissionStatus ?? "unknown"}
+              </Text>
+              <Text style={[styles.syncText, { marginTop: 4 }]}>
+                Location last update:{" "}
+                {preferences.locationLastUpdatedAt
+                  ? new Date(preferences.locationLastUpdatedAt).toLocaleString()
+                  : "Never"}
               </Text>
               <Text style={[styles.syncText, { marginTop: 4 }]}>
                 Notification permission:{" "}
@@ -1592,6 +1830,11 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: Spacing.sm,
   },
+  integrationHeadingBadges: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
   integrationTitle: {
     ...Typography.body,
     color: c.text,
@@ -1628,6 +1871,10 @@ const styles = StyleSheet.create({
   integrationStatusDisconnected: {
     backgroundColor: c.surfaceSecondary,
     borderColor: c.divider,
+  },
+  integrationStatusSetupRequired: {
+    backgroundColor: c.tintLight,
+    borderColor: c.tint,
   },
   integrationStatusText: {
     ...Typography.caption1,
@@ -1680,6 +1927,25 @@ const styles = StyleSheet.create({
   },
   integrationFeedbackText: {
     ...Typography.caption1,
+  },
+  appleHealthHintCard: {
+    marginTop: Spacing.sm,
+    borderWidth: 1,
+    borderColor: c.divider,
+    borderRadius: Radius.sm,
+    backgroundColor: c.surfaceSecondary,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.sm,
+    gap: 6,
+  },
+  appleHealthHintText: {
+    ...Typography.caption1,
+    color: c.textSecondary,
+  },
+  appleHealthHintAction: {
+    ...Typography.caption1,
+    color: c.tint,
+    fontWeight: "600",
   },
   emptyRow: {
     flexDirection: "row",

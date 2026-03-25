@@ -2,6 +2,12 @@
 
 DayLog is a multi-app journaling platform with a shared Convex backend.
 
+## Current capability boundaries
+
+- Implemented: memory journaling, mood tracking, day ratings, OpenAI day summaries, integrations for Google Calendar, Google Fit, Spotify, and Apple Health daily uploads.
+- Implemented (mobile): optional foreground location tracking with coarse location signals while the app is open.
+- Not implemented: background location tracking and call-log collection.
+
 ## Apps and packages
 
 - `apps/web` — User-facing Next.js app (port `3000`)

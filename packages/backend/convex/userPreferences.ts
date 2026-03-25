@@ -13,6 +13,12 @@ const preferenceThemeValidator = v.union(
   v.literal("system"),
 );
 
+const locationPermissionStatusValidator = v.union(
+  v.literal("unknown"),
+  v.literal("granted"),
+  v.literal("denied"),
+);
+
 const defaultPreferenceSettings = {
   theme: "system" as const,
   notificationsEnabled: true,
@@ -23,6 +29,8 @@ const defaultPreferenceSettings = {
   quietHoursEnd: "07:00",
   autoSyncIntegrations: true,
   defaultMemoryMood: "happy",
+  locationTrackingEnabled: false,
+  locationPermissionStatus: "unknown" as const,
 };
 
 const canonicalFocusAreaIds = new Set([0, 1, 2, 3, 4]);
@@ -71,6 +79,10 @@ export const syncUserPreferencesFromClerk = mutation({
     quietHoursEnd: v.optional(v.string()),
     autoSyncIntegrations: v.optional(v.boolean()),
     defaultMemoryMood: v.optional(v.string()),
+    locationTrackingEnabled: v.optional(v.boolean()),
+    locationPermissionStatus: v.optional(locationPermissionStatusValidator),
+    locationLastUpdatedAt: v.optional(v.number()),
+    locationLastArea: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireIdentityMatch(ctx, args.clerkUserId);
@@ -123,6 +135,17 @@ export const syncUserPreferencesFromClerk = mutation({
           args.defaultMemoryMood ??
           existing.defaultMemoryMood ??
           defaultPreferenceSettings.defaultMemoryMood,
+        locationTrackingEnabled:
+          args.locationTrackingEnabled ??
+          existing.locationTrackingEnabled ??
+          defaultPreferenceSettings.locationTrackingEnabled,
+        locationPermissionStatus:
+          args.locationPermissionStatus ??
+          existing.locationPermissionStatus ??
+          defaultPreferenceSettings.locationPermissionStatus,
+        locationLastUpdatedAt:
+          args.locationLastUpdatedAt ?? existing.locationLastUpdatedAt,
+        locationLastArea: args.locationLastArea ?? existing.locationLastArea,
         updatedAt: now,
       });
 
@@ -157,6 +180,14 @@ export const syncUserPreferencesFromClerk = mutation({
         defaultPreferenceSettings.autoSyncIntegrations,
       defaultMemoryMood:
         args.defaultMemoryMood ?? defaultPreferenceSettings.defaultMemoryMood,
+      locationTrackingEnabled:
+        args.locationTrackingEnabled ??
+        defaultPreferenceSettings.locationTrackingEnabled,
+      locationPermissionStatus:
+        args.locationPermissionStatus ??
+        defaultPreferenceSettings.locationPermissionStatus,
+      locationLastUpdatedAt: args.locationLastUpdatedAt,
+      locationLastArea: args.locationLastArea,
       createdAt: now,
       updatedAt: now,
     });
@@ -229,6 +260,10 @@ export const syncMyUserPreferences = mutation({
     quietHoursEnd: v.optional(v.string()),
     autoSyncIntegrations: v.optional(v.boolean()),
     defaultMemoryMood: v.optional(v.string()),
+    locationTrackingEnabled: v.optional(v.boolean()),
+    locationPermissionStatus: v.optional(locationPermissionStatusValidator),
+    locationLastUpdatedAt: v.optional(v.number()),
+    locationLastArea: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
@@ -281,6 +316,17 @@ export const syncMyUserPreferences = mutation({
           args.defaultMemoryMood ??
           existing.defaultMemoryMood ??
           defaultPreferenceSettings.defaultMemoryMood,
+        locationTrackingEnabled:
+          args.locationTrackingEnabled ??
+          existing.locationTrackingEnabled ??
+          defaultPreferenceSettings.locationTrackingEnabled,
+        locationPermissionStatus:
+          args.locationPermissionStatus ??
+          existing.locationPermissionStatus ??
+          defaultPreferenceSettings.locationPermissionStatus,
+        locationLastUpdatedAt:
+          args.locationLastUpdatedAt ?? existing.locationLastUpdatedAt,
+        locationLastArea: args.locationLastArea ?? existing.locationLastArea,
         updatedAt: now,
       });
 
@@ -315,10 +361,50 @@ export const syncMyUserPreferences = mutation({
         defaultPreferenceSettings.autoSyncIntegrations,
       defaultMemoryMood:
         args.defaultMemoryMood ?? defaultPreferenceSettings.defaultMemoryMood,
+      locationTrackingEnabled:
+        args.locationTrackingEnabled ??
+        defaultPreferenceSettings.locationTrackingEnabled,
+      locationPermissionStatus:
+        args.locationPermissionStatus ??
+        defaultPreferenceSettings.locationPermissionStatus,
+      locationLastUpdatedAt: args.locationLastUpdatedAt,
+      locationLastArea: args.locationLastArea,
       createdAt: now,
       updatedAt: now,
     });
 
     return await ctx.db.get(id);
+  },
+});
+
+export const updateMyLocationTrackingState = mutation({
+  args: {
+    locationTrackingEnabled: v.optional(v.boolean()),
+    locationPermissionStatus: v.optional(locationPermissionStatusValidator),
+    locationLastUpdatedAt: v.optional(v.number()),
+    locationLastArea: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+
+    const existing = await ctx.db
+      .query("userPreferences")
+      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", user.clerkUserId))
+      .unique();
+
+    if (!existing) return null;
+
+    await ctx.db.patch(existing._id, {
+      locationTrackingEnabled:
+        args.locationTrackingEnabled ?? existing.locationTrackingEnabled,
+      locationPermissionStatus:
+        args.locationPermissionStatus ?? existing.locationPermissionStatus,
+      locationLastUpdatedAt:
+        args.locationLastUpdatedAt ?? existing.locationLastUpdatedAt,
+      locationLastArea: args.locationLastArea ?? existing.locationLastArea,
+      updatedAt: Date.now(),
+    });
+
+    return await ctx.db.get(existing._id);
   },
 });
