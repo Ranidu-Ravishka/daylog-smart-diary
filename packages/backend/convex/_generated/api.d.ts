@@ -17,6 +17,7 @@ import type * as env from "../env.js";
 import type * as http from "../http.js";
 import type * as integrations from "../integrations.js";
 import type * as memories from "../memories.js";
+import type * as runtimeConfig from "../runtimeConfig.js";
 import type * as summaries from "../summaries.js";
 import type * as summaryGeneration from "../summaryGeneration.js";
 import type * as userPreferences from "../userPreferences.js";
@@ -40,6 +41,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   integrations: typeof integrations;
   memories: typeof memories;
+  runtimeConfig: typeof runtimeConfig;
   summaries: typeof summaries;
   summaryGeneration: typeof summaryGeneration;
   userPreferences: typeof userPreferences;

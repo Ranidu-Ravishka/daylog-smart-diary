@@ -11,9 +11,7 @@
     "dev": "convex dev",
     "predev": "convex dev --until-success",
     "logs": "convex logs",
-    "lint": "tsc -p convex && eslint . --report-unused-disable-directives --max-warnings 0",
-    "test": "vitest",
-    "test:run": "vitest run"
+    "lint": "tsc -p convex && eslint . --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
     "convex": "^1.29.3",
@@ -28,8 +26,7 @@
     "@typescript-eslint/parser": "^8.47.0",
     "eslint": "^9.39.1",
     "globals": "^16.5.0",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.0"
+    "typescript": "^5.9.3"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

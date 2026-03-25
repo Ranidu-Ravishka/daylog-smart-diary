@@ -1007,12 +1007,14 @@ const SettingsScreen = () => {
     value,
     onToggle,
     disabled,
+    testID,
   }: {
     label: string;
     subtitle?: string;
     value: boolean;
     onToggle: () => void;
     disabled?: boolean;
+    testID?: string;
   }) => (
     <View style={styles.toggleRow}>
       <View style={{ flex: 1 }}>
@@ -1025,6 +1027,7 @@ const SettingsScreen = () => {
         value={value}
         onValueChange={onToggle}
         disabled={disabled}
+        testID={testID}
         trackColor={{ false: c.border, true: c.tint }}
         thumbColor="#FFF"
       />
@@ -1473,6 +1476,7 @@ const SettingsScreen = () => {
                 void handleLocationTrackingToggle();
               }}
               disabled={preferences === null}
+              testID="location-tracking-switch"
             />
             <Text style={styles.integrationSubMuted}>
               Permission: {preferences?.locationPermissionStatus ?? "unknown"}

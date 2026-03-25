@@ -61,7 +61,7 @@ Current status: **strong MVP with implemented summary + integrations + mobile co
 - Input: memories + day metadata + integrationDailyData.
 - Model: `gpt-4o` with JSON schema response.
 - Output persisted via `summaries.upsertSummary`.
-- Quota: `DAILY_SUMMARY_GENERATION_LIMIT = 5` in `summaries.ts`.
+- Quota: `SUMMARY_DAILY_GENERATION_LIMIT` from backend runtime config (`runtimeConfig.ts`), enforced in `summaries.ts`.
 
 ### Integrations
 

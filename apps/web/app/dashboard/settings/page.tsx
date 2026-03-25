@@ -58,6 +58,14 @@ function toTimeInputValue(preferenceDailyTime: string | undefined): string {
   return `${h}:${m}`;
 }
 
+function areNumberArraysEqual(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 function LoadingSkeleton() {
   return (
     <div className="max-w-xl space-y-6">
@@ -177,7 +185,10 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (preferences) {
-      setSelectedFocus(preferences.focusAreas ?? []);
+      const nextFocusAreas = preferences.focusAreas ?? [];
+      setSelectedFocus((prev) =>
+        areNumberArraysEqual(prev, nextFocusAreas) ? prev : nextFocusAreas,
+      );
       setReminderType(preferences.reminderType ?? "daily");
       setWeeklyDay(preferences.weeklyDay ?? "Sunday");
       setDailyTime(toTimeInputValue(preferences.dailyTime));

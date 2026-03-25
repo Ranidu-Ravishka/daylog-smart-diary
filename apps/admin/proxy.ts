@@ -92,7 +92,7 @@ const handler = clerkMiddleware(async (auth, req) => {
     return NextResponse.next();
   }
 
-  const cacheSecret = adminServerEnv.clerkSecretKey;
+  const cacheSecret = adminServerEnv.adminCacheSecret;
   const hasCachedAdminStatus = await readCachedAdminStatus(
     req,
     userId,
@@ -124,7 +124,7 @@ const handler = clerkMiddleware(async (auth, req) => {
   return denied;
 });
 
-export async function middleware(req: NextRequest, event: NextFetchEvent) {
+export async function proxy(req: NextRequest, event: NextFetchEvent) {
   return handler(req, event);
 }
 

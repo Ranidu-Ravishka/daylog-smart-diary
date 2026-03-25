@@ -2,8 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { requireUser, requireOwnership } from "./authz";
 import { validateDayKey, clampLimit } from "./validators";
-
-export const DAILY_SUMMARY_GENERATION_LIMIT = 5;
+import { getSummaryDailyGenerationLimit } from "./runtimeConfig";
 
 export function getUtcDayKey(timestamp: number): string {
   return new Date(timestamp).toISOString().slice(0, 10);
@@ -136,6 +135,7 @@ export const getSummaryQuotaForDay = query({
   handler: async (ctx) => {
     const user = await requireUser(ctx);
     const quotaDayKey = getUtcDayKey(Date.now());
+    const limit = getSummaryDailyGenerationLimit();
 
     const quota = await ctx.db
       .query("summaryGenerationQuotas")
@@ -148,8 +148,8 @@ export const getSummaryQuotaForDay = query({
     return {
       quotaDayKey,
       used,
-      limit: DAILY_SUMMARY_GENERATION_LIMIT,
-      remaining: Math.max(DAILY_SUMMARY_GENERATION_LIMIT - used, 0),
+      limit,
+      remaining: Math.max(limit - used, 0),
     };
   },
 });
@@ -161,6 +161,7 @@ export const reserveSummaryGenerationSlot = mutation({
     const user = await requireUser(ctx);
     const now = Date.now();
     const quotaDayKey = getUtcDayKey(now);
+    const limit = getSummaryDailyGenerationLimit();
 
     const existing = await ctx.db
       .query("summaryGenerationQuotas")
@@ -170,9 +171,9 @@ export const reserveSummaryGenerationSlot = mutation({
       .unique();
 
     const used = existing?.used ?? 0;
-    if (used >= DAILY_SUMMARY_GENERATION_LIMIT) {
+    if (used >= limit) {
       throw new Error(
-        "Daily summary limit reached (5/day). Please try again tomorrow.",
+        `Daily summary limit reached (${limit}/day). Please try again tomorrow.`,
       );
     }
 
@@ -193,8 +194,8 @@ export const reserveSummaryGenerationSlot = mutation({
     return {
       quotaDayKey,
       used: used + 1,
-      limit: DAILY_SUMMARY_GENERATION_LIMIT,
-      remaining: Math.max(DAILY_SUMMARY_GENERATION_LIMIT - (used + 1), 0),
+      limit,
+      remaining: Math.max(limit - (used + 1), 0),
     };
   },
 });
