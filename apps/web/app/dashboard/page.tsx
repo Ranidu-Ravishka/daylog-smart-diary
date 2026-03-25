@@ -4,7 +4,15 @@ import { useAction, useQuery, useConvexAuth } from "convex/react";
 import { api } from "@repo/backend/convex";
 import { MOOD_EMOJI } from "@repo/ui/lib/constants";
 import { useState } from "react";
-import { Sparkles, Clock, FileText, Users, Activity } from "lucide-react";
+import {
+  Sparkles,
+  Clock,
+  FileText,
+  Users,
+  Activity,
+  Database,
+  MapPin,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -115,6 +123,10 @@ export default function DashboardPage() {
     isAuthenticated ? { dayKey } : "skip",
   );
   const day = useQuery(api.days.getDay, isAuthenticated ? { dayKey } : "skip");
+  const integrationDailyData = useQuery(
+    api.integrations.listMyIntegrationDailyDataForDay,
+    isAuthenticated ? { dayKey } : "skip",
+  );
   const memoryIds = (memories ?? []).map((memory) => memory._id);
   const memoryThumbnails = useQuery(
     api.memories.listMemoryMediaThumbnailsForMemories,
@@ -184,6 +196,22 @@ export default function DashboardPage() {
   const moodFromMemories =
     memories && memories.length > 0 ? (memories[0]?.mood ?? null) : null;
 
+  const latestMemoryMood = moodFromMemories
+    ? (MOOD_EMOJI[moodFromMemories] ?? "😐")
+    : "—";
+
+  const sourceRows = (integrationDailyData ?? []).slice().sort((a, b) => {
+    return b.syncedAt - a.syncedAt;
+  });
+
+  const providerLabel: Record<string, string> = {
+    location: "Location (coarse foreground)",
+    google_calendar: "Google Calendar",
+    google_fit: "Google Fit",
+    spotify: "Spotify",
+    apple_health: "Apple Health",
+  };
+
   const summaryMetrics = summary?.metrics;
   const metricItems = [
     summaryMetrics?.steps
@@ -220,10 +248,8 @@ export default function DashboardPage() {
       <div className="grid grid-cols-3 gap-3 mb-8">
         <Card>
           <CardContent className="p-4 text-center">
-            <p className="text-xl">
-              {moodFromMemories ? (MOOD_EMOJI[moodFromMemories] ?? "😐") : "—"}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">Mood</p>
+            <p className="text-xl">{latestMemoryMood}</p>
+            <p className="mt-1 text-xs text-muted-foreground">Latest mood</p>
           </CardContent>
         </Card>
         <Card>
@@ -339,6 +365,58 @@ export default function DashboardPage() {
                   ? "Click Generate Summary to create one from your day data."
                   : "Add a memory, rating, note, or people tag, then generate a summary."}
               </p>
+            </CardContent>
+          </Card>
+        )}
+      </section>
+
+      <section className="mb-8">
+        <div className="mb-3 flex items-center gap-2">
+          <Database className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-medium">Data sources for this day</h2>
+        </div>
+
+        {(integrationDailyData ?? undefined) === undefined ? (
+          <SummarySkeleton />
+        ) : sourceRows.length > 0 ? (
+          <Card>
+            <CardContent className="p-4 space-y-3">
+              {sourceRows.map((row) => (
+                <div
+                  key={`${row.provider}-${row.dayKey}`}
+                  className="rounded-md border border-border p-3"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      {row.provider === "location" ? (
+                        <MapPin className="h-3.5 w-3.5" />
+                      ) : null}
+                      {providerLabel[row.provider] ?? row.provider}
+                    </div>
+                    <Badge variant="secondary">
+                      Synced {formatDateTime(row.syncedAt)}
+                    </Badge>
+                  </div>
+
+                  {row.summary ? (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      {row.summary}
+                    </p>
+                  ) : null}
+
+                  {row.signals && row.signals.length > 0 ? (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Signals: {row.signals.slice(0, 2).join(" • ")}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardContent className="p-4 text-sm text-muted-foreground">
+              No integration sync data for this day yet.
             </CardContent>
           </Card>
         )}

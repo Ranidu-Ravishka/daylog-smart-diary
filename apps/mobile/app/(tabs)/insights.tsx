@@ -144,7 +144,7 @@ const InsightsScreen = () => {
       dayLabels[date.getDay() === 0 ? 6 : date.getDay() - 1] ?? "?";
 
     const dayMemories = resolvedMemories.filter((m) => m.dayKey === dayKey);
-    let value = 50;
+    let value: number | null = null;
     if (dayMemories.length > 0) {
       const moodScores = dayMemories
         .filter((m) => m.mood)
@@ -159,16 +159,22 @@ const InsightsScreen = () => {
     return { value, day: dayOfWeek };
   });
 
+  const moodValues = moodTrendsData
+    .map((item) => item.value)
+    .filter((value): value is number => value !== null);
+
   const avgMood =
-    moodTrendsData.length > 0
+    moodValues.length > 0
       ? (
-          moodTrendsData.reduce((sum, d) => sum + d.value, 0) /
-          moodTrendsData.length /
+          moodValues.reduce((sum, value) => sum + value, 0) /
+          moodValues.length /
           10
         ).toFixed(1)
       : "—";
 
   const totalMemories = resolvedMemories.length;
+  const summariesCount = resolvedSummaries.length;
+  const moodDaysTracked = moodValues.length;
 
   // Mood distribution
   const moodCounts: Record<string, number> = {};
@@ -181,14 +187,6 @@ const InsightsScreen = () => {
     .sort(([, a], [, b]) => b - a)
     .slice(0, 5);
   const maxMoodCount = topMoods.length > 0 ? topMoods[0]![1] : 1;
-
-  // Metrics from latest summary
-  const latestSummary =
-    resolvedSummaries.length > 0 ? resolvedSummaries[0] : null;
-  const steps = latestSummary?.metrics?.steps;
-  const sleepHours = latestSummary?.metrics?.sleepMinutes
-    ? (latestSummary.metrics.sleepMinutes / 60).toFixed(1)
-    : null;
 
   const hasData = resolvedMemories.length > 0 || resolvedSummaries.length > 0;
 
@@ -207,7 +205,7 @@ const InsightsScreen = () => {
   }
 
   const renderMoodChart = () => {
-    const maxValue = Math.max(...moodTrendsData.map((d) => d.value), 1);
+    const maxValue = Math.max(...moodValues, 1);
     const chartHeight = 120;
 
     return (
@@ -234,9 +232,30 @@ const InsightsScreen = () => {
         ))}
         {/* Data points + lines */}
         {moodTrendsData.map((item, index) => {
+          if (item.value === null) {
+            return (
+              <View
+                key={index}
+                style={{
+                  position: "absolute",
+                  left: (index * CHART_WIDTH) / 6 - 3,
+                  top: chartHeight - 3,
+                  width: 6,
+                  height: 6,
+                  borderRadius: 3,
+                  backgroundColor: c.textTertiary,
+                  opacity: 0.45,
+                }}
+              />
+            );
+          }
+
           const nextItem = moodTrendsData[index + 1];
           const xPos = (index * CHART_WIDTH) / 6;
           const yPos = chartHeight - (item.value / maxValue) * chartHeight;
+
+          const canLinkToNext = nextItem?.value !== null;
+          const nextValue = nextItem?.value ?? item.value;
 
           return (
             <View
@@ -251,7 +270,7 @@ const InsightsScreen = () => {
                 backgroundColor: c.tint,
               }}
             >
-              {nextItem && (
+              {canLinkToNext && (
                 <View
                   style={{
                     position: "absolute",
@@ -263,16 +282,14 @@ const InsightsScreen = () => {
                     width: Math.sqrt(
                       Math.pow(CHART_WIDTH / 6, 2) +
                         Math.pow(
-                          ((item.value - nextItem.value) / maxValue) *
-                            chartHeight,
+                          ((item.value - nextValue) / maxValue) * chartHeight,
                           2,
                         ),
                     ),
                     transform: [
                       {
                         rotate: `${Math.atan2(
-                          ((item.value - nextItem.value) / maxValue) *
-                            chartHeight,
+                          ((item.value - nextValue) / maxValue) * chartHeight,
                           CHART_WIDTH / 6,
                         )}rad`,
                       },
@@ -317,24 +334,19 @@ const InsightsScreen = () => {
             <Text style={styles.statValue}>{totalMemories}</Text>
             <Text style={styles.statLabel}>Memories</Text>
           </View>
-          {steps != null ? (
-            <View style={styles.statCard}>
-              <Ionicons name="walk-outline" size={20} color={c.success} />
-              <Text style={styles.statValue}>{steps.toLocaleString()}</Text>
-              <Text style={styles.statLabel}>Steps</Text>
-            </View>
-          ) : (
-            <View style={styles.statCard}>
-              <Ionicons name="moon-outline" size={20} color={c.warning} />
-              <Text style={styles.statValue}>{sleepHours ?? "—"}</Text>
-              <Text style={styles.statLabel}>Sleep (h)</Text>
-            </View>
-          )}
+          <View style={styles.statCard}>
+            <Ionicons name="sparkles-outline" size={20} color={c.warning} />
+            <Text style={styles.statValue}>{summariesCount}</Text>
+            <Text style={styles.statLabel}>Summaries</Text>
+          </View>
         </View>
 
         {/* ── Mood Trends ─────────────────────────────── */}
         <View style={styles.section}>
-          <SectionHeader title="Mood Trends" action="7 days" />
+          <SectionHeader
+            title="Mood Trends"
+            action={`${moodDaysTracked}/7 days with mood data`}
+          />
           <AppCard>
             {renderMoodChart()}
             <View style={styles.daysRow}>

@@ -10,7 +10,9 @@ import {
   Modal,
   Platform,
   TouchableWithoutFeedback,
+  Linking,
 } from "react-native";
+import * as Location from "expo-location";
 import * as WebBrowser from "expo-web-browser";
 import DateTimePicker, {
   type DateTimePickerEvent,
@@ -641,6 +643,36 @@ const SettingsScreen = () => {
 
     const previous = locationTrackingEnabled;
     const next = !locationTrackingEnabled;
+
+    if (next) {
+      const permission = await Location.getForegroundPermissionsAsync();
+      if (permission.status !== "granted") {
+        const requested = await Location.requestForegroundPermissionsAsync();
+        if (requested.status !== "granted") {
+          setLocationTrackingEnabled(false);
+          await updateMyLocationTrackingState({
+            locationTrackingEnabled: false,
+            locationPermissionStatus: "denied",
+          });
+
+          Alert.alert(
+            "Location permission needed",
+            "DayLog only stores coarse area signals while the app is open. Enable location permission in system settings to turn this on.",
+            [
+              {
+                text: "Open Settings",
+                onPress: () => {
+                  void Linking.openSettings();
+                },
+              },
+              { text: "Not now", style: "cancel" },
+            ],
+          );
+          return;
+        }
+      }
+    }
+
     setLocationTrackingEnabled(next);
 
     try {
@@ -654,7 +686,7 @@ const SettingsScreen = () => {
       setIntegrationFeedback({
         type: "success",
         message: next
-          ? "Foreground location tracking enabled. DayLog will only collect coarse location while the app is open."
+          ? "Foreground location tracking enabled. DayLog only collects coarse area signals while the app is open."
           : "Foreground location tracking disabled.",
       });
     } catch {

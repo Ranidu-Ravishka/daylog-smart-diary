@@ -823,6 +823,26 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
+      <Card className="mb-8">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">Location data transparency</CardTitle>
+          <CardDescription>
+            DayLog stores privacy-first location signals only.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pb-5 text-xs text-muted-foreground space-y-1.5">
+          <p>
+            • Location is opt-in and collected only while the mobile app is
+            open.
+          </p>
+          <p>
+            • Stored values are coarse area labels (approximate), not raw GPS
+            trails.
+          </p>
+          <p>• You control whether location signals are included in exports.</p>
+        </CardContent>
+      </Card>
+
       {/* ── Save ──────────────────────────────────────── */}
       <Button onClick={handleSave} disabled={isSaving}>
         {isSaving ? (

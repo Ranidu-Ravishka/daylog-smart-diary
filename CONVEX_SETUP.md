@@ -89,12 +89,12 @@ OPENAI_API_KEY=your_openai_api_key
 SUMMARY_DAILY_GENERATION_LIMIT=5
 ```
 
-These Convex variables are now strictly validated at startup in backend entry points:
+These Convex variables are validated in backend entry points:
 
 - `CLERK_JWT_ISSUER_DOMAIN` (must be a real https URL)
 - `CLERK_WEBHOOK_SECRET` (must start with `whsec_`)
 - `OPENAI_API_KEY` (must start with `sk-`)
-- `SUMMARY_DAILY_GENERATION_LIMIT` (must be a positive integer, e.g. `5`)
+- `SUMMARY_DAILY_GENERATION_LIMIT` (recommended positive integer, e.g. `5`; defaults to `5` if missing or invalid)
 
 `OPENAI_API_KEY` is required for manual AI summary generation from the web dashboard.
 

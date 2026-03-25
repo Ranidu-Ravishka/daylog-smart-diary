@@ -199,3 +199,77 @@ export const reserveSummaryGenerationSlot = mutation({
     };
   },
 });
+
+export const exportMyDiaryData = query({
+  args: {
+    includeLocationSignals: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    const includeLocationSignals = args.includeLocationSignals ?? false;
+
+    const summaries = await ctx.db
+      .query("daySummaries")
+      .withIndex("by_user_generatedAt", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .collect();
+
+    const memories = await ctx.db
+      .query("memories")
+      .withIndex("by_user_happenedAt", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .collect();
+
+    const days = await ctx.db
+      .query("days")
+      .withIndex("by_user_day", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .collect();
+
+    const integrations = await ctx.db
+      .query("integrationDailyData")
+      .withIndex("by_user_day", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .collect();
+
+    const integrationDailyData = integrations
+      .filter((item) => includeLocationSignals || item.provider !== "location")
+      .map((item) => ({
+        provider: item.provider,
+        dayKey: item.dayKey,
+        syncedAt: item.syncedAt,
+        summary: item.summary,
+        metrics: item.metrics,
+        signals:
+          item.provider === "location" && !includeLocationSignals
+            ? []
+            : (item.signals ?? []),
+      }));
+
+    return {
+      exportedAt: Date.now(),
+      summaries: summaries.map((summary) => ({
+        dayKey: summary.dayKey,
+        story: summary.story,
+        highlights: summary.highlights,
+        metrics: summary.metrics,
+        sourcesUsed: summary.sourcesUsed,
+        generatedAt: summary.generatedAt,
+      })),
+      memories: memories.map((memory) => ({
+        dayKey: memory.dayKey,
+        title: memory.title,
+        description: memory.description,
+        mood: memory.mood,
+        happenedAt: memory.happenedAt,
+      })),
+      days: days.map((day) => ({
+        dayKey: day.dayKey,
+        rating: day.rating,
+        manualNotes: day.manualNotes ?? [],
+        peopleTags: day.peopleTags ?? [],
+      })),
+      integrationDailyData,
+    };
+  },
+});
