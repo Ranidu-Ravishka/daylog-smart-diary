@@ -38,6 +38,9 @@ const PROVIDER_SYNC_BASE_BACKOFF_MS = 300;
 const PROVIDER_SYNC_TIMEOUT_MS = 8_000;
 const PROVIDER_SYNC_TOTAL_BUDGET_MS = 20_000;
 const SYNC_RUN_IN_PROGRESS_TTL_MS = 60_000;
+const ACCESS_TOKEN_REFRESH_LEEWAY_MS = 60_000;
+const TOKEN_REFRESH_MAX_ATTEMPTS = 3;
+const TOKEN_REFRESH_BASE_BACKOFF_MS = 300;
 
 class ProviderRequestError extends Error {
   status: number;
@@ -51,12 +54,66 @@ class ProviderRequestError extends Error {
   }
 }
 
+class ProviderTokenRefreshError extends Error {
+  status: number;
+  retryable: boolean;
+
+  constructor(status: number, message: string, retryable: boolean) {
+    super(message);
+    this.name = "ProviderTokenRefreshError";
+    this.status = status;
+    this.retryable = retryable;
+  }
+}
+
+type OAuthRefreshProvider = "google_calendar" | "google_fit" | "spotify";
+
+type ProviderOAuthCredentials = {
+  tokenUrl: string;
+  clientId: string;
+  clientSecret: string;
+};
+
+type RefreshedTokenPayload = {
+  accessToken: string;
+  refreshToken?: string;
+  accessTokenExpiresAt?: number;
+};
+
 function isSupportedProvider(
   provider: string,
 ): provider is SupportedIntegrationProvider {
   return SUPPORTED_INTEGRATION_PROVIDERS.includes(
     provider as SupportedIntegrationProvider,
   );
+}
+
+function isOAuthRefreshProvider(
+  provider: string,
+): provider is OAuthRefreshProvider {
+  return (
+    provider === "google_calendar" ||
+    provider === "google_fit" ||
+    provider === "spotify"
+  );
+}
+
+function getProviderOAuthCredentials(
+  provider: OAuthRefreshProvider,
+): ProviderOAuthCredentials {
+  if (provider === "google_calendar" || provider === "google_fit") {
+    return {
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      clientId: process.env.GOOGLE_CLIENT_ID ?? "",
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+    };
+  }
+
+  return {
+    tokenUrl: "https://accounts.spotify.com/api/token",
+    clientId: process.env.SPOTIFY_CLIENT_ID ?? "",
+    clientSecret: process.env.SPOTIFY_CLIENT_SECRET ?? "",
+  };
 }
 
 function getUtcDayRange(dayKey: string) {
@@ -88,8 +145,26 @@ function isRetryableProviderStatus(status: number): boolean {
   return status === 429 || status >= 500;
 }
 
+function isRetryableTokenRefreshStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
 function isRetryableProviderError(error: unknown): boolean {
   if (error instanceof ProviderRequestError) return error.retryable;
+  if (error instanceof TypeError) return true;
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    (error as { name?: string }).name === "AbortError"
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isRetryableTokenRefreshError(error: unknown): boolean {
+  if (error instanceof ProviderTokenRefreshError) return error.retryable;
   if (error instanceof TypeError) return true;
   if (
     typeof error === "object" &&
@@ -114,6 +189,115 @@ function jitteredBackoff(attempt: number): number {
   return base + jitter;
 }
 
+function tokenRefreshBackoff(attempt: number): number {
+  const base = TOKEN_REFRESH_BASE_BACKOFF_MS * 2 ** (attempt - 1);
+  const jitter = Math.floor(Math.random() * 180);
+  return base + jitter;
+}
+
+function isAccessTokenNearExpiry(expiresAt: number | undefined): boolean {
+  if (typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) {
+    return false;
+  }
+
+  return expiresAt - Date.now() <= ACCESS_TOKEN_REFRESH_LEEWAY_MS;
+}
+
+async function refreshOAuthAccessToken(
+  provider: OAuthRefreshProvider,
+  refreshToken: string,
+): Promise<RefreshedTokenPayload> {
+  const credentials = getProviderOAuthCredentials(provider);
+
+  if (!credentials.clientId || !credentials.clientSecret) {
+    throw new Error(
+      `OAuth client credentials are missing for provider "${provider}". Configure ${provider === "spotify" ? "SPOTIFY_CLIENT_ID/SPOTIFY_CLIENT_SECRET" : "GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET"} in Convex environment variables.`,
+    );
+  }
+
+  const form = new URLSearchParams();
+  form.set("grant_type", "refresh_token");
+  form.set("refresh_token", refreshToken);
+  form.set("client_id", credentials.clientId);
+  form.set("client_secret", credentials.clientSecret);
+
+  const response = await fetch(credentials.tokenUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: form.toString(),
+  });
+
+  if (!response.ok) {
+    const status = response.status;
+    const retryable = isRetryableTokenRefreshStatus(status);
+    throw new ProviderTokenRefreshError(
+      status,
+      `Token refresh failed (${status}) for provider "${provider}".`,
+      retryable,
+    );
+  }
+
+  const payload = (await response.json()) as {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+  };
+
+  if (!payload.access_token) {
+    throw new Error(
+      `Token refresh returned no access_token for provider "${provider}".`,
+    );
+  }
+
+  const expiresInSeconds =
+    typeof payload.expires_in === "number" &&
+    Number.isFinite(payload.expires_in) &&
+    payload.expires_in > 0
+      ? payload.expires_in
+      : undefined;
+
+  return {
+    accessToken: payload.access_token,
+    refreshToken:
+      typeof payload.refresh_token === "string" &&
+      payload.refresh_token.trim().length > 0
+        ? payload.refresh_token
+        : undefined,
+    accessTokenExpiresAt: expiresInSeconds
+      ? Date.now() + expiresInSeconds * 1000
+      : undefined,
+  };
+}
+
+async function refreshOAuthAccessTokenWithRetry(
+  provider: OAuthRefreshProvider,
+  refreshToken: string,
+): Promise<RefreshedTokenPayload> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= TOKEN_REFRESH_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await refreshOAuthAccessToken(provider, refreshToken);
+    } catch (error) {
+      lastError = error;
+
+      const shouldRetry =
+        attempt < TOKEN_REFRESH_MAX_ATTEMPTS &&
+        isRetryableTokenRefreshError(error);
+
+      if (!shouldRetry) break;
+
+      await sleep(tokenRefreshBackoff(attempt));
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Token refresh failed unexpectedly.");
+}
+
 function remainingBudget(syncStartedAt: number): number {
   return PROVIDER_SYNC_TOTAL_BUDGET_MS - (Date.now() - syncStartedAt);
 }
@@ -132,11 +316,16 @@ async function upsertIntegrationSecret(
         }) => unknown,
       ) => {
         collect: () => Promise<
-          Array<{ _id: Id<"integrationSecrets">; tokenRef: string }>
+          Array<{
+            _id: Id<"integrationSecrets">;
+            tokenRef: string;
+            refreshToken?: string;
+          }>
         >;
         unique: () => Promise<{
           _id: Id<"integrationSecrets">;
           tokenRef: string;
+          refreshToken?: string;
         } | null>;
       };
     };
@@ -154,6 +343,9 @@ async function upsertIntegrationSecret(
     userId: Id<"user">;
     provider: string;
     accessToken: string;
+    refreshToken?: string;
+    accessTokenExpiresAt?: number;
+    lastRefreshAt?: number;
     existingTokenRef?: string;
   },
 ): Promise<string> {
@@ -169,11 +361,21 @@ async function upsertIntegrationSecret(
     .unique();
 
   if (existing) {
-    await db.patch(existing._id, {
+    const patchPayload: Record<string, unknown> = {
       userId: args.userId,
       provider: args.provider,
       accessToken: args.accessToken,
+      accessTokenExpiresAt: args.accessTokenExpiresAt,
+      lastRefreshAt: args.lastRefreshAt,
       updatedAt: now,
+    };
+
+    if (args.refreshToken !== undefined) {
+      patchPayload.refreshToken = args.refreshToken;
+    }
+
+    await db.patch(existing._id, {
+      ...patchPayload,
     });
     return tokenRef;
   }
@@ -183,6 +385,9 @@ async function upsertIntegrationSecret(
     provider: args.provider,
     tokenRef,
     accessToken: args.accessToken,
+    refreshToken: args.refreshToken,
+    accessTokenExpiresAt: args.accessTokenExpiresAt,
+    lastRefreshAt: args.lastRefreshAt,
     createdAt: now,
     updatedAt: now,
   });
@@ -594,16 +799,23 @@ export const connectIntegration = mutation({
   args: {
     provider: v.string(),
     scopes: v.optional(v.array(v.string())),
+    accessToken: v.optional(v.string()),
+    refreshToken: v.optional(v.string()),
+    accessTokenExpiresAt: v.optional(v.number()),
     tokenRef: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
 
-    const nextTokenRef = args.tokenRef
+    const accessToken = args.accessToken ?? args.tokenRef;
+
+    const nextTokenRef = accessToken
       ? await upsertIntegrationSecret(ctx.db as never, {
           userId: user._id,
           provider: args.provider,
-          accessToken: args.tokenRef,
+          accessToken,
+          refreshToken: args.refreshToken,
+          accessTokenExpiresAt: args.accessTokenExpiresAt,
         })
       : undefined;
 
@@ -674,17 +886,27 @@ export const getIntegrationAccessTokenByRefInternal = internalQuery({
     provider: v.string(),
   },
   handler: async (ctx, args) => {
-    const secret = await ctx.db
+    const secret = (await ctx.db
       .query("integrationSecrets")
       .withIndex("by_tokenRef", (q) => q.eq("tokenRef", args.tokenRef))
-      .unique();
+      .unique()) as {
+      userId: Id<"user">;
+      provider: string;
+      accessToken: string;
+      refreshToken?: string;
+      accessTokenExpiresAt?: number;
+    } | null;
 
     if (!secret) return null;
     if (secret.userId !== args.userId || secret.provider !== args.provider) {
       return null;
     }
 
-    return { accessToken: secret.accessToken };
+    return {
+      accessToken: secret.accessToken,
+      refreshToken: secret.refreshToken,
+      accessTokenExpiresAt: secret.accessTokenExpiresAt,
+    };
   },
 });
 
@@ -693,6 +915,9 @@ export const storeIntegrationSecretInternal = internalMutation({
     userId: v.id("user"),
     provider: v.string(),
     accessToken: v.string(),
+    refreshToken: v.optional(v.string()),
+    accessTokenExpiresAt: v.optional(v.number()),
+    lastRefreshAt: v.optional(v.number()),
     existingTokenRef: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -700,6 +925,9 @@ export const storeIntegrationSecretInternal = internalMutation({
       userId: args.userId,
       provider: args.provider,
       accessToken: args.accessToken,
+      refreshToken: args.refreshToken,
+      accessTokenExpiresAt: args.accessTokenExpiresAt,
+      lastRefreshAt: args.lastRefreshAt,
       existingTokenRef: args.existingTokenRef,
     });
   },
@@ -1147,6 +1375,8 @@ export const syncMyIntegrationForDay = action({
     }
 
     const syncStartedAt = Date.now();
+    const oauthRefreshProvider: OAuthRefreshProvider | null =
+      isOAuthRefreshProvider(args.provider) ? args.provider : null;
 
     try {
       if (!integration.tokenRef) {
@@ -1155,7 +1385,11 @@ export const syncMyIntegrationForDay = action({
         );
       }
 
+      let currentTokenRef = integration.tokenRef;
       let accessToken = integration.tokenRef;
+      let refreshToken: string | undefined;
+      let accessTokenExpiresAt: number | undefined;
+
       if (isOpaqueTokenRef(integration.tokenRef)) {
         const secret = (await ctx.runQuery(
           internal.integrations.getIntegrationAccessTokenByRefInternal,
@@ -1164,7 +1398,11 @@ export const syncMyIntegrationForDay = action({
             userId: integration.userId,
             provider: args.provider,
           },
-        )) as { accessToken: string } | null;
+        )) as {
+          accessToken: string;
+          refreshToken?: string;
+          accessTokenExpiresAt?: number;
+        } | null;
 
         if (!secret?.accessToken) {
           throw new Error(
@@ -1173,6 +1411,8 @@ export const syncMyIntegrationForDay = action({
         }
 
         accessToken = secret.accessToken;
+        refreshToken = secret.refreshToken;
+        accessTokenExpiresAt = secret.accessTokenExpiresAt;
       } else {
         const migratedTokenRef = await ctx.runMutation(
           internal.integrations.storeIntegrationSecretInternal,
@@ -1190,14 +1430,99 @@ export const syncMyIntegrationForDay = action({
             tokenRef: migratedTokenRef,
           },
         );
+
+        currentTokenRef = migratedTokenRef;
       }
 
-      const normalized = await syncProviderForDay(
-        args.provider,
-        accessToken,
-        args.dayKey,
-        syncStartedAt,
-      );
+      if (
+        oauthRefreshProvider &&
+        isAccessTokenNearExpiry(accessTokenExpiresAt)
+      ) {
+        if (!refreshToken) {
+          throw new Error(
+            `Provider "${args.provider}" access token has expired and no refresh token is available. Reconnect integration.`,
+          );
+        }
+
+        const refreshed = await refreshOAuthAccessTokenWithRetry(
+          oauthRefreshProvider,
+          refreshToken,
+        );
+
+        const nextRefreshToken = refreshed.refreshToken ?? refreshToken;
+
+        currentTokenRef = await ctx.runMutation(
+          internal.integrations.storeIntegrationSecretInternal,
+          {
+            userId: integration.userId,
+            provider: args.provider,
+            accessToken: refreshed.accessToken,
+            refreshToken: nextRefreshToken,
+            accessTokenExpiresAt: refreshed.accessTokenExpiresAt,
+            lastRefreshAt: Date.now(),
+            existingTokenRef: currentTokenRef,
+          },
+        );
+
+        accessToken = refreshed.accessToken;
+        refreshToken = nextRefreshToken;
+        accessTokenExpiresAt = refreshed.accessTokenExpiresAt;
+      }
+
+      let normalized: NormalizedIntegrationDailySync;
+
+      try {
+        normalized = await syncProviderForDay(
+          args.provider,
+          accessToken,
+          args.dayKey,
+          syncStartedAt,
+        );
+      } catch (error) {
+        const shouldRetryAfterRefresh =
+          !!oauthRefreshProvider &&
+          !!refreshToken &&
+          error instanceof ProviderRequestError &&
+          error.status === 401;
+
+        if (!shouldRetryAfterRefresh) {
+          throw error;
+        }
+
+        if (!oauthRefreshProvider || !refreshToken) {
+          throw error;
+        }
+
+        const refreshed = await refreshOAuthAccessTokenWithRetry(
+          oauthRefreshProvider,
+          refreshToken,
+        );
+
+        const nextRefreshToken = refreshed.refreshToken ?? refreshToken;
+        await ctx.runMutation(
+          internal.integrations.storeIntegrationSecretInternal,
+          {
+            userId: integration.userId,
+            provider: args.provider,
+            accessToken: refreshed.accessToken,
+            refreshToken: nextRefreshToken,
+            accessTokenExpiresAt: refreshed.accessTokenExpiresAt,
+            lastRefreshAt: Date.now(),
+            existingTokenRef: currentTokenRef,
+          },
+        );
+
+        accessToken = refreshed.accessToken;
+        refreshToken = nextRefreshToken;
+        accessTokenExpiresAt = refreshed.accessTokenExpiresAt;
+
+        normalized = await syncProviderForDay(
+          args.provider,
+          accessToken,
+          args.dayKey,
+          syncStartedAt,
+        );
+      }
 
       await ctx.runMutation(
         internal.integrations.upsertIntegrationDailyDataInternal,

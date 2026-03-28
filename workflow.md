@@ -1,354 +1,285 @@
-# DayLog Engineering Workflow (Current State + Delivery Plan)
+# DayLog Engineering Workflow (Reality-Aligned, March 2026)
 
-Project: DayLog – AI-Assisted Journal  
+Project: DayLog - AI-Assisted Journal  
 Module: PUSL3190 Computing Project
 
-This workflow is based on the **actual repository implementation** in:
+This workflow is the implementation-aware source of truth for how we build, review, and ship DayLog.
 
-- `apps/web` (user web app)
-- `apps/mobile` (Expo app)
-- `apps/admin` (admin console)
-- `packages/backend/convex` (shared backend)
+Applies to:
 
----
-
-## 1) Project Overview
-
-DayLog is a monorepo journaling platform with:
-
-- **Core diary loop implemented**: memory CRUD, day rating, day notes/tags, AI summary generation.
-- **Cross-client architecture**: web + mobile clients on a shared Convex backend.
-- **Admin operations**: CRUD and metrics across core domain tables.
-- **Security baseline**: Clerk auth, ownership checks, env validation, webhook signature verification.
-
-Current status: **strong MVP with implemented summary + integrations + mobile controls, plus clear boundary notes for future items**.
-
-### Implementation boundary (important)
-
-- Implemented now: memories, mood tags, day rating, OpenAI daily summaries, Spotify/Google Calendar/Google Fit sync, Apple Health daily upload path, mobile integration controls, and optional foreground location tracking.
-- Not implemented now: background location tracking and call-log ingestion.
-- Product copy and demos must present background location and call logs only as future scope.
+- apps/web (user web app)
+- apps/mobile (Expo app)
+- apps/admin (admin console)
+- packages/backend/convex (shared Convex backend)
 
 ---
 
-## 2) Architecture Summary
+## 1) Critical Findings First
+
+### High Severity
+
+1. OAuth integrations do not persist or use refresh tokens.
+   - Risk: provider connections eventually fail after access token expiry.
+   - Impact: scheduled or repeated sync degrades over time.
+
+2. CI and testing docs were previously out of sync with executable gates.
+   - Mitigation: CI now includes an explicit Backend Validation job and docs are aligned to real checks.
+   - Residual risk: branch protection settings in GitHub must continue to match workflow job names.
+
+### Medium Severity
+
+1. Provider validation is inconsistent across write APIs.
+   - Risk: arbitrary provider strings can enter data paths.
+   - Impact: data quality drift and harder operational debugging.
+
+2. Integration sync-run query path has avoidable scale cost.
+   - Risk: query collects broadly then filters in memory.
+   - Impact: read amplification as sync history grows.
+
+### Low Severity
+
+1. Backend docs have stale module naming.
+   - Risk: contributor confusion and onboarding slowdown.
+   - Impact: avoidable implementation mistakes and slower ramp-up.
+
+---
+
+## 2) Open Assumptions (Must Be Confirmed)
+
+1. Product intent is long-lived OAuth integrations (production lifecycle), not short-session tokens.
+2. Backend behavior tests were removed or paused intentionally, not accidentally lost.
+3. location is intentionally modeled as a contextual integration provider for daily signal ingestion.
+
+If any assumption is wrong, update this document and the remediation plan before coding.
+
+---
+
+## 3) Evolution Timeline (Implemented Phases)
+
+1. Foundation: Turborepo + pnpm monorepo bootstrap.
+2. Platform wiring: Convex integrated across web, admin, and mobile.
+3. Identity migration: Auth0 experiments shifted to Clerk + Convex.
+4. Core loop: memory CRUD, mood capture, day rating, dashboard flow.
+5. Admin maturity: paginated admin lists, CRUD detail/edit flows, role gating.
+6. AI summaries: OpenAI summary generation plus quota and retry hardening.
+7. Security hardening: strict env validation, webhook verification, CI secret scanning.
+8. Integrations: Google Calendar, Google Fit, Spotify OAuth, Apple Health upload path.
+9. Mobile context: reminders, onboarding steps, foreground location, screen-time augmentation.
+
+---
+
+## 4) Architecture Snapshot (Current)
 
 ### Frontend
 
-- `apps/web`: Next.js user dashboard (`/dashboard`) with memory CRUD, rating, summary generation, settings, export, account.
-- `apps/mobile`: Expo app with tabs (home, add-memory, memory detail, insights, profile, quick setup).
-- `apps/admin`: Next.js admin panel with paginated list views and CRUD for users/memories/days/summaries/integrations/preferences/audit logs.
+- apps/web: dashboard, memory flow, summaries, settings, export, OAuth routes.
+- apps/mobile: tab-based app with quick setup, profile controls, reminder and integration operations.
+- apps/admin: admin dashboard and data management with server-backed pagination.
 
 ### Backend
 
-- `packages/backend/convex/schema.ts`: data model for users, preferences, memories, memory media, days, summaries, integrations, integration secrets, sync runs, content, audit logs, quotas.
-- Domain handlers:
-  - `users.ts`, `userPreferences.ts`, `memories.ts`, `days.ts`, `summaries.ts`
-  - `summaryGeneration.ts` (OpenAI action)
-  - `integrations.ts` (provider sync + secret refs)
-  - `admin.ts` (admin CRUD + metrics)
-- HTTP endpoint: `http.ts` → `/clerk/webhook`.
+- schema-first Convex model in schema.ts.
+- auth and ownership boundaries in authz.ts.
+- domains: users, userPreferences, memories, days, summaries, summaryGeneration, integrations, admin.
+- webhook endpoint in http.ts.
 
-### Auth & Authorization
+### Strengths to Keep
 
-- Clerk for all clients.
-- Convex auth provider configured in `auth.config.ts`.
-- Shared guards in `authz.ts`: `requireUser`, `requireAdmin`, `requireOwnership`.
-
-### AI Flow
-
-- Trigger: `summaryGeneration.generateSummaryForDay`.
-- Input: memories + day metadata + integrationDailyData.
-- Model: `gpt-4o` with JSON schema response.
-- Output persisted via `summaries.upsertSummary`.
-- Quota: `SUMMARY_DAILY_GENERATION_LIMIT` from backend runtime config (`runtimeConfig.ts`), enforced in `summaries.ts`.
-
-### Integrations
-
-- Providers supported in backend: `google_calendar`, `google_fit`, `spotify`, `apple_health`.
-- Tokens stored in `integrationSecrets` with opaque `tokref_*` references.
-- Sync runs tracked in `integrationSyncRuns`.
-- Normalized daily data in `integrationDailyData`.
+1. Cross-platform dayKey-centric data model.
+2. Good ownership enforcement patterns.
+3. Integration sync idempotency and retry controls.
+4. Summary generation normalization and schema-constrained output.
+5. Strong mobile preference and runtime-state UX for reminders/location.
 
 ---
 
-## 3) Development Setup
+## 5) Implementation Boundaries
 
-### Prerequisites
+Implemented now:
 
-- Node `>=18`
-- pnpm `10.x`
-- Convex project
-- Clerk project
-- OpenAI API key
+- memory journaling, mood tags, day ratings, AI day summaries
+- integrations: Google Calendar, Google Fit, Spotify, Apple Health daily upload path
+- mobile reminders and optional foreground-only location signals
 
-### First-Time Setup
+Not implemented now:
 
-```bash
-pnpm install
-cp apps/web/.env.example apps/web/.env.local
-cp apps/admin/.env.example apps/admin/.env.local
-cp apps/mobile/.env.example apps/mobile/.env.local
-cp packages/backend/.env.example packages/backend/.env.local
-```
+- background location tracking
+- call-log ingestion
 
-### Start Development
-
-Terminal 1:
-
-```bash
-pnpm --filter @repo/backend dev
-```
-
-Terminal 2:
-
-```bash
-pnpm dev
-```
-
-Or per app:
-
-```bash
-pnpm dev:web
-pnpm dev:admin
-pnpm dev:mobile
-```
+All demos, docs, and stakeholder communication must treat non-implemented items as future scope.
 
 ---
 
-## 4) Environment & Configuration Guidance
+## 6) Real CI and Local Validation Truth
 
-### Required Runtime Variables
+CI source of truth: .github/workflows/feature.yml
 
-- Web/Admin:
-  - `NEXT_PUBLIC_CONVEX_URL`
-  - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
-  - `CLERK_SECRET_KEY`
-- Mobile:
-  - `EXPO_PUBLIC_CONVEX_URL`
-  - `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`
-- Convex Dashboard:
-  - `CLERK_JWT_ISSUER_DOMAIN`
-  - `CLERK_WEBHOOK_SECRET`
-  - `OPENAI_API_KEY`
-  - `ADMIN_BOOTSTRAP_CLERK_USER_IDS` (optional)
+Current CI jobs:
 
-### Rules
+- Feature Branch CI / ci-checks
+- Feature Branch CI / Backend Validation
+- Feature Branch CI / Mobile Validation
 
-- Never commit real secrets.
-- Keep `.env.example` placeholders only.
-- Use platform secret stores for deployed environments.
-- Backend/admin startup validation must remain strict (fail fast).
-
----
-
-## 5) Coding Workflow
-
-1. Create a branch from `main`.
-2. Implement one feature/fix per branch.
-3. Validate with targeted checks.
-4. Run full pre-PR checks.
-5. Open PR with scope, risk, and test evidence.
-6. Merge only after required CI passes.
-
-### Local Validation (minimum)
+Current local baseline (real scripts):
 
 ```bash
 pnpm lint
 pnpm typecheck
+pnpm build:web
+pnpm build:admin
+pnpm --filter @repo/backend lint
 pnpm --filter @repo/backend test:run
 pnpm --filter mobile check-types
 pnpm --filter mobile lint
 pnpm --filter mobile build:ci
-pnpm build:web
-pnpm build:admin
 ```
 
----
+Branch protection rules are configured in GitHub repository settings (not in git). Required status checks must match the workflow job names above exactly.
 
-## 6) Branch Naming Convention
-
-Current history contains mixed patterns (`feature/*`, `features/*`, `task/*`, `chore/*`, `feat/*`).  
-Use one standard moving forward:
-
-- `feat/<scope>-<short-description>`
-- `fix/<scope>-<short-description>`
-- `chore/<scope>-<short-description>`
-- `docs/<scope>-<short-description>`
-
-Examples:
-
-- `feat/mobile-reminder-push-scheduler`
-- `fix/web-settings-preference-sync`
-- `chore/admin-env-validation-refactor`
+Rule: do not document a command or CI gate unless it exists and is green in the repository.
 
 ---
 
-## 7) Commit Message Convention
+## 7) Step-by-Step Remediation Plan (Execution Order)
 
-Use Conventional Commits:
+### Step 0 - Align truth before feature work
 
-- `feat: add integration connect flow skeleton`
-- `fix: guard memory queries behind convex auth`
-- `chore: remove unused web public assets`
-- `docs: update workflow and delivery scope`
+Goal: eliminate doc/CI mismatch first.
 
-Commit guidance:
+Tasks:
 
-- Keep commits small and coherent.
-- Include migration notes in commit body if schema changes.
-- Avoid “misc updates” messages.
+1. Update README and backend READMEs to match actual scripts and checks.
+2. Decide one direction:
+   - restore backend tests plus CI Backend Tests job, or
+   - remove backend test claims until tests are reintroduced.
+3. Update branch protection check names to match workflow jobs.
 
----
+Exit criteria:
 
-## 8) Feature Development Process
+- every command in docs executes successfully
+- all required check names in docs match workflow file exactly
 
-For each feature:
+### Step 1 - Implement OAuth refresh-token lifecycle
 
-1. Define user-visible behavior + acceptance criteria.
-2. Identify backend contract first (Convex query/mutation/action).
-3. Implement UI state + loading/error states.
-4. Add/extend tests where test infrastructure exists.
-5. Validate authz + ownership boundaries.
-6. Document env/config implications.
+Goal: make integration auth durable.
 
-Delivery priority rule: **MVP reliability before breadth**.
+Tasks:
 
----
+1. Extend integration secret model for refresh credentials and token expiry metadata.
+2. Persist refresh_token during OAuth callback when provider returns it.
+3. Add pre-sync token-refresh logic for expired or near-expiry access tokens.
+4. Update stored access token after refresh.
+5. Record actionable error states when refresh fails.
 
-## 9) Testing Checklist
+Exit criteria:
 
-### Backend (required)
+- long-lived sync still works after access token expiry window
+- reconnect is no longer required for normal token expiry events
 
-- [ ] `pnpm --filter @repo/backend test:run` passes.
-- [ ] New backend logic has behavior/unit tests when feasible.
-- [ ] Validation errors return clear messages.
-- [ ] Unauthorized/forbidden paths are covered.
+### Step 2 - Enforce provider validation at write boundaries
 
-### Web/Admin/Mobile
+Goal: centralize allowed provider rules.
 
-- [ ] Lint + type checks pass.
-- [ ] Build succeeds for changed app(s).
-- [ ] Manual smoke test for changed flows completed.
-- [ ] Empty/loading/error states verified.
+Tasks:
 
-### Critical Manual Smoke Paths
+1. Create shared provider validator used by all integration write mutations/actions.
+2. Explicitly allow contextual provider values (for example location) where intended.
+3. Reject unknown providers with clear errors.
 
-- [ ] Sign in and user sync works in web/admin/mobile.
-- [ ] Memory create/edit/delete with media works.
-- [ ] Day rating persists.
-- [ ] Summary generation works and saves output.
-- [ ] Admin guard blocks non-admin users.
+Exit criteria:
 
----
+- no integration write path accepts uncontrolled provider strings
+- provider rules are defined once and reused
 
-## 10) Code Review Checklist
+### Step 3 - Optimize sync-run query scale path
 
-- [ ] Scope is focused and branch name is correct.
-- [ ] No secrets in code/docs/config.
-- [ ] Authz checks exist for any data mutation.
-- [ ] No duplicated business logic introduced.
-- [ ] Errors are surfaced to user (not only `console.error`).
-- [ ] Loading and failure states exist for async UI operations.
-- [ ] Docs updated for behavior/env/workflow changes.
+Goal: remove collect-then-filter pattern.
 
----
+Tasks:
 
-## 11) Deployment & Build Notes
+1. Add an index aligned to day-scoped query requirements.
+2. Replace in-memory filtering query with index-native query.
+3. Verify result ordering and parity with previous behavior.
 
-CI source of truth: `.github/workflows/feature.yml`.
+Exit criteria:
 
-Required checks:
+- sync-run list query is index-aligned for day lookups
+- no broad collect for day-specific user reads
 
-- `Feature Branch CI / ci-checks`
-- `Feature Branch CI / Backend Tests`
-- `Feature Branch CI / Mobile Validation`
+### Step 4 - Burn down documentation and type-safety drift
 
-Post-deploy checks:
+Goal: close reliability debt and improve contributor velocity.
 
-- Sign-in flow on web/admin/mobile.
-- Clerk webhook event delivery.
-- Summary generation action health.
-- Integration sync (if enabled in release).
+Tasks:
+
+1. Replace stale file names and commands in backend docs.
+2. Reduce any-based casts around summary and integration pipelines where practical.
+3. Add or restore backend behavioral tests tied to key auth/integration flows.
+
+Exit criteria:
+
+- docs reflect live repository structure
+- critical backend paths have deterministic test coverage
 
 ---
 
-## 12) Security Rules
+## 8) Branch, Commit, and PR Standards
 
-- All user-scoped backend operations must use `requireUser` + ownership checks.
-- All admin operations must use `requireAdmin`.
-- Keep webhook signature verification enabled.
-- Use dedicated secret for admin middleware cache signing (do not reuse Clerk secret).
-- Never expose integration access tokens to clients.
-- Rotate leaked credentials immediately and document the rotation.
+### Branch naming
+
+- feat/scope-description
+- fix/scope-description
+- chore/scope-description
+- docs/scope-description
+
+### Commit style
+
+- feat: add oauth token refresh flow
+- fix: validate integration provider on write paths
+- docs: align workflow and ci gates with repository reality
+
+### PR requirements
+
+1. Problem statement and risk summary.
+2. What changed and why.
+3. Validation evidence (commands run and outcomes).
+4. Rollback notes for risky migrations.
+5. Docs updated in same PR when behavior/contracts changed.
 
 ---
 
-## 13) Cleanup & Maintenance Rules
+## 9) Review Checklist (Reviewer + Author)
 
-Before each milestone/demo:
-
-- Remove or archive unused template assets and dead routes.
-- Remove stale docs referencing non-existent files/functions.
-- Standardize branch/commit naming.
-- Ensure version labels shown in UI match actual release version.
-- Keep workflow docs aligned with real implementation status.
-
-Do not delete files blindly; list candidates in PR description first.
+- [ ] No secrets committed.
+- [ ] Authz and ownership enforced on all user mutations.
+- [ ] Admin-only operations enforce requireAdmin paths.
+- [ ] Provider validation exists at every write boundary.
+- [ ] Integration token handling does not expose credentials to clients.
+- [ ] Loading, error, and retry states are user-visible for async UX.
+- [ ] CI jobs and docs are consistent.
+- [ ] Any new command in docs is executable in the repo.
 
 ---
 
-## 14) Definition of Done (DoD)
+## 10) Definition of Done
 
 A task is done only when:
 
-- Functional behavior works end-to-end.
-- Authz/security checks are correct.
-- Lint/type/tests/build checks pass.
-- Manual smoke test for affected flow is completed.
-- Documentation is updated.
-- Known limitations are explicitly stated if not resolved.
+1. End-to-end behavior works for target flows.
+2. Security and authz invariants are preserved.
+3. Lint, typecheck, and build checks pass.
+4. Critical manual smoke paths are verified.
+5. Documentation is updated to repository truth.
+6. Known limitations are clearly documented.
 
 ---
 
-## 15) Immediate Next Priorities (for final-year delivery)
+## 11) Current Explicit Gaps
 
-### P0 (must finish)
+1. OAuth refresh-token lifecycle is incomplete.
+2. Branch protection required checks must remain synchronized with workflow job names.
+3. Provider validation consistency is incomplete across write APIs.
+4. Integration sync-run day query path needs index alignment.
+5. Some docs still contain stale naming.
 
-1. **Reminder execution path hardening**
-   - Verify reliable reminder scheduling and delivery behavior across app restarts.
-2. **Web settings parity**
-   - Expose existing backend preference fields in web settings UI.
-3. **Frontend reliability tests**
-   - Add smoke-level tests for critical mobile and web journaling flows.
-4. **Demo-data and narration readiness**
-   - Prepare a deterministic demo script showing memory capture → integration sync → mobile summary generation.
-
-### P1 (high value)
-
-1. **Config-driven summary quota**
-   - Move hardcoded quota from code to config/admin-manageable source.
-2. **Frontend reliability tests**
-   - Add minimal smoke-level tests for key web/mobile flows.
-3. **Admin security hardening**
-   - Use dedicated cache-signing secret in admin middleware.
-
-### P2 (nice to have after MVP stability)
-
-1. Background location intelligence (privacy-aware opt-in).
-2. Call log ingestion (explicit opt-in and strong privacy controls).
-3. Richer export formats (CSV/PDF).
-4. Dashboard/insight polish and advanced analytics.
-
----
-
-## 16) Current Known Gaps (explicit)
-
-- Background location tracking is not implemented.
-- Call-log ingestion is not implemented.
-- Reminder preferences and scheduling are implemented, but delivery reliability still needs end-to-end hardening checks.
-- Mobile theme toggles are largely preference-level; many screens remain fixed `Colors.light`.
-- Frontend automated tests are missing.
-- Some docs are stale (e.g., `preferences.ts` reference in backend README while file is `userPreferences.ts`).
-
-This document should be updated whenever these gaps are addressed.
+This file must be updated whenever any gap above is resolved.

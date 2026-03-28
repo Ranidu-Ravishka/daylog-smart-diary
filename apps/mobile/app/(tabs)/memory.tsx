@@ -10,6 +10,7 @@ import {
   Alert,
   Image,
 } from "react-native";
+import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useMutation, useAction, useConvexAuth } from "convex/react";
@@ -99,6 +100,41 @@ function getTodayDayKey(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
+function getSummaryGenerationErrorMessage(error: unknown): string {
+  const fallback = "Could not generate summary right now.";
+  if (!(error instanceof Error) || !error.message) return fallback;
+
+  const rawMessage = error.message;
+  const noDataSignature =
+    "No memories, day metadata, or integration sync data found for this date";
+
+  if (rawMessage.includes(noDataSignature)) {
+    return "Add at least one memory, day note/rating/tag, or synced integration data before generating a summary.";
+  }
+
+  const lines = rawMessage
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const candidate = lines.find(
+    (line) =>
+      !line.startsWith("[CONVEX ") &&
+      !line.startsWith("[Request ID:") &&
+      !line.startsWith("Called by client") &&
+      !line.startsWith("at handler"),
+  );
+
+  if (!candidate) return fallback;
+
+  const cleaned = candidate
+    .replace(/^Uncaught Error:\s*/i, "")
+    .replace(/^Error:\s*/i, "")
+    .trim();
+
+  return cleaned || fallback;
+}
+
 function MemorySkeleton() {
   return (
     <SafeAreaView style={styles.safe}>
@@ -118,8 +154,12 @@ function MemorySkeleton() {
 }
 
 const DailyDetailView = () => {
+  const router = useRouter();
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
   const dayKey = getTodayDayKey();
+  const scrollRef = React.useRef<ScrollView>(null);
+  const manualNotesSectionYRef = React.useRef(0);
+  const manualEntryInputRef = React.useRef<TextInput>(null);
 
   const summary = useQuery(
     api.summaries.getSummaryByDay,
@@ -275,22 +315,44 @@ const DailyDetailView = () => {
     [peopleTags, dayKey, upsertDay],
   );
 
+  const hasDayMetadataForSummary =
+    day?.rating !== undefined ||
+    (day?.manualNotes?.length ?? 0) > 0 ||
+    (day?.peopleTags?.length ?? 0) > 0;
+  const hasSummaryInputs =
+    resolvedMemories.length > 0 ||
+    hasDayMetadataForSummary ||
+    integrationDailyData.length > 0;
+  const isSummaryActionDisabled = isGeneratingSummary || !hasSummaryInputs;
+
   const handleGenerateSummary = useCallback(async () => {
+    if (!hasSummaryInputs) {
+      setSummaryGenerationError(
+        "Add at least one memory, day note/rating/tag, or synced integration data before generating a summary.",
+      );
+      return;
+    }
+
     setIsGeneratingSummary(true);
     setSummaryGenerationError(null);
 
     try {
       await generateSummaryForDay({ dayKey });
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Could not generate summary right now.";
-      setSummaryGenerationError(message);
+      setSummaryGenerationError(getSummaryGenerationErrorMessage(error));
     } finally {
       setIsGeneratingSummary(false);
     }
-  }, [dayKey, generateSummaryForDay]);
+  }, [dayKey, generateSummaryForDay, hasSummaryInputs]);
+
+  const handleJumpToManualNotes = useCallback(() => {
+    const targetY = Math.max(0, manualNotesSectionYRef.current - Spacing.xl);
+    scrollRef.current?.scrollTo({ y: targetY, animated: true });
+
+    setTimeout(() => {
+      manualEntryInputRef.current?.focus();
+    }, 260);
+  }, []);
 
   if (isLoading) return <MemorySkeleton />;
 
@@ -304,6 +366,7 @@ const DailyDetailView = () => {
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -370,22 +433,40 @@ const DailyDetailView = () => {
                 icon="book-outline"
                 title="No story yet"
                 subtitle="Generate a summary from your memories and connected integration data."
+                actionLabel="Add Memory"
+                onAction={() => router.push("/add-memory")}
               />
             )}
 
             <View style={{ marginTop: Spacing.md, gap: Spacing.sm }}>
+              {!summary && !hasSummaryInputs ? (
+                <AppButton
+                  title="Add Day Note"
+                  onPress={handleJumpToManualNotes}
+                  variant="secondary"
+                  size="md"
+                  icon={
+                    <Ionicons name="create-outline" size={16} color={c.tint} />
+                  }
+                />
+              ) : null}
+
               <AppButton
                 title={
                   summary
                     ? isGeneratingSummary
                       ? "Refreshing..."
-                      : "Refresh Summary"
+                      : hasSummaryInputs
+                        ? "Refresh Summary"
+                        : "Add data to refresh"
                     : isGeneratingSummary
                       ? "Generating..."
-                      : "Generate Summary"
+                      : hasSummaryInputs
+                        ? "Generate Summary"
+                        : "Add data to generate"
                 }
                 onPress={handleGenerateSummary}
-                disabled={isGeneratingSummary}
+                disabled={isSummaryActionDisabled}
                 loading={isGeneratingSummary}
                 size="md"
               />
@@ -394,6 +475,13 @@ const DailyDetailView = () => {
                 <Text style={styles.summaryHintText}>
                   Daily summary quota: {summaryQuota.remaining} remaining of{" "}
                   {summaryQuota.limit}
+                </Text>
+              ) : null}
+
+              {!hasSummaryInputs ? (
+                <Text style={styles.summaryBlockedHintText}>
+                  This day has no memories, notes, rating, people tags, or
+                  synced integration data yet.
                 </Text>
               ) : null}
 
@@ -452,6 +540,8 @@ const DailyDetailView = () => {
                 icon="time-outline"
                 title="No memories today"
                 subtitle="Everything is working—this day just has no memories yet. Add one to get started."
+                actionLabel="Add Memory"
+                onAction={() => router.push("/add-memory")}
               />
             </AppCard>
           </View>
@@ -511,7 +601,12 @@ const DailyDetailView = () => {
         )}
 
         {/* ── Manual Notes ─────────────────────────────── */}
-        <View style={styles.section}>
+        <View
+          style={styles.section}
+          onLayout={(event) => {
+            manualNotesSectionYRef.current = event.nativeEvent.layout.y;
+          }}
+        >
           <SectionHeader title="Manual Notes" />
           <AppCard>
             {manualNotes.length > 0 && (
@@ -525,6 +620,7 @@ const DailyDetailView = () => {
               </View>
             )}
             <TextInput
+              ref={manualEntryInputRef}
               style={styles.input}
               placeholder="Add what mattered today..."
               placeholderTextColor={c.textTertiary}
@@ -694,6 +790,10 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md,
   },
   summaryHintText: {
+    ...Typography.caption2,
+    color: c.textSecondary,
+  },
+  summaryBlockedHintText: {
     ...Typography.caption2,
     color: c.textSecondary,
   },

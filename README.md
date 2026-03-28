@@ -102,7 +102,7 @@ pnpm lint:mobile
 PR validation runs in `.github/workflows/feature.yml` and should require these job checks in branch protection:
 
 - `Feature Branch CI / ci-checks`
-- `Feature Branch CI / Backend Tests`
+- `Feature Branch CI / Backend Validation`
 - `Feature Branch CI / Mobile Validation`
 
 Run the same gates locally before opening a PR:
@@ -110,6 +110,7 @@ Run the same gates locally before opening a PR:
 ```bash
 pnpm lint
 pnpm typecheck
+pnpm --filter @repo/backend lint
 pnpm --filter @repo/backend test:run
 pnpm --filter mobile check-types
 pnpm --filter mobile lint
@@ -127,10 +128,13 @@ pnpm --filter mobile build:ci
 Run the same validation locally after admin/backend changes:
 
 ```bash
+pnpm --filter @repo/backend lint
 pnpm --filter @repo/backend test:run
 pnpm --filter admin lint
 pnpm --filter admin build
 ```
+
+Branch protection rules are configured in GitHub repository settings and are not versioned in this repository. Keep the required status checks above in sync with workflow job names.
 
 ## App-specific docs
 

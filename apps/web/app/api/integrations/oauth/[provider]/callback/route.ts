@@ -40,7 +40,12 @@ async function exchangeCodeForAccessToken(
   provider: "google_calendar" | "google_fit" | "spotify",
   code: string,
   redirectUri: string,
-): Promise<{ accessToken: string; grantedScope: string[] }> {
+): Promise<{
+  accessToken: string;
+  refreshToken?: string;
+  accessTokenExpiresAt?: number;
+  grantedScope: string[];
+}> {
   const config = getOAuthProviderConfig(provider);
 
   const body = new URLSearchParams();
@@ -66,6 +71,8 @@ async function exchangeCodeForAccessToken(
 
   const tokenPayload = (await response.json()) as {
     access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
     scope?: string;
   };
 
@@ -73,8 +80,23 @@ async function exchangeCodeForAccessToken(
     throw new Error("OAuth token exchange returned no access token");
   }
 
+  const expiresInSeconds =
+    typeof tokenPayload.expires_in === "number" &&
+    Number.isFinite(tokenPayload.expires_in) &&
+    tokenPayload.expires_in > 0
+      ? tokenPayload.expires_in
+      : undefined;
+
   return {
     accessToken: tokenPayload.access_token,
+    refreshToken:
+      typeof tokenPayload.refresh_token === "string" &&
+      tokenPayload.refresh_token.trim().length > 0
+        ? tokenPayload.refresh_token
+        : undefined,
+    accessTokenExpiresAt: expiresInSeconds
+      ? Date.now() + expiresInSeconds * 1000
+      : undefined,
     grantedScope: tokenPayload.scope
       ? tokenPayload.scope.split(" ").filter(Boolean)
       : config.scopes,
@@ -163,11 +185,8 @@ export async function GET(
   try {
     const appBaseUrl = getAppBaseUrl(request.nextUrl.origin);
     const callbackUrl = `${appBaseUrl}/api/integrations/oauth/${provider}/callback`;
-    const { accessToken, grantedScope } = await exchangeCodeForAccessToken(
-      provider,
-      code,
-      callbackUrl,
-    );
+    const { accessToken, refreshToken, accessTokenExpiresAt, grantedScope } =
+      await exchangeCodeForAccessToken(provider, code, callbackUrl);
 
     const convexToken = await getToken({ template: "convex" });
     if (!convexToken) {
@@ -185,7 +204,9 @@ export async function GET(
     await convex.mutation(api.integrations.connectIntegration, {
       provider,
       scopes: grantedScope,
-      tokenRef: accessToken,
+      accessToken,
+      refreshToken,
+      accessTokenExpiresAt,
     });
 
     const successRedirect = buildSettingsRedirect(

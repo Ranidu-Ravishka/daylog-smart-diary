@@ -13,6 +13,17 @@ pnpm --filter @repo/backend lint
 pnpm --filter @repo/backend test:run
 ```
 
+## Backend CI gate
+
+The `Backend Validation` CI job executes:
+
+```bash
+pnpm --filter @repo/backend lint
+pnpm --filter @repo/backend test:run
+```
+
+Keep these commands green locally before opening a PR with backend changes.
+
 ## Backend structure
 
 - Convex functions: `packages/backend/convex/*.ts`

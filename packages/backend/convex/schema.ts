@@ -151,6 +151,9 @@ export default defineSchema(
       provider: v.string(),
       tokenRef: v.string(),
       accessToken: v.string(),
+      refreshToken: v.optional(v.string()),
+      accessTokenExpiresAt: v.optional(v.number()),
+      lastRefreshAt: v.optional(v.number()),
       createdAt: v.number(),
       updatedAt: v.number(),
     })
