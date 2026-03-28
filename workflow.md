@@ -28,13 +28,13 @@ Applies to:
 
 ### Medium Severity
 
-1. Provider validation is inconsistent across write APIs.
-   - Risk: arbitrary provider strings can enter data paths.
-   - Impact: data quality drift and harder operational debugging.
+1. Provider validation was inconsistent across write APIs.
+   - Mitigation: provider validation is now centralized with strict allowlists, input normalization, and shared guard functions across integration and admin write paths.
+   - Residual risk: new write entry points can regress if they bypass the centralized validation layer.
 
 2. Integration sync-run query path has avoidable scale cost.
-   - Risk: query collects broadly then filters in memory.
-   - Impact: read amplification as sync history grows.
+   - Mitigation: day-scoped sync-run reads now use an index-native query with direct user/day filtering and descending order by update time.
+   - Residual risk: future sync-run read APIs can regress if they bypass indexed patterns.
 
 ### Low Severity
 
@@ -191,6 +191,14 @@ Exit criteria:
 - no integration write path accepts uncontrolled provider strings
 - provider rules are defined once and reused
 
+Status: completed.
+
+Completion notes:
+
+1. Added a centralized provider validation module with strict integration and daily-data provider sets.
+2. Enforced provider validation and normalization across integration write APIs, internal mutations, and admin integration write APIs.
+3. Added tests for provider normalization, allowlist acceptance, and clear rejection behavior.
+
 ### Step 3 - Optimize sync-run query scale path
 
 Goal: remove collect-then-filter pattern.
@@ -205,6 +213,14 @@ Exit criteria:
 
 - sync-run list query is index-aligned for day lookups
 - no broad collect for day-specific user reads
+
+Status: completed.
+
+Completion notes:
+
+1. Added a day-scoped index for integration sync runs keyed by user, day, and updatedAt.
+2. Replaced the collect-then-filter/sort implementation with an index-native query for day-specific sync-run reads.
+3. Preserved result ordering semantics by sorting on updatedAt descending at query level.
 
 ### Step 4 - Burn down documentation and type-safety drift
 
@@ -278,8 +294,8 @@ A task is done only when:
 
 1. OAuth refresh-token lifecycle is incomplete.
 2. Branch protection required checks must remain synchronized with workflow job names.
-3. Provider validation consistency is incomplete across write APIs.
-4. Integration sync-run day query path needs index alignment.
+3. Provider validation consistency must be preserved as new write APIs are added.
+4. Integration sync-run query scale characteristics must remain index-aligned as new read paths are added.
 5. Some docs still contain stale naming.
 
 This file must be updated whenever any gap above is resolved.

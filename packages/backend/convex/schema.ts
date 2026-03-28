@@ -175,7 +175,8 @@ export default defineSchema(
       lastError: v.optional(v.string()),
     })
       .index("by_user_provider_day", ["userId", "provider", "dayKey"])
-      .index("by_user_provider", ["userId", "provider"]),
+      .index("by_user_provider", ["userId", "provider"])
+      .index("by_user_day_updatedAt", ["userId", "dayKey", "updatedAt"]),
 
     // ── Normalized per-day integration sync payloads ───────
     integrationDailyData: defineTable({

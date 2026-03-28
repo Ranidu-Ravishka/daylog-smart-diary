@@ -5,6 +5,7 @@ import { requireAdmin } from "./authz";
 import { validateDayKey, validateRating } from "./validators";
 import { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
+import { assertIntegrationProvider } from "./integrationProviders";
 import {
   deleteDayCascadeData,
   deleteMemoryMediaByMemoryId,
@@ -748,6 +749,7 @@ export const adminCreateIntegration = mutation({
   },
   handler: async (ctx, args): Promise<unknown> => {
     const admin = await requireAdmin(ctx);
+    const provider = assertIntegrationProvider(args.provider);
 
     const nextTokenRef: string | undefined =
       args.tokenRef && !args.tokenRef.startsWith(OPAQUE_TOKEN_REF_PREFIX)
@@ -755,7 +757,7 @@ export const adminCreateIntegration = mutation({
             internal.integrations.storeIntegrationSecretInternal,
             {
               userId: args.userId,
-              provider: args.provider,
+              provider,
               accessToken: args.tokenRef,
             },
           )
@@ -763,12 +765,12 @@ export const adminCreateIntegration = mutation({
 
     const id: Id<"integrations"> = await ctx.db.insert("integrations", {
       userId: args.userId,
-      provider: args.provider,
+      provider,
       status: args.status,
       scopes: args.scopes,
       tokenRef: nextTokenRef,
     });
-    await logAdminAction(ctx, admin._id, "create_integration", args.provider);
+    await logAdminAction(ctx, admin._id, "create_integration", provider);
     return await ctx.db.get(id);
   },
 });
@@ -857,14 +859,18 @@ export const adminUpdateIntegration = mutation({
     const admin = await requireAdmin(ctx);
     const integration = await ctx.db.get(args.integrationId);
     if (!integration) throw new Error("Integration not found");
+    const currentProvider = assertIntegrationProvider(integration.provider);
+    const nextProvider =
+      args.provider !== undefined
+        ? assertIntegrationProvider(args.provider)
+        : currentProvider;
 
     const updates: Record<string, unknown> = {};
-    if (args.provider !== undefined) updates.provider = args.provider;
+    if (args.provider !== undefined) updates.provider = nextProvider;
     if (args.status !== undefined) updates.status = args.status;
     if (args.scopes !== undefined) updates.scopes = args.scopes;
     if (args.tokenRef !== undefined) {
       if (args.tokenRef && !args.tokenRef.startsWith(OPAQUE_TOKEN_REF_PREFIX)) {
-        const nextProvider = args.provider ?? integration.provider;
         updates.tokenRef = await ctx.runMutation(
           internal.integrations.storeIntegrationSecretInternal,
           {

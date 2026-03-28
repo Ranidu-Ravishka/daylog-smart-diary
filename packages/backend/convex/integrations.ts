@@ -10,16 +10,16 @@ import { requireUser, requireOwnership } from "./authz";
 import { validateDayKey } from "./validators";
 import { api, internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
-
-const SUPPORTED_INTEGRATION_PROVIDERS = [
-  "google_calendar",
-  "google_fit",
-  "spotify",
-  "apple_health",
-] as const;
-
-type SupportedIntegrationProvider =
-  (typeof SUPPORTED_INTEGRATION_PROVIDERS)[number];
+import {
+  asIntegrationProvider,
+  asOAuthRefreshProvider,
+  assertDailyDataProvider,
+  assertIntegrationProvider,
+  integrationProviderList,
+  type DailyDataProvider,
+  type IntegrationProvider,
+  type OAuthRefreshProvider,
+} from "./integrationProviders";
 
 type NormalizedIntegrationDailySync = {
   metrics?: {
@@ -66,8 +66,6 @@ class ProviderTokenRefreshError extends Error {
   }
 }
 
-type OAuthRefreshProvider = "google_calendar" | "google_fit" | "spotify";
-
 type ProviderOAuthCredentials = {
   tokenUrl: string;
   clientId: string;
@@ -79,24 +77,6 @@ type RefreshedTokenPayload = {
   refreshToken?: string;
   accessTokenExpiresAt?: number;
 };
-
-function isSupportedProvider(
-  provider: string,
-): provider is SupportedIntegrationProvider {
-  return SUPPORTED_INTEGRATION_PROVIDERS.includes(
-    provider as SupportedIntegrationProvider,
-  );
-}
-
-function isOAuthRefreshProvider(
-  provider: string,
-): provider is OAuthRefreshProvider {
-  return (
-    provider === "google_calendar" ||
-    provider === "google_fit" ||
-    provider === "spotify"
-  );
-}
 
 function getProviderOAuthCredentials(
   provider: OAuthRefreshProvider,
@@ -341,7 +321,7 @@ async function upsertIntegrationSecret(
   },
   args: {
     userId: Id<"user">;
-    provider: string;
+    provider: IntegrationProvider;
     accessToken: string;
     refreshToken?: string;
     accessTokenExpiresAt?: number;
@@ -349,6 +329,7 @@ async function upsertIntegrationSecret(
     existingTokenRef?: string;
   },
 ): Promise<string> {
+  const provider = assertIntegrationProvider(args.provider);
   const now = Date.now();
   const tokenRef =
     args.existingTokenRef && isOpaqueTokenRef(args.existingTokenRef)
@@ -363,7 +344,7 @@ async function upsertIntegrationSecret(
   if (existing) {
     const patchPayload: Record<string, unknown> = {
       userId: args.userId,
-      provider: args.provider,
+      provider,
       accessToken: args.accessToken,
       accessTokenExpiresAt: args.accessTokenExpiresAt,
       lastRefreshAt: args.lastRefreshAt,
@@ -382,7 +363,7 @@ async function upsertIntegrationSecret(
 
   await db.insert("integrationSecrets", {
     userId: args.userId,
-    provider: args.provider,
+    provider,
     tokenRef,
     accessToken: args.accessToken,
     refreshToken: args.refreshToken,
@@ -426,7 +407,7 @@ async function upsertIntegrationDailyDataDoc(
   db: unknown,
   args: {
     userId: Id<"user">;
-    provider: string;
+    provider: DailyDataProvider;
     dayKey: string;
     metrics?: {
       steps?: number;
@@ -438,6 +419,8 @@ async function upsertIntegrationDailyDataDoc(
     signals?: string[];
   },
 ) {
+  const provider = assertDailyDataProvider(args.provider);
+
   const typedDb = db as {
     query: (table: "integrationDailyData") => {
       withIndex: (
@@ -498,7 +481,7 @@ async function upsertIntegrationDailyDataDoc(
     .withIndex("by_user_provider_day", (q) =>
       q
         .eq("userId", args.userId)
-        .eq("provider", args.provider)
+        .eq("provider", provider)
         .eq("dayKey", args.dayKey),
     )
     .unique();
@@ -517,7 +500,7 @@ async function upsertIntegrationDailyDataDoc(
 
   const id = await typedDb.insert("integrationDailyData", {
     userId: args.userId,
-    provider: args.provider,
+    provider,
     dayKey: args.dayKey,
     ...payload,
   });
@@ -773,7 +756,7 @@ async function syncGoogleFitForDay(
 }
 
 async function syncProviderForDay(
-  provider: SupportedIntegrationProvider,
+  provider: IntegrationProvider,
   accessToken: string,
   dayKey: string,
   syncStartedAt: number,
@@ -806,13 +789,14 @@ export const connectIntegration = mutation({
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
+    const provider = assertIntegrationProvider(args.provider);
 
     const accessToken = args.accessToken ?? args.tokenRef;
 
     const nextTokenRef = accessToken
       ? await upsertIntegrationSecret(ctx.db as never, {
           userId: user._id,
-          provider: args.provider,
+          provider,
           accessToken,
           refreshToken: args.refreshToken,
           accessTokenExpiresAt: args.accessTokenExpiresAt,
@@ -823,7 +807,7 @@ export const connectIntegration = mutation({
     const existing = await ctx.db
       .query("integrations")
       .withIndex("by_user_provider", (q) =>
-        q.eq("userId", user._id).eq("provider", args.provider),
+        q.eq("userId", user._id).eq("provider", provider),
       )
       .unique();
 
@@ -842,7 +826,7 @@ export const connectIntegration = mutation({
 
     const id = await ctx.db.insert("integrations", {
       userId: user._id,
-      provider: args.provider,
+      provider,
       status: "connected",
       lastError: undefined,
       scopes: args.scopes,
@@ -886,6 +870,8 @@ export const getIntegrationAccessTokenByRefInternal = internalQuery({
     provider: v.string(),
   },
   handler: async (ctx, args) => {
+    const provider = assertIntegrationProvider(args.provider);
+
     const secret = (await ctx.db
       .query("integrationSecrets")
       .withIndex("by_tokenRef", (q) => q.eq("tokenRef", args.tokenRef))
@@ -898,7 +884,7 @@ export const getIntegrationAccessTokenByRefInternal = internalQuery({
     } | null;
 
     if (!secret) return null;
-    if (secret.userId !== args.userId || secret.provider !== args.provider) {
+    if (secret.userId !== args.userId || secret.provider !== provider) {
       return null;
     }
 
@@ -921,9 +907,11 @@ export const storeIntegrationSecretInternal = internalMutation({
     existingTokenRef: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const provider = assertIntegrationProvider(args.provider);
+
     return await upsertIntegrationSecret(ctx.db as never, {
       userId: args.userId,
-      provider: args.provider,
+      provider,
       accessToken: args.accessToken,
       refreshToken: args.refreshToken,
       accessTokenExpiresAt: args.accessTokenExpiresAt,
@@ -951,6 +939,7 @@ export const beginIntegrationSyncRunInternal = internalMutation({
     dayKey: v.string(),
   },
   handler: async (ctx, args) => {
+    const provider = assertIntegrationProvider(args.provider);
     const now = Date.now();
 
     const existingRun = await ctx.db
@@ -958,7 +947,7 @@ export const beginIntegrationSyncRunInternal = internalMutation({
       .withIndex("by_user_provider_day", (q) =>
         q
           .eq("userId", args.userId)
-          .eq("provider", args.provider)
+          .eq("provider", provider)
           .eq("dayKey", args.dayKey),
       )
       .unique();
@@ -968,7 +957,7 @@ export const beginIntegrationSyncRunInternal = internalMutation({
       .withIndex("by_user_provider_day", (q) =>
         q
           .eq("userId", args.userId)
-          .eq("provider", args.provider)
+          .eq("provider", provider)
           .eq("dayKey", args.dayKey),
       )
       .unique();
@@ -994,7 +983,7 @@ export const beginIntegrationSyncRunInternal = internalMutation({
     } else {
       await ctx.db.insert("integrationSyncRuns", {
         userId: args.userId,
-        provider: args.provider,
+        provider,
         dayKey: args.dayKey,
         status: "in_progress",
         startedAt: now,
@@ -1016,12 +1005,14 @@ export const completeIntegrationSyncRunInternal = internalMutation({
     lastError: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const provider = assertIntegrationProvider(args.provider);
+
     const existingRun = await ctx.db
       .query("integrationSyncRuns")
       .withIndex("by_user_provider_day", (q) =>
         q
           .eq("userId", args.userId)
-          .eq("provider", args.provider)
+          .eq("provider", provider)
           .eq("dayKey", args.dayKey),
       )
       .unique();
@@ -1039,7 +1030,7 @@ export const completeIntegrationSyncRunInternal = internalMutation({
 
     await ctx.db.insert("integrationSyncRuns", {
       userId: args.userId,
-      provider: args.provider,
+      provider,
       dayKey: args.dayKey,
       status: args.status,
       startedAt: Date.now(),
@@ -1104,11 +1095,12 @@ export const getIntegrationByProvider = query({
   args: { provider: v.string() },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
+    const provider = assertIntegrationProvider(args.provider);
 
     return await ctx.db
       .query("integrations")
       .withIndex("by_user_provider", (q) =>
-        q.eq("userId", user._id).eq("provider", args.provider),
+        q.eq("userId", user._id).eq("provider", provider),
       )
       .unique();
   },
@@ -1133,14 +1125,13 @@ export const listMyIntegrationSyncRunsForDay = query({
     const user = await requireUser(ctx);
     validateDayKey(args.dayKey);
 
-    const rows = await ctx.db
+    return await ctx.db
       .query("integrationSyncRuns")
-      .withIndex("by_user_provider", (q) => q.eq("userId", user._id))
+      .withIndex("by_user_day_updatedAt", (q) =>
+        q.eq("userId", user._id).eq("dayKey", args.dayKey),
+      )
+      .order("desc")
       .collect();
-
-    return rows
-      .filter((row) => row.dayKey === args.dayKey)
-      .sort((a, b) => b.updatedAt - a.updatedAt);
   },
 });
 
@@ -1188,7 +1179,7 @@ export const deleteIntegration = mutation({
 export const listSupportedProviders = query({
   args: {},
   handler: async () => {
-    return [...SUPPORTED_INTEGRATION_PROVIDERS];
+    return [...integrationProviderList];
   },
 });
 
@@ -1225,10 +1216,11 @@ export const upsertMyIntegrationDailyData = mutation({
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
     validateDayKey(args.dayKey);
+    const provider = assertDailyDataProvider(args.provider);
 
     return await upsertIntegrationDailyDataDoc(ctx.db, {
       userId: user._id,
-      provider: args.provider,
+      provider,
       dayKey: args.dayKey,
       metrics: args.metrics,
       summary: args.summary,
@@ -1305,10 +1297,11 @@ export const upsertIntegrationDailyDataInternal = internalMutation({
   },
   handler: async (ctx, args) => {
     validateDayKey(args.dayKey);
+    const provider = assertDailyDataProvider(args.provider);
 
     return await upsertIntegrationDailyDataDoc(ctx.db, {
       userId: args.userId,
-      provider: args.provider,
+      provider,
       dayKey: args.dayKey,
       metrics: args.metrics,
       summary: args.summary,
@@ -1324,17 +1317,12 @@ export const syncMyIntegrationForDay = action({
   },
   handler: async (ctx, args) => {
     validateDayKey(args.dayKey);
-
-    if (!isSupportedProvider(args.provider)) {
-      throw new Error(
-        `Unsupported provider "${args.provider}". Supported providers: ${SUPPORTED_INTEGRATION_PROVIDERS.join(", ")}`,
-      );
-    }
+    const provider = assertIntegrationProvider(args.provider);
 
     const integration = (await ctx.runQuery(
       api.integrations.getIntegrationByProvider,
       {
-        provider: args.provider,
+        provider,
       },
     )) as {
       _id: Id<"integrations">;
@@ -1345,18 +1333,18 @@ export const syncMyIntegrationForDay = action({
 
     if (!integration) {
       throw new Error(
-        `Provider "${args.provider}" is not connected for this account.`,
+        `Provider "${provider}" is not connected for this account.`,
       );
     }
     if (integration.status === "disconnected") {
-      throw new Error(`Provider "${args.provider}" is disconnected.`);
+      throw new Error(`Provider "${provider}" is disconnected.`);
     }
 
     const syncRunState = (await ctx.runMutation(
       internal.integrations.beginIntegrationSyncRunInternal,
       {
         userId: integration.userId,
-        provider: args.provider,
+        provider,
         dayKey: args.dayKey,
       },
     )) as {
@@ -1367,7 +1355,7 @@ export const syncMyIntegrationForDay = action({
     if (!syncRunState.shouldSync) {
       return {
         success: true,
-        provider: args.provider,
+        provider,
         dayKey: args.dayKey,
         idempotent: true,
         skippedReason: syncRunState.reason,
@@ -1375,13 +1363,12 @@ export const syncMyIntegrationForDay = action({
     }
 
     const syncStartedAt = Date.now();
-    const oauthRefreshProvider: OAuthRefreshProvider | null =
-      isOAuthRefreshProvider(args.provider) ? args.provider : null;
+    const oauthRefreshProvider = asOAuthRefreshProvider(provider);
 
     try {
       if (!integration.tokenRef) {
         throw new Error(
-          `Provider "${args.provider}" is missing tokenRef. Reconnect integration before syncing.`,
+          `Provider "${provider}" is missing tokenRef. Reconnect integration before syncing.`,
         );
       }
 
@@ -1396,7 +1383,7 @@ export const syncMyIntegrationForDay = action({
           {
             tokenRef: integration.tokenRef,
             userId: integration.userId,
-            provider: args.provider,
+            provider,
           },
         )) as {
           accessToken: string;
@@ -1406,7 +1393,7 @@ export const syncMyIntegrationForDay = action({
 
         if (!secret?.accessToken) {
           throw new Error(
-            `Provider "${args.provider}" secret not found. Reconnect integration before syncing.`,
+            `Provider "${provider}" secret not found. Reconnect integration before syncing.`,
           );
         }
 
@@ -1418,7 +1405,7 @@ export const syncMyIntegrationForDay = action({
           internal.integrations.storeIntegrationSecretInternal,
           {
             userId: integration.userId,
-            provider: args.provider,
+            provider,
             accessToken: integration.tokenRef,
           },
         );
@@ -1440,7 +1427,7 @@ export const syncMyIntegrationForDay = action({
       ) {
         if (!refreshToken) {
           throw new Error(
-            `Provider "${args.provider}" access token has expired and no refresh token is available. Reconnect integration.`,
+            `Provider "${provider}" access token has expired and no refresh token is available. Reconnect integration.`,
           );
         }
 
@@ -1455,7 +1442,7 @@ export const syncMyIntegrationForDay = action({
           internal.integrations.storeIntegrationSecretInternal,
           {
             userId: integration.userId,
-            provider: args.provider,
+            provider,
             accessToken: refreshed.accessToken,
             refreshToken: nextRefreshToken,
             accessTokenExpiresAt: refreshed.accessTokenExpiresAt,
@@ -1473,7 +1460,7 @@ export const syncMyIntegrationForDay = action({
 
       try {
         normalized = await syncProviderForDay(
-          args.provider,
+          provider,
           accessToken,
           args.dayKey,
           syncStartedAt,
@@ -1503,7 +1490,7 @@ export const syncMyIntegrationForDay = action({
           internal.integrations.storeIntegrationSecretInternal,
           {
             userId: integration.userId,
-            provider: args.provider,
+            provider,
             accessToken: refreshed.accessToken,
             refreshToken: nextRefreshToken,
             accessTokenExpiresAt: refreshed.accessTokenExpiresAt,
@@ -1517,7 +1504,7 @@ export const syncMyIntegrationForDay = action({
         accessTokenExpiresAt = refreshed.accessTokenExpiresAt;
 
         normalized = await syncProviderForDay(
-          args.provider,
+          provider,
           accessToken,
           args.dayKey,
           syncStartedAt,
@@ -1528,7 +1515,7 @@ export const syncMyIntegrationForDay = action({
         internal.integrations.upsertIntegrationDailyDataInternal,
         {
           userId: integration.userId,
-          provider: args.provider,
+          provider,
           dayKey: args.dayKey,
           metrics: normalized.metrics,
           summary: normalized.summary,
@@ -1544,7 +1531,7 @@ export const syncMyIntegrationForDay = action({
         internal.integrations.completeIntegrationSyncRunInternal,
         {
           userId: integration.userId,
-          provider: args.provider,
+          provider,
           dayKey: args.dayKey,
           status: "success",
         },
@@ -1552,7 +1539,7 @@ export const syncMyIntegrationForDay = action({
 
       return {
         success: true,
-        provider: args.provider,
+        provider,
         dayKey: args.dayKey,
       };
     } catch (error) {
@@ -1567,7 +1554,7 @@ export const syncMyIntegrationForDay = action({
         internal.integrations.completeIntegrationSyncRunInternal,
         {
           userId: integration.userId,
-          provider: args.provider,
+          provider,
           dayKey: args.dayKey,
           status: "error",
           lastError: message,
@@ -1601,18 +1588,19 @@ export const syncAllMyIntegrationsForDay = action({
     }> = [];
 
     for (const integration of integrations) {
-      if (!isSupportedProvider(integration.provider)) continue;
+      const provider = asIntegrationProvider(integration.provider);
+      if (!provider) continue;
       if (integration.status !== "connected") continue;
 
       try {
         await ctx.runAction(api.integrations.syncMyIntegrationForDay, {
-          provider: integration.provider,
+          provider,
           dayKey: args.dayKey,
         });
-        results.push({ provider: integration.provider, success: true });
+        results.push({ provider, success: true });
       } catch (error) {
         results.push({
-          provider: integration.provider,
+          provider,
           success: false,
           message: error instanceof Error ? error.message : "Sync failed",
         });

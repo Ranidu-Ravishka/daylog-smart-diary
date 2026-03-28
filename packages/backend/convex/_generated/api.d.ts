@@ -15,6 +15,7 @@ import type * as content from "../content.js";
 import type * as days from "../days.js";
 import type * as env from "../env.js";
 import type * as http from "../http.js";
+import type * as integrationProviders from "../integrationProviders.js";
 import type * as integrations from "../integrations.js";
 import type * as memories from "../memories.js";
 import type * as runtimeConfig from "../runtimeConfig.js";
@@ -39,6 +40,7 @@ declare const fullApi: ApiFromModules<{
   days: typeof days;
   env: typeof env;
   http: typeof http;
+  integrationProviders: typeof integrationProviders;
   integrations: typeof integrations;
   memories: typeof memories;
   runtimeConfig: typeof runtimeConfig;
