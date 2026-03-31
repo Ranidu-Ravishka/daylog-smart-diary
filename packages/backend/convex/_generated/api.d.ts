@@ -12,6 +12,7 @@ import type * as admin from "../admin.js";
 import type * as authz from "../authz.js";
 import type * as cascadeCleanup from "../cascadeCleanup.js";
 import type * as content from "../content.js";
+import type * as dashboardMetrics from "../dashboardMetrics.js";
 import type * as days from "../days.js";
 import type * as env from "../env.js";
 import type * as http from "../http.js";
@@ -37,6 +38,7 @@ declare const fullApi: ApiFromModules<{
   authz: typeof authz;
   cascadeCleanup: typeof cascadeCleanup;
   content: typeof content;
+  dashboardMetrics: typeof dashboardMetrics;
   days: typeof days;
   env: typeof env;
   http: typeof http;

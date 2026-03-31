@@ -126,6 +126,19 @@ export default defineSchema(
       updatedAt: v.number(),
     }).index("by_user_day", ["userId", "quotaDayKey"]),
 
+    // ── Admin dashboard materialized global counters ───────
+    adminDashboardMetrics: defineTable({
+      key: v.string(),
+      totalUsers: v.number(),
+      totalMemories: v.number(),
+      totalDays: v.number(),
+      totalSummaries: v.number(),
+      totalIntegrations: v.number(),
+      totalPreferences: v.number(),
+      totalAuditLogs: v.number(),
+      updatedAt: v.number(),
+    }).index("by_key", ["key"]),
+
     // ── Integrations (external data-source connections) ──────
     integrations: defineTable({
       userId: v.id("user"),

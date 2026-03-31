@@ -3,6 +3,7 @@ import { mutation, query } from "./_generated/server";
 import { requireUser, requireOwnership } from "./authz";
 import { validateDayKey, clampLimit } from "./validators";
 import type { Id } from "./_generated/dataModel";
+import { applyDashboardMetricsDelta } from "./dashboardMetrics";
 
 // ── Generate an upload URL for memory media ─────────────────
 export const generateMemoryMediaUploadUrl = mutation({
@@ -35,6 +36,10 @@ export const createMemory = mutation({
       mood: args.mood,
       happenedAt: args.happenedAt,
       dayKey: args.dayKey,
+    });
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalMemories: 1,
     });
 
     return await ctx.db.get(id);
@@ -150,6 +155,11 @@ export const deleteMemory = mutation({
     }
 
     await ctx.db.delete(args.memoryId);
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalMemories: -1,
+    });
+
     return { success: true };
   },
 });

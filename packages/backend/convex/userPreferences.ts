@@ -6,6 +6,7 @@ import {
   requireAdmin,
   requireIdentityMatch,
 } from "./authz";
+import { applyDashboardMetricsDelta } from "./dashboardMetrics";
 
 const preferenceThemeValidator = v.union(
   v.literal("light"),
@@ -192,6 +193,10 @@ export const syncUserPreferencesFromClerk = mutation({
       updatedAt: now,
     });
 
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalPreferences: 1,
+    });
+
     return await ctx.db.get(id);
   },
 });
@@ -371,6 +376,10 @@ export const syncMyUserPreferences = mutation({
       locationLastArea: args.locationLastArea,
       createdAt: now,
       updatedAt: now,
+    });
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalPreferences: 1,
     });
 
     return await ctx.db.get(id);

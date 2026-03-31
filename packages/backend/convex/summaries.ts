@@ -5,6 +5,7 @@ import { validateDayKey, clampLimit } from "./validators";
 import { getSummaryDailyGenerationLimit } from "./runtimeConfig";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
+import { applyDashboardMetricsDelta } from "./dashboardMetrics";
 
 export function getUtcDayKey(timestamp: number): string {
   return new Date(timestamp).toISOString().slice(0, 10);
@@ -58,6 +59,10 @@ export async function upsertSummaryForUserDay(
     metrics: args.metrics,
     sourcesUsed: args.sourcesUsed,
     generatedAt: now,
+  });
+
+  await applyDashboardMetricsDelta(db, {
+    totalSummaries: 1,
   });
 
   return await db.get(id);
@@ -193,6 +198,11 @@ export const deleteSummary = mutation({
     requireOwnership(user, summary.userId);
 
     await ctx.db.delete(args.summaryId);
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalSummaries: -1,
+    });
+
     return { success: true };
   },
 });

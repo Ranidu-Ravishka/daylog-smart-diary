@@ -13,6 +13,7 @@ import {
 } from "./authz";
 import { convexServerEnv } from "./env";
 import { deleteUserCascadeData } from "./cascadeCleanup";
+import { applyDashboardMetricsDelta } from "./dashboardMetrics";
 
 // ── Sync a user row from Clerk (called by the client after sign-in).
 //    Identity must match the clerkUserId arg.
@@ -80,6 +81,10 @@ async function syncUserRecord(
     lastName: args.lastName,
     imageUrl: args.imageUrl,
     isAdmin: false,
+  });
+
+  await applyDashboardMetricsDelta(ctx.db, {
+    totalUsers: 1,
   });
 
   return await ctx.db.get(id);
@@ -178,12 +183,23 @@ export const deleteUserAndRelatedDataByClerkId = internalMutation({
       return { success: true, deleted: false };
     }
 
-    await deleteUserCascadeData(ctx, {
+    const deleted = await deleteUserCascadeData(ctx, {
       userId: user._id,
       clerkUserId: user.clerkUserId,
     });
 
     await ctx.db.delete(user._id);
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalUsers: -1,
+      totalMemories: -deleted.deletedMemories,
+      totalDays: -deleted.deletedDays,
+      totalSummaries: -deleted.deletedSummaries,
+      totalIntegrations: -deleted.deletedIntegrations,
+      totalPreferences: -deleted.deletedPreferences,
+      totalAuditLogs: -deleted.deletedAuditLogs,
+    });
+
     return { success: true, deleted: true };
   },
 });

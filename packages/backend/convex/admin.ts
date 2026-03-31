@@ -11,6 +11,12 @@ import {
   deleteMemoryMediaByMemoryId,
   deleteUserCascadeData,
 } from "./cascadeCleanup";
+import {
+  applyDashboardMetricsDelta,
+  getDashboardMetricsSnapshot,
+  replaceDashboardMetricsSnapshot,
+  type DashboardMetricsSnapshot,
+} from "./dashboardMetrics";
 
 const OPAQUE_TOKEN_REF_PREFIX = "tokref_";
 
@@ -31,6 +37,10 @@ async function logAdminAction(
     target,
     at: Date.now(),
   });
+
+  await applyDashboardMetricsDelta(ctx.db, {
+    totalAuditLogs: 1,
+  });
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -42,33 +52,72 @@ export const getDashboardMetrics = query({
   handler: async (ctx) => {
     await requireAdmin(ctx);
 
+    return await getDashboardMetricsSnapshot(ctx.db);
+  },
+});
+
+type CountableQuery = {
+  paginate: (opts: { numItems: number; cursor: string | null }) => Promise<{
+    page: unknown[];
+    isDone: boolean;
+    continueCursor: string | null;
+  }>;
+};
+
+async function countRows(queryRef: CountableQuery): Promise<number> {
+  let total = 0;
+  let cursor: string | null = null;
+
+  while (true) {
+    const page = await queryRef.paginate({
+      numItems: 512,
+      cursor,
+    });
+
+    total += page.page.length;
+    if (page.isDone) break;
+    cursor = page.continueCursor;
+  }
+
+  return total;
+}
+
+export const adminRebuildDashboardMetrics = mutation({
+  args: {},
+  handler: async (ctx): Promise<DashboardMetricsSnapshot> => {
+    const admin = await requireAdmin(ctx);
+
     const [
-      users,
-      memories,
-      days,
-      summaries,
-      integrations,
-      preferences,
-      auditLogs,
+      totalUsers,
+      totalMemories,
+      totalDays,
+      totalSummaries,
+      totalIntegrations,
+      totalPreferences,
+      totalAuditLogs,
     ] = await Promise.all([
-      ctx.db.query("user").collect(),
-      ctx.db.query("memories").collect(),
-      ctx.db.query("days").collect(),
-      ctx.db.query("daySummaries").collect(),
-      ctx.db.query("integrations").collect(),
-      ctx.db.query("userPreferences").collect(),
-      ctx.db.query("auditLogs").collect(),
+      countRows(ctx.db.query("user")),
+      countRows(ctx.db.query("memories")),
+      countRows(ctx.db.query("days")),
+      countRows(ctx.db.query("daySummaries")),
+      countRows(ctx.db.query("integrations")),
+      countRows(ctx.db.query("userPreferences")),
+      countRows(ctx.db.query("auditLogs")),
     ]);
 
-    return {
-      totalUsers: users.length,
-      totalMemories: memories.length,
-      totalDays: days.length,
-      totalSummaries: summaries.length,
-      totalIntegrations: integrations.length,
-      totalPreferences: preferences.length,
-      totalAuditLogs: auditLogs.length,
-    };
+    await replaceDashboardMetricsSnapshot(ctx.db, {
+      totalUsers,
+      totalMemories,
+      totalDays,
+      totalSummaries,
+      totalIntegrations,
+      totalPreferences,
+      totalAuditLogs,
+    });
+
+    await logAdminAction(ctx, admin._id, "rebuild_dashboard_metrics", "global");
+
+    return await getDashboardMetricsSnapshot(ctx.db);
   },
 });
 
@@ -93,6 +142,11 @@ export const adminCreateUser = mutation({
       lastName: args.lastName,
       isAdmin: args.isAdmin,
     });
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalUsers: 1,
+    });
+
     await logAdminAction(ctx, admin._id, "create_user", args.email);
     return await ctx.db.get(id);
   },
@@ -161,12 +215,23 @@ export const adminDeleteUser = mutation({
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("User not found");
 
-    await deleteUserCascadeData(ctx, {
+    const deleted = await deleteUserCascadeData(ctx, {
       userId: args.userId,
       clerkUserId: user.clerkUserId,
     });
 
     await ctx.db.delete(args.userId);
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalUsers: -1,
+      totalMemories: -deleted.deletedMemories,
+      totalDays: -deleted.deletedDays,
+      totalSummaries: -deleted.deletedSummaries,
+      totalIntegrations: -deleted.deletedIntegrations,
+      totalPreferences: -deleted.deletedPreferences,
+      totalAuditLogs: -deleted.deletedAuditLogs,
+    });
+
     await logAdminAction(ctx, admin._id, "delete_user", user.email);
     return { success: true };
   },
@@ -198,6 +263,11 @@ export const adminCreateUserPreference = mutation({
       createdAt: now,
       updatedAt: now,
     });
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalPreferences: 1,
+    });
+
     await logAdminAction(ctx, admin._id, "create_preference", args.clerkUserId);
     return await ctx.db.get(id);
   },
@@ -312,6 +382,11 @@ export const adminDeleteUserPreference = mutation({
     const pref = await ctx.db.get(args.preferenceId);
     if (!pref) throw new Error("Preference not found");
     await ctx.db.delete(args.preferenceId);
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalPreferences: -1,
+    });
+
     await logAdminAction(
       ctx,
       admin._id,
@@ -346,6 +421,11 @@ export const adminCreateMemory = mutation({
       happenedAt: args.happenedAt,
       dayKey: args.dayKey,
     });
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalMemories: 1,
+    });
+
     await logAdminAction(ctx, admin._id, "create_memory", args.title);
     return await ctx.db.get(id);
   },
@@ -449,6 +529,11 @@ export const adminDeleteMemory = mutation({
     await deleteMemoryMediaByMemoryId(ctx, args.memoryId);
 
     await ctx.db.delete(args.memoryId);
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalMemories: -1,
+    });
+
     await logAdminAction(ctx, admin._id, "delete_memory", memory.title);
     return { success: true };
   },
@@ -477,6 +562,11 @@ export const adminCreateDay = mutation({
       manualNotes: args.manualNotes,
       peopleTags: args.peopleTags,
     });
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalDays: 1,
+    });
+
     await logAdminAction(ctx, admin._id, "create_day", args.dayKey);
     return await ctx.db.get(id);
   },
@@ -579,12 +669,19 @@ export const adminDeleteDay = mutation({
     const day = await ctx.db.get(args.dayId);
     if (!day) throw new Error("Day not found");
 
-    await deleteDayCascadeData(ctx, {
+    const deleted = await deleteDayCascadeData(ctx, {
       userId: day.userId,
       dayKey: day.dayKey,
     });
 
     await ctx.db.delete(args.dayId);
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalDays: -1,
+      totalMemories: -deleted.deletedMemories,
+      totalSummaries: -deleted.deletedSummaries,
+    });
+
     await logAdminAction(ctx, admin._id, "delete_day", day.dayKey);
     return { success: true };
   },
@@ -613,6 +710,11 @@ export const adminCreateSummary = mutation({
       sourcesUsed: args.sourcesUsed,
       generatedAt: Date.now(),
     });
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalSummaries: 1,
+    });
+
     await logAdminAction(ctx, admin._id, "create_summary", args.dayKey);
     return await ctx.db.get(id);
   },
@@ -721,6 +823,11 @@ export const adminDeleteSummary = mutation({
     const summary = await ctx.db.get(args.summaryId);
     if (!summary) throw new Error("Summary not found");
     await ctx.db.delete(args.summaryId);
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalSummaries: -1,
+    });
+
     await logAdminAction(
       ctx,
       admin._id,
@@ -770,6 +877,11 @@ export const adminCreateIntegration = mutation({
       scopes: args.scopes,
       tokenRef: nextTokenRef,
     });
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalIntegrations: 1,
+    });
+
     await logAdminAction(ctx, admin._id, "create_integration", provider);
     return await ctx.db.get(id);
   },
@@ -935,6 +1047,11 @@ export const adminDeleteIntegration = mutation({
     }
 
     await ctx.db.delete(args.integrationId);
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalIntegrations: -1,
+    });
+
     await logAdminAction(
       ctx,
       admin._id,
@@ -1122,6 +1239,11 @@ export const writeAuditLog = mutation({
       target: args.target,
       at: Date.now(),
     });
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalAuditLogs: 1,
+    });
+
     return await ctx.db.get(id);
   },
 });
@@ -1133,6 +1255,11 @@ export const adminDeleteAuditLog = mutation({
     const log = await ctx.db.get(args.auditLogId);
     if (!log) throw new Error("Audit log not found");
     await ctx.db.delete(args.auditLogId);
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalAuditLogs: -1,
+    });
+
     return { success: true };
   },
 });

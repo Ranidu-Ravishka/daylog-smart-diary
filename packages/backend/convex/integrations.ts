@@ -21,6 +21,7 @@ import {
   type IntegrationProvider,
   type OAuthRefreshProvider,
 } from "./integrationProviders";
+import { applyDashboardMetricsDelta } from "./dashboardMetrics";
 
 type NormalizedIntegrationDailySync = {
   metrics?: {
@@ -835,6 +836,10 @@ export const connectIntegration = mutation({
       lastSyncAt: Date.now(),
     });
 
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalIntegrations: 1,
+    });
+
     return await ctx.db.get(id);
   },
 });
@@ -1173,6 +1178,11 @@ export const deleteIntegration = mutation({
     }
 
     await ctx.db.delete(args.integrationId);
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalIntegrations: -1,
+    });
+
     return { success: true };
   },
 });

@@ -17,7 +17,8 @@ type TableName =
   | "summaryGenerationQuotas"
   | "daySummaries"
   | "auditLogs"
-  | "integrationDailyData";
+  | "integrationDailyData"
+  | "adminDashboardMetrics";
 
 type SeedData = Partial<Record<TableName, GenericDoc[]>>;
 
@@ -45,6 +46,9 @@ const INDEX_FIELDS: Record<TableName, Record<string, string[]>> = {
   },
   integrationDailyData: {
     by_user_provider_day: ["userId", "provider", "dayKey"],
+  },
+  adminDashboardMetrics: {
+    by_key: ["key"],
   },
 };
 
@@ -272,6 +276,7 @@ export class InMemoryDb {
       daySummaries: [...(seed?.daySummaries ?? [])],
       auditLogs: [...(seed?.auditLogs ?? [])],
       integrationDailyData: [...(seed?.integrationDailyData ?? [])],
+      adminDashboardMetrics: [...(seed?.adminDashboardMetrics ?? [])],
     };
   }
 
