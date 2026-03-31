@@ -206,10 +206,11 @@ export default defineSchema(
       target: v.optional(v.string()),
       at: v.number(),
     })
-      .index("by_actor", ["actorUserId"])
-      .index("by_at", ["at"])
-      .index("by_actor_at", ["actorUserId", "at"])
-      .index("by_action_at", ["action", "at"]),
+      .index("by_userId", ["actorUserId"])
+      .index("by_createdAt", ["at"])
+      .index("by_userId_createdAt", ["actorUserId", "at"])
+      .index("by_action_createdAt", ["action", "at"])
+      .index("by_userId_action_createdAt", ["actorUserId", "action", "at"]),
   },
   { schemaValidation: true },
 );

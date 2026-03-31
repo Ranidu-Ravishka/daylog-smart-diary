@@ -11,7 +11,7 @@ export default function AuditLogsPage() {
     "admin:listAuditLogsPaginated",
   );
   const { isAuthenticated } = useConvexAuth();
-  const [actorFilter, setActorFilter] = useState<string>("all");
+  const [userFilter, setUserFilter] = useState<string>("all");
   const [actionFilter, setActionFilter] = useState<string>("all");
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
@@ -35,7 +35,7 @@ export default function AuditLogsPage() {
     listAuditLogsPaginatedRef,
     isAdmin
       ? {
-          actorUserId: actorFilter === "all" ? undefined : actorFilter,
+          userId: userFilter === "all" ? undefined : userFilter,
           action: actionFilter === "all" ? undefined : actionFilter,
           fromTs,
           toTs,
@@ -45,7 +45,7 @@ export default function AuditLogsPage() {
   );
   const users = useQuery(api.admin.listAllUsers, isAdmin ? {} : "skip");
 
-  const actorOptions = useMemo(() => {
+  const userOptions = useMemo(() => {
     if (!logs) return [];
     return [...new Set(logs.map((row) => String(row.actorUserId)))].sort();
   }, [logs]);
@@ -88,11 +88,11 @@ export default function AuditLogsPage() {
               Actor
               <select
                 className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
-                value={actorFilter}
-                onChange={(event) => setActorFilter(event.target.value)}
+                value={userFilter}
+                onChange={(event) => setUserFilter(event.target.value)}
               >
                 <option value="all">All actors</option>
-                {actorOptions.map((id) => (
+                {userOptions.map((id) => (
                   <option key={id} value={id}>
                     {userById.get(id)?.email || id}
                   </option>
@@ -139,7 +139,7 @@ export default function AuditLogsPage() {
             <div className="flex items-end">
               <button
                 onClick={() => {
-                  setActorFilter("all");
+                  setUserFilter("all");
                   setActionFilter("all");
                   setStartDate("");
                   setEndDate("");

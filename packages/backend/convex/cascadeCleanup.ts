@@ -143,7 +143,7 @@ async function deleteAuditLogsByUser(
 ): Promise<void> {
   const auditLogs = await ctx.db
     .query("auditLogs")
-    .withIndex("by_actor", (q) => q.eq("actorUserId", userId))
+    .withIndex("by_userId", (q) => q.eq("actorUserId", userId))
     .collect();
 
   for (const log of auditLogs) {
