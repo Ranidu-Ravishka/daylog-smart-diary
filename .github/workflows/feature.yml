@@ -133,6 +133,9 @@ jobs:
       - name: Backend tests
         run: pnpm --filter @repo/backend test:run
 
+      - name: Web OAuth abuse tests
+        run: pnpm --filter web test:oauth-abuse
+
       - name: Mobile typecheck
         run: pnpm --filter mobile check-types
 

@@ -20,6 +20,24 @@ type OAuthStateCookiePayload = {
 
 export const runtime = "nodejs";
 
+function rejectOAuthCallback(
+  oauthCookieName: string,
+  status: 400 | 403 | 502,
+  message = "OAuth callback rejected.",
+) {
+  const response = NextResponse.json(
+    {
+      error: message,
+    },
+    {
+      status,
+    },
+  );
+
+  response.cookies.delete(oauthCookieName);
+  return response;
+}
+
 function buildSettingsRedirect(
   request: NextRequest,
   provider: string,
@@ -131,27 +149,15 @@ export async function GET(
     }
   }
 
-  const redirectOnError = buildSettingsRedirect(
-    request,
-    provider,
-    "error",
-    "OAuth connection failed. Please try again.",
-    statePayload?.returnPath,
-  );
-
   const nextState = request.nextUrl.searchParams.get("state");
   const code = request.nextUrl.searchParams.get("code");
   const providerError = request.nextUrl.searchParams.get("error");
 
   if (providerError) {
-    return NextResponse.redirect(
-      buildSettingsRedirect(
-        request,
-        provider,
-        "error",
-        `OAuth provider rejected authorization: ${providerError}`,
-        statePayload?.returnPath,
-      ),
+    return rejectOAuthCallback(
+      oauthCookieName,
+      400,
+      "OAuth authorization was denied.",
     );
   }
 
@@ -161,12 +167,12 @@ export async function GET(
     statePayload.state !== nextState ||
     !code
   ) {
-    return NextResponse.redirect(redirectOnError);
+    return rejectOAuthCallback(oauthCookieName, 400);
   }
 
   const { userId, getToken } = await auth();
   if (!userId || userId !== statePayload.userId) {
-    return NextResponse.redirect(redirectOnError);
+    return rejectOAuthCallback(oauthCookieName, 403);
   }
 
   const config = getOAuthProviderConfig(provider);
@@ -220,19 +226,7 @@ export async function GET(
     const response = NextResponse.redirect(successRedirect);
     response.cookies.delete(oauthCookieName);
     return response;
-  } catch (error) {
-    const response = NextResponse.redirect(
-      buildSettingsRedirect(
-        request,
-        provider,
-        "error",
-        error instanceof Error
-          ? error.message
-          : "OAuth callback failed unexpectedly.",
-        statePayload.returnPath,
-      ),
-    );
-    response.cookies.delete(oauthCookieName);
-    return response;
+  } catch {
+    return rejectOAuthCallback(oauthCookieName, 502, "OAuth callback failed.");
   }
 }
