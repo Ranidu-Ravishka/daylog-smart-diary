@@ -15,7 +15,7 @@ pnpm --filter @repo/backend test:run
 
 ## Backend CI gate
 
-The `Backend Validation` CI job executes:
+The canonical `backend-validation` CI check executes:
 
 ```bash
 pnpm --filter @repo/backend lint

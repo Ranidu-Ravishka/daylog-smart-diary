@@ -144,7 +144,7 @@ Primary result:
 
 - Workspace orchestration: Turborepo + pnpm.
 - Language: TypeScript across apps and packages.
-- CI orchestration: GitHub Actions workflow at `.github/workflows/feature.yml`.
+- CI orchestration: GitHub Actions workflow at `.github/workflows/backend-validation.yml`.
 - Shared UI primitives and constants in `packages/ui`.
 
 ### 4.2 Backend Architecture (Convex)
@@ -365,17 +365,17 @@ Recommendation:
 
 ### 7.3 Low severity
 
-#### Finding L1: CI naming drift across docs/workflow
+#### Finding L1: CI naming canonicalized
 
-- Docs refer to `Backend Tests` while workflow job name is `Backend Validation`.
+- CI workflow and docs now use a single canonical required check name: `backend-validation`.
 
 Impact:
 
-- Confusion in branch protection setup and release checklists.
+- Branch protection setup and release checklists are now unambiguous.
 
 Recommendation:
 
-- Standardize naming in docs and branch-protection rule labels.
+- Keep branch protection required checks pinned only to `backend-validation`.
 
 ## 8) Security and Compliance Posture Snapshot
 
@@ -416,7 +416,7 @@ Recommended minimal high-value test suites:
 ### 0-2 weeks (stability + correctness)
 
 1. Fix audit log filter/pagination correctness.
-2. Normalize CI naming across docs and protections.
+2. Keep CI required-check naming pinned to `backend-validation`.
 3. Add focused behavior tests for summaries + integrations + audit logs.
 
 ### 2-6 weeks (scale + security)
@@ -557,7 +557,7 @@ Mobile:
 
 CI and ops docs:
 
-- `.github/workflows/feature.yml`
+- `.github/workflows/backend-validation.yml`
 - `README.md`
 - `CONVEX_SETUP.md`
 - `DEPLOY_RUNBOOK.md`

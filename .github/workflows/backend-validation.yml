@@ -1,0 +1,143 @@
+name: backend-validation
+
+permissions:
+  contents: read
+  pull-requests: read
+
+on:
+  push:
+    branches:
+      - "feature/**"
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  backend-validation:
+    name: backend-validation
+    runs-on: ubuntu-latest
+    env:
+      # Dummy Convex URL so ConvexReactClient doesn't fail during Next.js build in CI
+      NEXT_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
+      EXPO_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ci_dummy"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          # Required for correct diffing
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Filter changed paths
+        uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            web:
+              - 'apps/web/**'
+
+            admin:
+              - 'apps/admin/**'
+
+            shared:
+              - 'packages/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'turbo.json'
+
+      - name: Compute build flags
+        id: set
+        shell: bash
+        env:
+          WEB_CHANGED: ${{ steps.filter.outputs.web }}
+          ADMIN_CHANGED: ${{ steps.filter.outputs.admin }}
+          SHARED_CHANGED: ${{ steps.filter.outputs.shared }}
+        run: |
+          bool_or() {
+            for v in "$@"; do
+              if [ "$v" = "true" ]; then
+                echo "true"
+                return 0
+              fi
+            done
+            echo "false"
+          }
+
+          WEB="$(bool_or "$WEB_CHANGED" "$SHARED_CHANGED")"
+          ADMIN="$(bool_or "$ADMIN_CHANGED" "$SHARED_CHANGED")"
+
+          echo "web=$WEB" >> "$GITHUB_OUTPUT"
+          echo "admin=$ADMIN" >> "$GITHUB_OUTPUT"
+
+      - name: Secret scan (high-confidence)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SECRET_PATTERN='(sk_(test|live)_[A-Za-z0-9]{20,}|pk_(test|live)_[A-Za-z0-9]{20,}|whsec_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|xox[baprs]-[A-Za-z0-9-]{16,})'
+
+          if git grep -nE "$SECRET_PATTERN" -- . ':(exclude)SECURITY.md'; then
+            echo "Potential secret detected. Remove it and rotate keys if needed."
+            exit 1
+          fi
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Build web app
+        if: steps.set.outputs.web == 'true'
+        run: pnpm run build:web
+
+      - name: Build admin app
+        if: steps.set.outputs.admin == 'true'
+        run: pnpm run build:admin
+
+      - name: Backend lint
+        run: pnpm --filter @repo/backend lint
+
+      - name: Backend tests
+        run: pnpm --filter @repo/backend test:run
+
+      - name: Mobile typecheck
+        run: pnpm --filter mobile check-types
+
+      - name: Mobile lint
+        run: pnpm --filter mobile lint
+
+      - name: Mobile build validation (Expo web export)
+        run: pnpm --filter mobile build:ci

@@ -99,11 +99,9 @@ pnpm lint:mobile
 
 ## CI required PR checks
 
-PR validation runs in `.github/workflows/feature.yml` and should require these job checks in branch protection:
+PR validation runs in [.github/workflows/backend-validation.yml](.github/workflows/backend-validation.yml) and should require these job checks in branch protection:
 
-- `Feature Branch CI / ci-checks`
-- `Feature Branch CI / Backend Validation`
-- `Feature Branch CI / Mobile Validation`
+- `backend-validation`
 
 Run the same gates locally before opening a PR:
 
@@ -134,7 +132,7 @@ pnpm --filter admin lint
 pnpm --filter admin build
 ```
 
-Branch protection rules are configured in GitHub repository settings and are not versioned in this repository. Keep the required status checks above in sync with workflow job names.
+Branch protection rules are configured in GitHub repository settings and are not versioned in this repository. Keep the required status checks set to only `backend-validation`.
 
 ## App-specific docs
 

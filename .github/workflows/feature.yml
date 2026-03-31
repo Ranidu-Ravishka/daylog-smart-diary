@@ -1,4 +1,4 @@
-name: Feature Branch CI
+name: backend-validation
 
 permissions:
   contents: read
@@ -20,16 +20,14 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  # ==================================================
-  # Detect changed areas
-  # ==================================================
-  changes:
+  backend-validation:
+    name: backend-validation
     runs-on: ubuntu-latest
-
-    outputs:
-      web: ${{ steps.set.outputs.web }}
-      admin: ${{ steps.set.outputs.admin }}
-      mobile: ${{ steps.set.outputs.mobile }}
+    env:
+      # Dummy Convex URL so ConvexReactClient doesn't fail during Next.js build in CI
+      NEXT_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
+      EXPO_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ci_dummy"
 
     steps:
       - name: Checkout repository
@@ -37,70 +35,6 @@ jobs:
         with:
           # Required for correct diffing
           fetch-depth: 0
-
-      - name: Filter changed paths
-        uses: dorny/paths-filter@v4
-        id: filter
-        with:
-          filters: |
-            web:
-              - 'apps/web/**'
-
-            admin:
-              - 'apps/admin/**'
-
-            mobile:
-              - 'apps/mobile/**'
-
-            shared:
-              - 'packages/**'
-              - 'package.json'
-              - 'pnpm-lock.yaml'
-              - 'pnpm-workspace.yaml'
-              - 'turbo.json'
-
-      - name: Compute build flags
-        id: set
-        shell: bash
-        env:
-          WEB_CHANGED: ${{ steps.filter.outputs.web }}
-          ADMIN_CHANGED: ${{ steps.filter.outputs.admin }}
-          MOBILE_CHANGED: ${{ steps.filter.outputs.mobile }}
-          SHARED_CHANGED: ${{ steps.filter.outputs.shared }}
-
-        run: |
-          bool_or() {
-            for v in "$@"; do
-              if [ "$v" = "true" ]; then
-                echo "true"
-                return 0
-              fi
-            done
-            echo "false"
-          }
-
-          WEB="$(bool_or "$WEB_CHANGED" "$SHARED_CHANGED")"
-          ADMIN="$(bool_or "$ADMIN_CHANGED" "$SHARED_CHANGED")"
-          MOBILE="$(bool_or "$MOBILE_CHANGED" "$SHARED_CHANGED")"
-
-          echo "web=$WEB" >> "$GITHUB_OUTPUT"
-          echo "admin=$ADMIN" >> "$GITHUB_OUTPUT"
-          echo "mobile=$MOBILE" >> "$GITHUB_OUTPUT"
-
-  # ==================================================
-  # Main CI checks (lint/typecheck/web/admin)
-  # ==================================================
-  ci-checks:
-    runs-on: ubuntu-latest
-    needs: [changes]
-
-    env:
-      # Dummy Convex URL so ConvexReactClient doesn't fail during Next.js build in CI
-      NEXT_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -124,6 +58,48 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Filter changed paths
+        uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            web:
+              - 'apps/web/**'
+
+            admin:
+              - 'apps/admin/**'
+
+            shared:
+              - 'packages/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'turbo.json'
+
+      - name: Compute build flags
+        id: set
+        shell: bash
+        env:
+          WEB_CHANGED: ${{ steps.filter.outputs.web }}
+          ADMIN_CHANGED: ${{ steps.filter.outputs.admin }}
+          SHARED_CHANGED: ${{ steps.filter.outputs.shared }}
+        run: |
+          bool_or() {
+            for v in "$@"; do
+              if [ "$v" = "true" ]; then
+                echo "true"
+                return 0
+              fi
+            done
+            echo "false"
+          }
+
+          WEB="$(bool_or "$WEB_CHANGED" "$SHARED_CHANGED")"
+          ADMIN="$(bool_or "$ADMIN_CHANGED" "$SHARED_CHANGED")"
+
+          echo "web=$WEB" >> "$GITHUB_OUTPUT"
+          echo "admin=$ADMIN" >> "$GITHUB_OUTPUT"
 
       - name: Secret scan (high-confidence)
         shell: bash
@@ -144,49 +120,18 @@ jobs:
         run: pnpm typecheck
 
       - name: Build web app
-        if: needs.changes.outputs.web == 'true'
+        if: steps.set.outputs.web == 'true'
         run: pnpm run build:web
 
       - name: Build admin app
-        if: needs.changes.outputs.admin == 'true'
+        if: steps.set.outputs.admin == 'true'
         run: pnpm run build:admin
 
-  # ==================================================
-  # Mobile validation (required gate)
-  # ==================================================
-  mobile-validation:
-    name: Mobile Validation
-    runs-on: ubuntu-latest
-    env:
-      EXPO_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
-      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ci_dummy"
+      - name: Backend lint
+        run: pnpm --filter @repo/backend lint
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Get pnpm store directory
-        id: pnpm-cache
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Backend tests
+        run: pnpm --filter @repo/backend test:run
 
       - name: Mobile typecheck
         run: pnpm --filter mobile check-types
@@ -196,43 +141,3 @@ jobs:
 
       - name: Mobile build validation (Expo web export)
         run: pnpm --filter mobile build:ci
-
-  # ==================================================
-  # Backend validation (required gate)
-  # ==================================================
-  backend-validation:
-    name: Backend Validation
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Get pnpm store directory
-        id: pnpm-cache
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Backend lint
-        run: pnpm --filter @repo/backend lint
-
-      - name: Backend tests
-        run: pnpm --filter @repo/backend test:run
