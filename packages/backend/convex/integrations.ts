@@ -7,10 +7,11 @@ import {
   mutation,
   query,
 } from "./_generated/server";
-import { requireUser, requireOwnership } from "./authz";
+import { requireAdmin, requireUser, requireOwnership } from "./authz";
 import { validateDayKey } from "./validators";
 import { api, internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
+import { paginationOptsValidator } from "convex/server";
 import {
   asIntegrationProvider,
   asOAuthRefreshProvider,
@@ -22,6 +23,13 @@ import {
   type OAuthRefreshProvider,
 } from "./integrationProviders";
 import { applyDashboardMetricsDelta } from "./dashboardMetrics";
+import {
+  constantTimeStringEquals,
+  decryptIntegrationSecret,
+  encryptIntegrationSecret,
+  getActiveIntegrationSecretKeyId,
+  type EncryptedSecretEnvelope,
+} from "./integrationSecretsCrypto";
 
 type NormalizedIntegrationDailySync = {
   metrics?: {
@@ -297,17 +305,17 @@ async function upsertIntegrationSecret(
           eq: (field: string, value: unknown) => unknown;
         }) => unknown,
       ) => {
-        collect: () => Promise<
-          Array<{
-            _id: Id<"integrationSecrets">;
-            tokenRef: string;
-            refreshToken?: string;
-          }>
-        >;
         unique: () => Promise<{
           _id: Id<"integrationSecrets">;
+          userId: Id<"user">;
+          provider: string;
           tokenRef: string;
+          encryptedAccessToken?: EncryptedSecretEnvelope;
+          encryptedRefreshToken?: EncryptedSecretEnvelope;
+          accessToken?: string;
           refreshToken?: string;
+          accessTokenExpiresAt?: number;
+          lastRefreshAt?: number;
         } | null>;
       };
     };
@@ -343,18 +351,37 @@ async function upsertIntegrationSecret(
     .withIndex("by_tokenRef", (q) => q.eq("tokenRef", tokenRef))
     .unique();
 
+  const cryptoContext = {
+    userId: String(args.userId),
+    provider,
+    tokenRef,
+  };
+
+  const encryptedAccessToken = await encryptIntegrationSecret(
+    args.accessToken,
+    cryptoContext,
+    now,
+  );
+
+  const encryptedRefreshToken =
+    args.refreshToken !== undefined
+      ? await encryptIntegrationSecret(args.refreshToken, cryptoContext, now)
+      : undefined;
+
   if (existing) {
     const patchPayload: Record<string, unknown> = {
       userId: args.userId,
       provider,
-      accessToken: args.accessToken,
+      encryptedAccessToken,
       accessTokenExpiresAt: args.accessTokenExpiresAt,
       lastRefreshAt: args.lastRefreshAt,
+      accessToken: undefined,
       updatedAt: now,
     };
 
     if (args.refreshToken !== undefined) {
-      patchPayload.refreshToken = args.refreshToken;
+      patchPayload.encryptedRefreshToken = encryptedRefreshToken;
+      patchPayload.refreshToken = undefined;
     }
 
     await db.patch(existing._id, {
@@ -367,8 +394,8 @@ async function upsertIntegrationSecret(
     userId: args.userId,
     provider,
     tokenRef,
-    accessToken: args.accessToken,
-    refreshToken: args.refreshToken,
+    encryptedAccessToken,
+    encryptedRefreshToken,
     accessTokenExpiresAt: args.accessTokenExpiresAt,
     lastRefreshAt: args.lastRefreshAt,
     createdAt: now,
@@ -877,27 +904,91 @@ export const getIntegrationAccessTokenByRefInternal = internalQuery({
   },
   handler: async (ctx, args) => {
     const provider = assertIntegrationProvider(args.provider);
+    const activeKeyId = getActiveIntegrationSecretKeyId();
 
     const secret = (await ctx.db
       .query("integrationSecrets")
       .withIndex("by_tokenRef", (q) => q.eq("tokenRef", args.tokenRef))
       .unique()) as {
+      _id: Id<"integrationSecrets">;
       userId: Id<"user">;
       provider: string;
-      accessToken: string;
+      encryptedAccessToken?: EncryptedSecretEnvelope;
+      encryptedRefreshToken?: EncryptedSecretEnvelope;
+      accessToken?: string;
       refreshToken?: string;
       accessTokenExpiresAt?: number;
     } | null;
 
     if (!secret) return null;
-    if (secret.userId !== args.userId || secret.provider !== provider) {
+    if (
+      !constantTimeStringEquals(String(secret.userId), String(args.userId)) ||
+      !constantTimeStringEquals(secret.provider, provider)
+    ) {
       return null;
     }
 
+    const cryptoContext = {
+      userId: String(args.userId),
+      provider,
+      tokenRef: args.tokenRef,
+    };
+
+    let accessToken: string;
+    let refreshToken: string | undefined;
+    let isLegacyPlaintext = false;
+    let needsKeyRotation = false;
+
+    if (secret.encryptedAccessToken) {
+      accessToken = await decryptIntegrationSecret(
+        secret.encryptedAccessToken,
+        cryptoContext,
+      );
+
+      if (
+        !constantTimeStringEquals(
+          secret.encryptedAccessToken.keyId,
+          activeKeyId,
+        )
+      ) {
+        needsKeyRotation = true;
+      }
+    } else if (secret.accessToken) {
+      accessToken = secret.accessToken;
+      isLegacyPlaintext = true;
+      needsKeyRotation = true;
+    } else {
+      throw new Error(
+        "Integration secret payload is invalid or missing token material.",
+      );
+    }
+
+    if (secret.encryptedRefreshToken) {
+      refreshToken = await decryptIntegrationSecret(
+        secret.encryptedRefreshToken,
+        cryptoContext,
+      );
+
+      if (
+        !constantTimeStringEquals(
+          secret.encryptedRefreshToken.keyId,
+          activeKeyId,
+        )
+      ) {
+        needsKeyRotation = true;
+      }
+    } else if (secret.refreshToken !== undefined) {
+      refreshToken = secret.refreshToken;
+      isLegacyPlaintext = true;
+      needsKeyRotation = true;
+    }
+
     return {
-      accessToken: secret.accessToken,
-      refreshToken: secret.refreshToken,
+      accessToken,
+      refreshToken,
       accessTokenExpiresAt: secret.accessTokenExpiresAt,
+      isLegacyPlaintext,
+      needsKeyRotation,
     };
   },
 });
@@ -1411,6 +1502,8 @@ export async function syncMyIntegrationForDayImpl(
         accessToken: string;
         refreshToken?: string;
         accessTokenExpiresAt?: number;
+        isLegacyPlaintext?: boolean;
+        needsKeyRotation?: boolean;
       } | null;
 
       if (!secret?.accessToken) {
@@ -1422,6 +1515,20 @@ export async function syncMyIntegrationForDayImpl(
       accessToken = secret.accessToken;
       refreshToken = secret.refreshToken;
       accessTokenExpiresAt = secret.accessTokenExpiresAt;
+
+      if (secret.isLegacyPlaintext || secret.needsKeyRotation) {
+        currentTokenRef = await ctx.runMutation(
+          internal.integrations.storeIntegrationSecretInternal,
+          {
+            userId: integration.userId,
+            provider,
+            accessToken,
+            refreshToken,
+            accessTokenExpiresAt,
+            existingTokenRef: currentTokenRef,
+          },
+        );
+      }
     } else {
       const migratedTokenRef = await ctx.runMutation(
         internal.integrations.storeIntegrationSecretInternal,
@@ -1583,6 +1690,57 @@ export async function syncMyIntegrationForDayImpl(
     throw error;
   }
 }
+
+export const adminMigrateLegacyIntegrationSecretsPage = mutation({
+  args: {
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+
+    const page = await ctx.db
+      .query("integrationSecrets")
+      .paginate(args.paginationOpts);
+
+    let migratedCount = 0;
+    let skippedCount = 0;
+
+    for (const secret of page.page) {
+      const hasLegacyPlaintext =
+        typeof secret.accessToken === "string" ||
+        typeof secret.refreshToken === "string";
+
+      if (!hasLegacyPlaintext) {
+        skippedCount += 1;
+        continue;
+      }
+
+      if (!secret.accessToken) {
+        skippedCount += 1;
+        continue;
+      }
+
+      await upsertIntegrationSecret(ctx.db as never, {
+        userId: secret.userId,
+        provider: assertIntegrationProvider(secret.provider),
+        accessToken: secret.accessToken,
+        refreshToken: secret.refreshToken,
+        accessTokenExpiresAt: secret.accessTokenExpiresAt,
+        lastRefreshAt: secret.lastRefreshAt,
+        existingTokenRef: secret.tokenRef,
+      });
+
+      migratedCount += 1;
+    }
+
+    return {
+      migratedCount,
+      skippedCount,
+      continueCursor: page.continueCursor,
+      isDone: page.isDone,
+    };
+  },
+});
 
 export const syncAllMyIntegrationsForDay = action({
   args: {

@@ -5,6 +5,19 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+const encryptedSecretEnvelopeValidator = v.object({
+  version: v.number(),
+  algorithm: v.literal("AES-256-GCM"),
+  wrappedDekAlgorithm: v.literal("AES-256-GCM"),
+  keyId: v.string(),
+  keyVersion: v.number(),
+  encryptedValue: v.string(),
+  valueIv: v.string(),
+  encryptedDek: v.string(),
+  dekIv: v.string(),
+  createdAt: v.number(),
+});
+
 export default defineSchema(
   {
     // ── CMS content (used by admin) ──────────────────────────
@@ -163,7 +176,10 @@ export default defineSchema(
       userId: v.id("user"),
       provider: v.string(),
       tokenRef: v.string(),
-      accessToken: v.string(),
+      encryptedAccessToken: v.optional(encryptedSecretEnvelopeValidator),
+      encryptedRefreshToken: v.optional(encryptedSecretEnvelopeValidator),
+      // Legacy plaintext fields are retained temporarily for migration.
+      accessToken: v.optional(v.string()),
       refreshToken: v.optional(v.string()),
       accessTokenExpiresAt: v.optional(v.number()),
       lastRefreshAt: v.optional(v.number()),
