@@ -167,7 +167,10 @@ function buildIntegrationContextForModel(entries: IntegrationDailyData[]) {
   };
 }
 
-async function generateSummaryWithOpenAi(dayKey: string, modelInput: string) {
+export async function generateSummaryWithOpenAi(
+  dayKey: string,
+  modelInput: string,
+) {
   const openAiKey = convexServerEnv.openAiApiKey;
 
   const callOpenAi = async () => {

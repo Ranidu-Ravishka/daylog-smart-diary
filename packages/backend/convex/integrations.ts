@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import {
+  type ActionCtx,
   action,
   internalMutation,
   internalQuery,
@@ -1316,255 +1317,262 @@ export const syncMyIntegrationForDay = action({
     dayKey: v.string(),
   },
   handler: async (ctx, args) => {
-    validateDayKey(args.dayKey);
-    const provider = assertIntegrationProvider(args.provider);
+    return await syncMyIntegrationForDayImpl(ctx, args);
+  },
+});
 
-    const integration = (await ctx.runQuery(
-      api.integrations.getIntegrationByProvider,
-      {
-        provider,
-      },
-    )) as {
-      _id: Id<"integrations">;
-      userId: Id<"user">;
-      tokenRef?: string;
-      status: "connected" | "disconnected" | "error";
-    } | null;
+export async function syncMyIntegrationForDayImpl(
+  ctx: Pick<ActionCtx, "runQuery" | "runMutation">,
+  args: {
+    provider: string;
+    dayKey: string;
+  },
+) {
+  validateDayKey(args.dayKey);
+  const provider = assertIntegrationProvider(args.provider);
 
-    if (!integration) {
+  const integration = (await ctx.runQuery(
+    api.integrations.getIntegrationByProvider,
+    {
+      provider,
+    },
+  )) as {
+    _id: Id<"integrations">;
+    userId: Id<"user">;
+    tokenRef?: string;
+    status: "connected" | "disconnected" | "error";
+  } | null;
+
+  if (!integration) {
+    throw new Error(
+      `Provider "${provider}" is not connected for this account.`,
+    );
+  }
+  if (integration.status === "disconnected") {
+    throw new Error(`Provider "${provider}" is disconnected.`);
+  }
+
+  const syncRunState = (await ctx.runMutation(
+    internal.integrations.beginIntegrationSyncRunInternal,
+    {
+      userId: integration.userId,
+      provider,
+      dayKey: args.dayKey,
+    },
+  )) as {
+    shouldSync: boolean;
+    reason: "ready" | "already_synced" | "already_running";
+  };
+
+  if (!syncRunState.shouldSync) {
+    return {
+      success: true,
+      provider,
+      dayKey: args.dayKey,
+      idempotent: true,
+      skippedReason: syncRunState.reason,
+    };
+  }
+
+  const syncStartedAt = Date.now();
+  const oauthRefreshProvider = asOAuthRefreshProvider(provider);
+
+  try {
+    if (!integration.tokenRef) {
       throw new Error(
-        `Provider "${provider}" is not connected for this account.`,
+        `Provider "${provider}" is missing tokenRef. Reconnect integration before syncing.`,
       );
     }
-    if (integration.status === "disconnected") {
-      throw new Error(`Provider "${provider}" is disconnected.`);
+
+    let currentTokenRef = integration.tokenRef;
+    let accessToken = integration.tokenRef;
+    let refreshToken: string | undefined;
+    let accessTokenExpiresAt: number | undefined;
+
+    if (isOpaqueTokenRef(integration.tokenRef)) {
+      const secret = (await ctx.runQuery(
+        internal.integrations.getIntegrationAccessTokenByRefInternal,
+        {
+          tokenRef: integration.tokenRef,
+          userId: integration.userId,
+          provider,
+        },
+      )) as {
+        accessToken: string;
+        refreshToken?: string;
+        accessTokenExpiresAt?: number;
+      } | null;
+
+      if (!secret?.accessToken) {
+        throw new Error(
+          `Provider "${provider}" secret not found. Reconnect integration before syncing.`,
+        );
+      }
+
+      accessToken = secret.accessToken;
+      refreshToken = secret.refreshToken;
+      accessTokenExpiresAt = secret.accessTokenExpiresAt;
+    } else {
+      const migratedTokenRef = await ctx.runMutation(
+        internal.integrations.storeIntegrationSecretInternal,
+        {
+          userId: integration.userId,
+          provider,
+          accessToken: integration.tokenRef,
+        },
+      );
+
+      await ctx.runMutation(
+        internal.integrations.updateIntegrationTokenRefInternal,
+        {
+          integrationId: integration._id,
+          tokenRef: migratedTokenRef,
+        },
+      );
+
+      currentTokenRef = migratedTokenRef;
     }
 
-    const syncRunState = (await ctx.runMutation(
-      internal.integrations.beginIntegrationSyncRunInternal,
+    if (oauthRefreshProvider && isAccessTokenNearExpiry(accessTokenExpiresAt)) {
+      if (!refreshToken) {
+        throw new Error(
+          `Provider "${provider}" access token has expired and no refresh token is available. Reconnect integration.`,
+        );
+      }
+
+      const refreshed = await refreshOAuthAccessTokenWithRetry(
+        oauthRefreshProvider,
+        refreshToken,
+      );
+
+      const nextRefreshToken = refreshed.refreshToken ?? refreshToken;
+
+      currentTokenRef = await ctx.runMutation(
+        internal.integrations.storeIntegrationSecretInternal,
+        {
+          userId: integration.userId,
+          provider,
+          accessToken: refreshed.accessToken,
+          refreshToken: nextRefreshToken,
+          accessTokenExpiresAt: refreshed.accessTokenExpiresAt,
+          lastRefreshAt: Date.now(),
+          existingTokenRef: currentTokenRef,
+        },
+      );
+
+      accessToken = refreshed.accessToken;
+      refreshToken = nextRefreshToken;
+      accessTokenExpiresAt = refreshed.accessTokenExpiresAt;
+    }
+
+    let normalized: NormalizedIntegrationDailySync;
+
+    try {
+      normalized = await syncProviderForDay(
+        provider,
+        accessToken,
+        args.dayKey,
+        syncStartedAt,
+      );
+    } catch (error) {
+      const shouldRetryAfterRefresh =
+        !!oauthRefreshProvider &&
+        !!refreshToken &&
+        error instanceof ProviderRequestError &&
+        error.status === 401;
+
+      if (!shouldRetryAfterRefresh) {
+        throw error;
+      }
+
+      if (!oauthRefreshProvider || !refreshToken) {
+        throw error;
+      }
+
+      const refreshed = await refreshOAuthAccessTokenWithRetry(
+        oauthRefreshProvider,
+        refreshToken,
+      );
+
+      const nextRefreshToken = refreshed.refreshToken ?? refreshToken;
+      await ctx.runMutation(
+        internal.integrations.storeIntegrationSecretInternal,
+        {
+          userId: integration.userId,
+          provider,
+          accessToken: refreshed.accessToken,
+          refreshToken: nextRefreshToken,
+          accessTokenExpiresAt: refreshed.accessTokenExpiresAt,
+          lastRefreshAt: Date.now(),
+          existingTokenRef: currentTokenRef,
+        },
+      );
+
+      accessToken = refreshed.accessToken;
+      refreshToken = nextRefreshToken;
+      accessTokenExpiresAt = refreshed.accessTokenExpiresAt;
+
+      normalized = await syncProviderForDay(
+        provider,
+        accessToken,
+        args.dayKey,
+        syncStartedAt,
+      );
+    }
+
+    await ctx.runMutation(
+      internal.integrations.upsertIntegrationDailyDataInternal,
       {
         userId: integration.userId,
         provider,
         dayKey: args.dayKey,
+        metrics: normalized.metrics,
+        summary: normalized.summary,
+        signals: normalized.signals,
       },
-    )) as {
-      shouldSync: boolean;
-      reason: "ready" | "already_synced" | "already_running";
+    );
+
+    await ctx.runMutation(api.integrations.recordSync, {
+      integrationId: integration._id,
+    });
+
+    await ctx.runMutation(
+      internal.integrations.completeIntegrationSyncRunInternal,
+      {
+        userId: integration.userId,
+        provider,
+        dayKey: args.dayKey,
+        status: "success",
+      },
+    );
+
+    return {
+      success: true,
+      provider,
+      dayKey: args.dayKey,
     };
+  } catch (error) {
+    const message = sanitizeSyncError(error);
 
-    if (!syncRunState.shouldSync) {
-      return {
-        success: true,
+    await ctx.runMutation(api.integrations.markIntegrationError, {
+      integrationId: integration._id,
+      reason: message,
+    });
+
+    await ctx.runMutation(
+      internal.integrations.completeIntegrationSyncRunInternal,
+      {
+        userId: integration.userId,
         provider,
         dayKey: args.dayKey,
-        idempotent: true,
-        skippedReason: syncRunState.reason,
-      };
-    }
+        status: "error",
+        lastError: message,
+      },
+    );
 
-    const syncStartedAt = Date.now();
-    const oauthRefreshProvider = asOAuthRefreshProvider(provider);
-
-    try {
-      if (!integration.tokenRef) {
-        throw new Error(
-          `Provider "${provider}" is missing tokenRef. Reconnect integration before syncing.`,
-        );
-      }
-
-      let currentTokenRef = integration.tokenRef;
-      let accessToken = integration.tokenRef;
-      let refreshToken: string | undefined;
-      let accessTokenExpiresAt: number | undefined;
-
-      if (isOpaqueTokenRef(integration.tokenRef)) {
-        const secret = (await ctx.runQuery(
-          internal.integrations.getIntegrationAccessTokenByRefInternal,
-          {
-            tokenRef: integration.tokenRef,
-            userId: integration.userId,
-            provider,
-          },
-        )) as {
-          accessToken: string;
-          refreshToken?: string;
-          accessTokenExpiresAt?: number;
-        } | null;
-
-        if (!secret?.accessToken) {
-          throw new Error(
-            `Provider "${provider}" secret not found. Reconnect integration before syncing.`,
-          );
-        }
-
-        accessToken = secret.accessToken;
-        refreshToken = secret.refreshToken;
-        accessTokenExpiresAt = secret.accessTokenExpiresAt;
-      } else {
-        const migratedTokenRef = await ctx.runMutation(
-          internal.integrations.storeIntegrationSecretInternal,
-          {
-            userId: integration.userId,
-            provider,
-            accessToken: integration.tokenRef,
-          },
-        );
-
-        await ctx.runMutation(
-          internal.integrations.updateIntegrationTokenRefInternal,
-          {
-            integrationId: integration._id,
-            tokenRef: migratedTokenRef,
-          },
-        );
-
-        currentTokenRef = migratedTokenRef;
-      }
-
-      if (
-        oauthRefreshProvider &&
-        isAccessTokenNearExpiry(accessTokenExpiresAt)
-      ) {
-        if (!refreshToken) {
-          throw new Error(
-            `Provider "${provider}" access token has expired and no refresh token is available. Reconnect integration.`,
-          );
-        }
-
-        const refreshed = await refreshOAuthAccessTokenWithRetry(
-          oauthRefreshProvider,
-          refreshToken,
-        );
-
-        const nextRefreshToken = refreshed.refreshToken ?? refreshToken;
-
-        currentTokenRef = await ctx.runMutation(
-          internal.integrations.storeIntegrationSecretInternal,
-          {
-            userId: integration.userId,
-            provider,
-            accessToken: refreshed.accessToken,
-            refreshToken: nextRefreshToken,
-            accessTokenExpiresAt: refreshed.accessTokenExpiresAt,
-            lastRefreshAt: Date.now(),
-            existingTokenRef: currentTokenRef,
-          },
-        );
-
-        accessToken = refreshed.accessToken;
-        refreshToken = nextRefreshToken;
-        accessTokenExpiresAt = refreshed.accessTokenExpiresAt;
-      }
-
-      let normalized: NormalizedIntegrationDailySync;
-
-      try {
-        normalized = await syncProviderForDay(
-          provider,
-          accessToken,
-          args.dayKey,
-          syncStartedAt,
-        );
-      } catch (error) {
-        const shouldRetryAfterRefresh =
-          !!oauthRefreshProvider &&
-          !!refreshToken &&
-          error instanceof ProviderRequestError &&
-          error.status === 401;
-
-        if (!shouldRetryAfterRefresh) {
-          throw error;
-        }
-
-        if (!oauthRefreshProvider || !refreshToken) {
-          throw error;
-        }
-
-        const refreshed = await refreshOAuthAccessTokenWithRetry(
-          oauthRefreshProvider,
-          refreshToken,
-        );
-
-        const nextRefreshToken = refreshed.refreshToken ?? refreshToken;
-        await ctx.runMutation(
-          internal.integrations.storeIntegrationSecretInternal,
-          {
-            userId: integration.userId,
-            provider,
-            accessToken: refreshed.accessToken,
-            refreshToken: nextRefreshToken,
-            accessTokenExpiresAt: refreshed.accessTokenExpiresAt,
-            lastRefreshAt: Date.now(),
-            existingTokenRef: currentTokenRef,
-          },
-        );
-
-        accessToken = refreshed.accessToken;
-        refreshToken = nextRefreshToken;
-        accessTokenExpiresAt = refreshed.accessTokenExpiresAt;
-
-        normalized = await syncProviderForDay(
-          provider,
-          accessToken,
-          args.dayKey,
-          syncStartedAt,
-        );
-      }
-
-      await ctx.runMutation(
-        internal.integrations.upsertIntegrationDailyDataInternal,
-        {
-          userId: integration.userId,
-          provider,
-          dayKey: args.dayKey,
-          metrics: normalized.metrics,
-          summary: normalized.summary,
-          signals: normalized.signals,
-        },
-      );
-
-      await ctx.runMutation(api.integrations.recordSync, {
-        integrationId: integration._id,
-      });
-
-      await ctx.runMutation(
-        internal.integrations.completeIntegrationSyncRunInternal,
-        {
-          userId: integration.userId,
-          provider,
-          dayKey: args.dayKey,
-          status: "success",
-        },
-      );
-
-      return {
-        success: true,
-        provider,
-        dayKey: args.dayKey,
-      };
-    } catch (error) {
-      const message = sanitizeSyncError(error);
-
-      await ctx.runMutation(api.integrations.markIntegrationError, {
-        integrationId: integration._id,
-        reason: message,
-      });
-
-      await ctx.runMutation(
-        internal.integrations.completeIntegrationSyncRunInternal,
-        {
-          userId: integration.userId,
-          provider,
-          dayKey: args.dayKey,
-          status: "error",
-          lastError: message,
-        },
-      );
-
-      throw error;
-    }
-  },
-});
+    throw error;
+  }
+}
 
 export const syncAllMyIntegrationsForDay = action({
   args: {
