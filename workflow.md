@@ -11,7 +11,7 @@ Current maturity snapshot:
 1. **Core product loop is shipped** across web and mobile: memory capture, day metadata, and summary rendering.
 2. **Admin control plane is broad** (CRUD, audit surfaces, role gates), but has a few query-performance/correctness concerns.
 3. **Integration subsystem is thoughtfully designed** (provider allowlists, token refs, sync-run idempotency), but secret-at-rest hardening remains a priority.
-4. **Operational posture is improving** (strict env validation + CI validation + secret scan), though docs and CI naming are slightly out of sync.
+4. **Operational posture is improving** (strict env validation + CI validation + secret scan) with a single canonical CI gate (`backend-validation`).
 5. **Testing depth lags feature depth**, especially for highest-risk backend behavior.
 
 Executive risk ranking (highest first):
@@ -54,20 +54,20 @@ Evidence model:
 
 ## Program Status Matrix (Current Snapshot)
 
-| Area                            | Current State          | Implementation Depth | Confidence  | Primary Risk | Next Gate                                       |
-| ------------------------------- | ---------------------- | -------------------- | ----------- | ------------ | ----------------------------------------------- |
-| Monorepo foundation             | Stable                 | High                 | High        | Low          | Keep config drift low across packages           |
-| Backend schema/domain model     | Stable                 | High                 | High        | Low          | Maintain schema/index discipline with growth    |
-| Auth + authorization boundaries | Stable                 | High                 | High        | Medium       | Add more negative-path tests for authz          |
-| Web dashboard core flow         | Shipped                | High                 | High        | Medium       | Continued UX and resilience polish              |
-| Mobile core flow                | Shipped                | High                 | Medium-High | Medium       | Device-level regression matrix for services     |
-| Admin CRUD surface              | Shipped                | High                 | Medium      | Medium       | Query performance and pagination correctness    |
-| Audit log review flow           | Partially robust       | Medium               | Medium      | High         | Fix cursor/filter semantics                     |
-| AI summary generation           | Shipped                | Medium-High          | Medium-High | Medium       | Add quality-eval + failure-path tests           |
-| Integration sync architecture   | Strong direction       | High                 | Medium-High | Medium       | Harden token security + provider observability  |
-| Data export/privacy controls    | Shipped                | Medium-High          | Medium-High | Low-Medium   | Clarify retention and location policy           |
-| CI and release gates            | Good baseline          | Medium-High          | Medium-High | Low-Medium   | Align check naming + enforce policy consistency |
-| Backend automated tests         | Underpowered for scope | Low-Medium           | Medium      | High         | Restore behavior tests for critical flows       |
+| Area                            | Current State          | Implementation Depth | Confidence  | Primary Risk | Next Gate                                      |
+| ------------------------------- | ---------------------- | -------------------- | ----------- | ------------ | ---------------------------------------------- |
+| Monorepo foundation             | Stable                 | High                 | High        | Low          | Keep config drift low across packages          |
+| Backend schema/domain model     | Stable                 | High                 | High        | Low          | Maintain schema/index discipline with growth   |
+| Auth + authorization boundaries | Stable                 | High                 | High        | Medium       | Add more negative-path tests for authz         |
+| Web dashboard core flow         | Shipped                | High                 | High        | Medium       | Continued UX and resilience polish             |
+| Mobile core flow                | Shipped                | High                 | Medium-High | Medium       | Device-level regression matrix for services    |
+| Admin CRUD surface              | Shipped                | High                 | Medium      | Medium       | Query performance and pagination correctness   |
+| Audit log review flow           | Partially robust       | Medium               | Medium      | High         | Fix cursor/filter semantics                    |
+| AI summary generation           | Shipped                | Medium-High          | Medium-High | Medium       | Add quality-eval + failure-path tests          |
+| Integration sync architecture   | Strong direction       | High                 | Medium-High | Medium       | Harden token security + provider observability |
+| Data export/privacy controls    | Shipped                | Medium-High          | Medium-High | Low-Medium   | Clarify retention and location policy          |
+| CI and release gates            | Stable                 | Medium-High          | Medium-High | Low-Medium   | Maintain canonical `backend-validation` policy |
+| Backend automated tests         | Underpowered for scope | Low-Medium           | Medium      | High         | Restore behavior tests for critical flows      |
 
 Interpretation:
 

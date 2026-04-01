@@ -4,11 +4,12 @@ import {
   action,
   internalMutation,
   internalQuery,
+  type MutationCtx,
   mutation,
   query,
 } from "./_generated/server";
 import { requireAdmin, requireUser, requireOwnership } from "./authz";
-import { validateDayKey } from "./validators";
+import { clampLimit, validateDayKey } from "./validators";
 import { api, internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { paginationOptsValidator } from "convex/server";
@@ -49,6 +50,10 @@ const ACCESS_TOKEN_REFRESH_LEEWAY_MS = 60_000;
 const TOKEN_REFRESH_MAX_ATTEMPTS = 3;
 const TOKEN_REFRESH_BASE_BACKOFF_MS = 300;
 const DELETE_BATCH_SIZE = 256;
+const LEGACY_SECRETS_AUDIT_DEFAULT_PAGE_SIZE = 200;
+const LEGACY_SECRETS_AUDIT_MAX_PAGE_SIZE = 500;
+const LEGACY_SECRETS_AUDIT_DEFAULT_MAX_PAGES = 100;
+const LEGACY_SECRETS_AUDIT_MAX_PAGES = 2_000;
 
 class ProviderRequestError extends Error {
   status: number;
@@ -85,6 +90,119 @@ type RefreshedTokenPayload = {
   refreshToken?: string;
   accessTokenExpiresAt?: number;
 };
+
+type IntegrationSecretRecord = {
+  _id: Id<"integrationSecrets">;
+  userId: Id<"user">;
+  provider: string;
+  tokenRef: string;
+  encryptedAccessToken?: EncryptedSecretEnvelope;
+  encryptedRefreshToken?: EncryptedSecretEnvelope;
+  accessToken?: string;
+  refreshToken?: string;
+  accessTokenExpiresAt?: number;
+  lastRefreshAt?: number;
+};
+
+type LegacySecretMigrationCounts = {
+  migratedCount: number;
+  skippedCount: number;
+  failedCount: number;
+};
+
+function hasLegacyPlaintextSecret(secret: IntegrationSecretRecord): boolean {
+  return (
+    typeof secret.accessToken === "string" ||
+    typeof secret.refreshToken === "string"
+  );
+}
+
+async function migrateLegacySecretRecord(
+  db: MutationCtx["db"],
+  secret: IntegrationSecretRecord,
+): Promise<"migrated" | "skipped"> {
+  const hasLegacyAccessToken = typeof secret.accessToken === "string";
+  const hasLegacyRefreshToken = typeof secret.refreshToken === "string";
+  const hasLegacyPlaintext = hasLegacyAccessToken || hasLegacyRefreshToken;
+
+  if (!hasLegacyPlaintext) {
+    return "skipped";
+  }
+
+  const provider = assertIntegrationProvider(secret.provider);
+  const cryptoContext = {
+    userId: String(secret.userId),
+    provider,
+    tokenRef: secret.tokenRef,
+  };
+
+  let accessTokenForMigration: string | undefined;
+
+  if (hasLegacyAccessToken) {
+    accessTokenForMigration = secret.accessToken;
+  } else if (secret.encryptedAccessToken) {
+    accessTokenForMigration = await decryptIntegrationSecret(
+      secret.encryptedAccessToken,
+      cryptoContext,
+    );
+  }
+
+  if (!accessTokenForMigration) {
+    return "skipped";
+  }
+
+  await upsertIntegrationSecret(db as never, {
+    userId: secret.userId,
+    provider,
+    accessToken: accessTokenForMigration,
+    refreshToken: hasLegacyRefreshToken ? secret.refreshToken : undefined,
+    accessTokenExpiresAt: secret.accessTokenExpiresAt,
+    lastRefreshAt: secret.lastRefreshAt,
+    existingTokenRef: secret.tokenRef,
+  });
+
+  return "migrated";
+}
+
+async function migrateLegacySecretPage(
+  db: MutationCtx["db"],
+  pageRecords: IntegrationSecretRecord[],
+): Promise<LegacySecretMigrationCounts> {
+  const counts: LegacySecretMigrationCounts = {
+    migratedCount: 0,
+    skippedCount: 0,
+    failedCount: 0,
+  };
+
+  for (const secret of pageRecords) {
+    try {
+      const status = await migrateLegacySecretRecord(db, secret);
+      if (status === "migrated") {
+        counts.migratedCount += 1;
+      } else {
+        counts.skippedCount += 1;
+      }
+    } catch {
+      counts.failedCount += 1;
+    }
+  }
+
+  return counts;
+}
+
+function normalizeAuditPageSize(value: number | undefined): number {
+  return clampLimit(
+    value ?? LEGACY_SECRETS_AUDIT_DEFAULT_PAGE_SIZE,
+    LEGACY_SECRETS_AUDIT_MAX_PAGE_SIZE,
+  );
+}
+
+function normalizeAuditMaxPages(value: number | undefined): number {
+  return clampLimit(
+    value ?? LEGACY_SECRETS_AUDIT_DEFAULT_MAX_PAGES,
+    LEGACY_SECRETS_AUDIT_MAX_PAGES,
+  );
+}
 
 function getProviderOAuthCredentials(
   provider: OAuthRefreshProvider,
@@ -1595,67 +1713,149 @@ export const adminMigrateLegacyIntegrationSecretsPage = mutation({
     const page = await ctx.db
       .query("integrationSecrets")
       .paginate(args.paginationOpts);
+    const pageCounts = await migrateLegacySecretPage(
+      ctx.db,
+      page.page as IntegrationSecretRecord[],
+    );
+
+    return {
+      ...pageCounts,
+      continueCursor: page.continueCursor,
+      isDone: page.isDone,
+    };
+  },
+});
+
+export const adminAuditIntegrationSecretsEncryptionStatus = query({
+  args: {
+    pageSize: v.optional(v.number()),
+    maxPages: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+
+    const pageSize = normalizeAuditPageSize(args.pageSize);
+    const maxPages = normalizeAuditMaxPages(args.maxPages);
+
+    let cursor: string | null = null;
+    let pagesScanned = 0;
+
+    let totalRows = 0;
+    let legacyPlaintextRows = 0;
+    let encryptedRows = 0;
+    let missingEncryptedAccessRows = 0;
+
+    while (pagesScanned < maxPages) {
+      const page = await ctx.db.query("integrationSecrets").paginate({
+        numItems: pageSize,
+        cursor,
+      });
+
+      pagesScanned += 1;
+
+      for (const secret of page.page as IntegrationSecretRecord[]) {
+        totalRows += 1;
+
+        if (hasLegacyPlaintextSecret(secret)) {
+          legacyPlaintextRows += 1;
+        }
+
+        if (secret.encryptedAccessToken) {
+          encryptedRows += 1;
+        } else {
+          missingEncryptedAccessRows += 1;
+        }
+      }
+
+      if (page.isDone) {
+        return {
+          totalRows,
+          encryptedRows,
+          legacyPlaintextRows,
+          missingEncryptedAccessRows,
+          pagesScanned,
+          pageSize,
+          isDone: true,
+          continueCursor: null,
+        };
+      }
+
+      cursor = page.continueCursor;
+      if (!cursor) break;
+    }
+
+    return {
+      totalRows,
+      encryptedRows,
+      legacyPlaintextRows,
+      missingEncryptedAccessRows,
+      pagesScanned,
+      pageSize,
+      isDone: false,
+      continueCursor: cursor,
+    };
+  },
+});
+
+export const adminMigrateLegacyIntegrationSecretsAll = mutation({
+  args: {
+    pageSize: v.optional(v.number()),
+    maxPages: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+
+    const pageSize = normalizeAuditPageSize(args.pageSize);
+    const maxPages = normalizeAuditMaxPages(args.maxPages);
+
+    let cursor: string | null = null;
+    let pagesScanned = 0;
 
     let migratedCount = 0;
     let skippedCount = 0;
     let failedCount = 0;
 
-    for (const secret of page.page) {
-      const hasLegacyAccessToken = typeof secret.accessToken === "string";
-      const hasLegacyRefreshToken = typeof secret.refreshToken === "string";
-      const hasLegacyPlaintext = hasLegacyAccessToken || hasLegacyRefreshToken;
+    while (pagesScanned < maxPages) {
+      const page = await ctx.db.query("integrationSecrets").paginate({
+        numItems: pageSize,
+        cursor,
+      });
 
-      if (!hasLegacyPlaintext) {
-        skippedCount += 1;
-        continue;
-      }
+      pagesScanned += 1;
 
-      try {
-        const provider = assertIntegrationProvider(secret.provider);
-        const cryptoContext = {
-          userId: String(secret.userId),
-          provider,
-          tokenRef: secret.tokenRef,
+      const pageCounts = await migrateLegacySecretPage(
+        ctx.db,
+        page.page as IntegrationSecretRecord[],
+      );
+
+      migratedCount += pageCounts.migratedCount;
+      skippedCount += pageCounts.skippedCount;
+      failedCount += pageCounts.failedCount;
+
+      if (page.isDone) {
+        return {
+          migratedCount,
+          skippedCount,
+          failedCount,
+          pagesScanned,
+          pageSize,
+          isDone: true,
+          continueCursor: null,
         };
-
-        let accessTokenForMigration: string | undefined;
-
-        if (hasLegacyAccessToken) {
-          accessTokenForMigration = secret.accessToken;
-        } else if (secret.encryptedAccessToken) {
-          accessTokenForMigration = await decryptIntegrationSecret(
-            secret.encryptedAccessToken,
-            cryptoContext,
-          );
-        }
-
-        if (!accessTokenForMigration) {
-          skippedCount += 1;
-          continue;
-        }
-
-        await upsertIntegrationSecret(ctx.db as never, {
-          userId: secret.userId,
-          provider,
-          accessToken: accessTokenForMigration,
-          refreshToken: hasLegacyRefreshToken ? secret.refreshToken : undefined,
-          accessTokenExpiresAt: secret.accessTokenExpiresAt,
-          lastRefreshAt: secret.lastRefreshAt,
-          existingTokenRef: secret.tokenRef,
-        });
-
-        migratedCount += 1;
-      } catch {
-        failedCount += 1;
       }
+
+      cursor = page.continueCursor;
+      if (!cursor) break;
     }
 
     return {
       migratedCount,
       skippedCount,
       failedCount,
-      continueCursor: page.continueCursor,
-      isDone: page.isDone,
+      pagesScanned,
+      pageSize,
+      isDone: false,
+      continueCursor: cursor,
     };
   },
 });

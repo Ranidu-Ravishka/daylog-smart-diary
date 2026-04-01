@@ -86,6 +86,10 @@ Backend:
 
 - Verify Clerk webhook events are accepted
 - Verify summary generation succeeds (OpenAI key valid)
+- Verify integration secrets are encrypted at rest:
+  - Run `integrations:adminAuditIntegrationSecretsEncryptionStatus`
+  - Confirm `legacyPlaintextRows = 0` and `missingEncryptedAccessRows = 0`
+  - If non-zero, run `integrations:adminMigrateLegacyIntegrationSecretsAll` and re-check
 
 Mobile:
 
@@ -111,6 +115,12 @@ pnpm --filter @repo/backend dev
 
 - Set `ADMIN_BOOTSTRAP_CLERK_USER_IDS` in Convex env.
 - Call mutation `users:bootstrapMakeMeAdmin` while signed in as an allowed Clerk user.
+
+### Integration secret migration sweep
+
+- Audit current status: `integrations:adminAuditIntegrationSecretsEncryptionStatus`
+- Migrate all legacy plaintext rows: `integrations:adminMigrateLegacyIntegrationSecretsAll`
+- Re-audit and ensure plaintext counters are zero before declaring production ready
 
 ## 7) Troubleshooting quick notes
 

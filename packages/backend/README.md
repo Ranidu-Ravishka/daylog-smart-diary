@@ -89,6 +89,17 @@ dashboard environment settings and restart `convex dev`.
 - Provider daily sync data is normalized into `integrationDailyData`.
 - Summary generation consumes integration daily data as additional model context.
 
+## Integration secret encryption operations
+
+- Encryption status audit (no secret values returned): `integrations:adminAuditIntegrationSecretsEncryptionStatus`
+- Full migration sweep (paginated, resumable): `integrations:adminMigrateLegacyIntegrationSecretsAll`
+- Single-page migration (manual paging): `integrations:adminMigrateLegacyIntegrationSecretsPage`
+
+Production readiness target for secrets at rest:
+
+- `legacyPlaintextRows = 0`
+- `missingEncryptedAccessRows = 0`
+
 ## Maturity layer modules
 
 - Integration provider adapters: `packages/backend/convex/providerAdapters.ts`

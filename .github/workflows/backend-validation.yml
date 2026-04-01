@@ -117,6 +117,19 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: Guardrail check (dashboard scans)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if grep -n 'collect(' \
+            apps/admin/app/admin/dashboard/page.tsx \
+            apps/admin/app/integrations/health/page.tsx \
+            packages/backend/convex/integrationHealth.ts; then
+            echo "Disallowed collect() usage detected in admin dashboard/health query paths."
+            exit 1
+          fi
+
       - name: Type check
         run: pnpm typecheck
 
