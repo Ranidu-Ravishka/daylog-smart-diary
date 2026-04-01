@@ -39,6 +39,12 @@ type HealthEventRow = {
   at: number;
 };
 
+type ProviderHealthSummary = {
+  connected: number;
+  degraded: number;
+  failed: number;
+};
+
 function statusBadge(status: "connected" | "degraded" | "failed") {
   if (status === "connected") {
     return "bg-green-100 text-green-700";
@@ -68,8 +74,14 @@ function tokenBadge(status: "valid" | "expiring_soon" | "expired" | "unknown") {
 }
 
 export default function IntegrationHealthPage() {
+  const listProviderHealthRef = makeFunctionReference<"query">(
+    "integrationHealth:listIntegrationProviderHealthPaginated",
+  );
   const listEventsForProviderRef = makeFunctionReference<"query">(
     "integrationHealth:listIntegrationHealthEventsForProvider",
+  );
+  const providerHealthSummaryRef = makeFunctionReference<"query">(
+    "integrationHealth:getIntegrationHealthSummary",
   );
 
   const { isAuthenticated } = useConvexAuth();
@@ -81,15 +93,29 @@ export default function IntegrationHealthPage() {
     isAuthenticated ? {} : "skip",
   );
 
-  const healthRows = useQuery(
-    api.integrationHealth.listIntegrationProviderHealth,
+  const {
+    results: healthRows,
+    status: healthRowsStatus,
+    loadMore: loadMoreHealthRows,
+  } = usePaginatedQuery(
+    listProviderHealthRef,
+    isAdmin
+      ? {
+          status: statusFilter === "all" ? undefined : statusFilter,
+        }
+      : "skip",
+    { initialNumItems: 20 },
+  );
+
+  const healthSummary = useQuery(
+    providerHealthSummaryRef,
     isAdmin ? {} : "skip",
-  ) as ProviderHealthRow[] | undefined;
+  ) as ProviderHealthSummary | undefined;
 
   const {
     results: providerEvents,
     status: providerEventsStatus,
-    loadMore,
+    loadMore: loadMoreEvents,
   } = usePaginatedQuery(
     listEventsForProviderRef,
     isAdmin && selectedProvider
@@ -100,25 +126,20 @@ export default function IntegrationHealthPage() {
     { initialNumItems: 20 },
   );
 
-  const filteredRows = useMemo(() => {
-    if (!healthRows) return [];
-    if (statusFilter === "all") return healthRows;
-    return healthRows.filter((row) => row.status === statusFilter);
-  }, [healthRows, statusFilter]);
-
   const selectedRow = useMemo(() => {
-    if (!selectedProvider || !healthRows) return null;
-    return healthRows.find((row) => row.provider === selectedProvider) ?? null;
+    if (!selectedProvider) return null;
+    return (
+      (healthRows as ProviderHealthRow[]).find(
+        (row) => row.provider === selectedProvider,
+      ) ?? null
+    );
   }, [selectedProvider, healthRows]);
 
-  const totals = useMemo(() => {
-    const rows = healthRows ?? [];
-    return {
-      connected: rows.filter((row) => row.status === "connected").length,
-      degraded: rows.filter((row) => row.status === "degraded").length,
-      failed: rows.filter((row) => row.status === "failed").length,
-    };
-  }, [healthRows]);
+  const totals = {
+    connected: healthSummary?.connected ?? 0,
+    degraded: healthSummary?.degraded ?? 0,
+    failed: healthSummary?.failed ?? 0,
+  };
 
   return (
     <AdminGuard>
@@ -164,73 +185,85 @@ export default function IntegrationHealthPage() {
 
           <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
             <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-              {!healthRows ? (
+              {healthRowsStatus === "LoadingFirstPage" ? (
                 <div className="p-6 text-sm text-gray-600">
                   Loading integration health snapshots…
                 </div>
-              ) : filteredRows.length === 0 ? (
+              ) : healthRows.length === 0 ? (
                 <div className="p-6 text-sm text-gray-600">
                   No providers match this status filter.
                 </div>
               ) : (
-                <div className="overflow-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="px-4 py-3 text-left font-medium">
-                          Provider
-                        </th>
-                        <th className="px-4 py-3 text-left font-medium">
-                          Status
-                        </th>
-                        <th className="px-4 py-3 text-left font-medium">
-                          Token
-                        </th>
-                        <th className="px-4 py-3 text-left font-medium">
-                          Error Rate
-                        </th>
-                        <th className="px-4 py-3 text-left font-medium">
-                          Last Sync
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {filteredRows.map((row) => (
-                        <tr
-                          key={row._id}
-                          className={`cursor-pointer hover:bg-gray-50 ${selectedProvider === row.provider ? "bg-blue-50/50" : ""}`}
-                          onClick={() => setSelectedProvider(row.provider)}
-                        >
-                          <td className="px-4 py-3 font-medium text-gray-900">
-                            {row.provider}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span
-                              className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${statusBadge(row.status)}`}
-                            >
-                              {row.status}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span
-                              className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${tokenBadge(row.tokenValidityStatus)}`}
-                            >
-                              {row.tokenValidityStatus}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-gray-700">
-                            {(row.errorRate * 100).toFixed(0)}%
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {row.lastSyncAt
-                              ? new Date(row.lastSyncAt).toLocaleString()
-                              : "Never"}
-                          </td>
+                <>
+                  <div className="overflow-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-gray-50 text-gray-600">
+                        <tr>
+                          <th className="px-4 py-3 text-left font-medium">
+                            Provider
+                          </th>
+                          <th className="px-4 py-3 text-left font-medium">
+                            Status
+                          </th>
+                          <th className="px-4 py-3 text-left font-medium">
+                            Token
+                          </th>
+                          <th className="px-4 py-3 text-left font-medium">
+                            Error Rate
+                          </th>
+                          <th className="px-4 py-3 text-left font-medium">
+                            Last Sync
+                          </th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {(healthRows as ProviderHealthRow[]).map((row) => (
+                          <tr
+                            key={row._id}
+                            className={`cursor-pointer hover:bg-gray-50 ${selectedProvider === row.provider ? "bg-blue-50/50" : ""}`}
+                            onClick={() => setSelectedProvider(row.provider)}
+                          >
+                            <td className="px-4 py-3 font-medium text-gray-900">
+                              {row.provider}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${statusBadge(row.status)}`}
+                              >
+                                {row.status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${tokenBadge(row.tokenValidityStatus)}`}
+                              >
+                                {row.tokenValidityStatus}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-gray-700">
+                              {(row.errorRate * 100).toFixed(0)}%
+                            </td>
+                            <td className="px-4 py-3 text-gray-600">
+                              {row.lastSyncAt
+                                ? new Date(row.lastSyncAt).toLocaleString()
+                                : "Never"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {healthRowsStatus === "CanLoadMore" && (
+                    <div className="border-t border-gray-100 p-4">
+                      <button
+                        onClick={() => loadMoreHealthRows(20)}
+                        className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
+                      >
+                        Load more providers
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
@@ -372,7 +405,7 @@ export default function IntegrationHealthPage() {
                 {providerEventsStatus === "CanLoadMore" && (
                   <div className="border-t border-gray-100 p-4">
                     <button
-                      onClick={() => loadMore(20)}
+                      onClick={() => loadMoreEvents(20)}
                       className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
                     >
                       Load more events

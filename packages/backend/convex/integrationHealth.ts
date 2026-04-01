@@ -8,6 +8,9 @@ import { validateDayKey } from "./validators";
 
 const RECENT_OUTCOME_WINDOW = 50;
 const MAX_RECENT_FAILURES = 20;
+const DEFAULT_PROVIDER_HEALTH_LIMIT = 50;
+const MAX_PROVIDER_HEALTH_LIMIT = 200;
+const MAX_PROVIDER_HEALTH_SUMMARY_ROWS = 256;
 
 export type IntegrationHealthStatus = "connected" | "degraded" | "failed";
 
@@ -94,6 +97,41 @@ function normalizeOptionalDayKey(
   if (!dayKey) return undefined;
   validateDayKey(dayKey);
   return dayKey;
+}
+
+function toListLimit(limit: number | undefined): number {
+  if (typeof limit !== "number" || !Number.isFinite(limit)) {
+    return DEFAULT_PROVIDER_HEALTH_LIMIT;
+  }
+
+  const normalized = Math.floor(limit);
+  if (normalized < 1) return 1;
+  if (normalized > MAX_PROVIDER_HEALTH_LIMIT) return MAX_PROVIDER_HEALTH_LIMIT;
+  return normalized;
+}
+
+function summarizeStatuses(
+  rows: Array<{ status: IntegrationHealthStatus; updatedAt: number }>,
+) {
+  let connected = 0;
+  let degraded = 0;
+  let failed = 0;
+  let updatedAt = 0;
+
+  for (const row of rows) {
+    if (row.status === "connected") connected += 1;
+    if (row.status === "degraded") degraded += 1;
+    if (row.status === "failed") failed += 1;
+    if (row.updatedAt > updatedAt) updatedAt = row.updatedAt;
+  }
+
+  return {
+    connected,
+    degraded,
+    failed,
+    totalProviders: rows.length,
+    updatedAt,
+  };
 }
 
 export async function recordIntegrationHealthEventInDb(
@@ -223,15 +261,78 @@ export const recordIntegrationHealthEventInternal = internalMutation({
 });
 
 export const listIntegrationProviderHealth = query({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    limit: v.optional(v.number()),
+    status: v.optional(
+      v.union(
+        v.literal("connected"),
+        v.literal("degraded"),
+        v.literal("failed"),
+      ),
+    ),
+  },
+  handler: async (ctx, args) => {
     await requireAdmin(ctx);
+    const limit = toListLimit(args.limit);
+
+    if (args.status) {
+      return await ctx.db
+        .query("integrationProviderHealth")
+        .withIndex("by_status_updatedAt", (q) => q.eq("status", args.status!))
+        .order("desc")
+        .take(limit);
+    }
 
     return await ctx.db
       .query("integrationProviderHealth")
       .withIndex("by_status_updatedAt")
       .order("desc")
-      .collect();
+      .take(limit);
+  },
+});
+
+export const listIntegrationProviderHealthPaginated = query({
+  args: {
+    paginationOpts: paginationOptsValidator,
+    status: v.optional(
+      v.union(
+        v.literal("connected"),
+        v.literal("degraded"),
+        v.literal("failed"),
+      ),
+    ),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+
+    if (args.status) {
+      return await ctx.db
+        .query("integrationProviderHealth")
+        .withIndex("by_status_updatedAt", (q) => q.eq("status", args.status!))
+        .order("desc")
+        .paginate(args.paginationOpts);
+    }
+
+    return await ctx.db
+      .query("integrationProviderHealth")
+      .withIndex("by_status_updatedAt")
+      .order("desc")
+      .paginate(args.paginationOpts);
+  },
+});
+
+export const getIntegrationHealthSummary = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+
+    const rows = await ctx.db
+      .query("integrationProviderHealth")
+      .withIndex("by_status_updatedAt")
+      .order("desc")
+      .take(MAX_PROVIDER_HEALTH_SUMMARY_ROWS);
+
+    return summarizeStatuses(rows);
   },
 });
 
@@ -260,7 +361,7 @@ export const listMyIntegrationHealth = query({
     const integrations = await ctx.db
       .query("integrations")
       .withIndex("by_user_provider", (q) => q.eq("userId", user._id))
-      .collect();
+      .take(MAX_PROVIDER_HEALTH_SUMMARY_ROWS);
 
     return await Promise.all(
       integrations.map(async (integration) => {

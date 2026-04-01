@@ -48,6 +48,7 @@ const SYNC_RUN_IN_PROGRESS_TTL_MS = 60_000;
 const ACCESS_TOKEN_REFRESH_LEEWAY_MS = 60_000;
 const TOKEN_REFRESH_MAX_ATTEMPTS = 3;
 const TOKEN_REFRESH_BASE_BACKOFF_MS = 300;
+const DELETE_BATCH_SIZE = 256;
 
 class ProviderRequestError extends Error {
   status: number;
@@ -373,9 +374,16 @@ async function upsertIntegrationSecret(
     now,
   );
 
-  const encryptedRefreshToken =
+  const refreshTokenSource =
     args.refreshToken !== undefined
-      ? await encryptIntegrationSecret(args.refreshToken, cryptoContext, now)
+      ? args.refreshToken
+      : existing?.refreshToken !== undefined
+        ? existing.refreshToken
+        : undefined;
+
+  const encryptedRefreshToken =
+    refreshTokenSource !== undefined
+      ? await encryptIntegrationSecret(refreshTokenSource, cryptoContext, now)
       : undefined;
 
   if (existing) {
@@ -386,12 +394,15 @@ async function upsertIntegrationSecret(
       accessTokenExpiresAt: args.accessTokenExpiresAt,
       lastRefreshAt: args.lastRefreshAt,
       accessToken: undefined,
+      refreshToken: undefined,
       updatedAt: now,
     };
 
-    if (args.refreshToken !== undefined) {
+    if (
+      args.refreshToken !== undefined ||
+      existing.refreshToken !== undefined
+    ) {
       patchPayload.encryptedRefreshToken = encryptedRefreshToken;
-      patchPayload.refreshToken = undefined;
     }
 
     await db.patch(existing._id, {
@@ -1068,27 +1079,40 @@ export const deleteIntegration = mutation({
 
     requireOwnership(user, integration.userId);
 
-    const linkedDailyRows = await ctx.db
-      .query("integrationDailyData")
-      .withIndex("by_user_provider", (q) =>
-        q.eq("userId", integration.userId).eq("provider", integration.provider),
-      )
-      .collect();
+    while (true) {
+      const linkedDailyRows = await ctx.db
+        .query("integrationDailyData")
+        .withIndex("by_user_provider", (q) =>
+          q
+            .eq("userId", integration.userId)
+            .eq("provider", integration.provider),
+        )
+        .take(DELETE_BATCH_SIZE);
 
-    for (const row of linkedDailyRows) {
-      await ctx.db.delete(row._id);
+      if (linkedDailyRows.length === 0) break;
+
+      for (const row of linkedDailyRows) {
+        await ctx.db.delete(row._id);
+      }
     }
 
     await deleteIntegrationSecretByRef(ctx.db as never, integration.tokenRef);
 
-    const syncRuns = await ctx.db
-      .query("integrationSyncRuns")
-      .withIndex("by_user_provider", (q) =>
-        q.eq("userId", integration.userId).eq("provider", integration.provider),
-      )
-      .collect();
-    for (const run of syncRuns) {
-      await ctx.db.delete(run._id);
+    while (true) {
+      const syncRuns = await ctx.db
+        .query("integrationSyncRuns")
+        .withIndex("by_user_provider", (q) =>
+          q
+            .eq("userId", integration.userId)
+            .eq("provider", integration.provider),
+        )
+        .take(DELETE_BATCH_SIZE);
+
+      if (syncRuns.length === 0) break;
+
+      for (const run of syncRuns) {
+        await ctx.db.delete(run._id);
+      }
     }
 
     await ctx.db.delete(args.integrationId);
@@ -1574,38 +1598,62 @@ export const adminMigrateLegacyIntegrationSecretsPage = mutation({
 
     let migratedCount = 0;
     let skippedCount = 0;
+    let failedCount = 0;
 
     for (const secret of page.page) {
-      const hasLegacyPlaintext =
-        typeof secret.accessToken === "string" ||
-        typeof secret.refreshToken === "string";
+      const hasLegacyAccessToken = typeof secret.accessToken === "string";
+      const hasLegacyRefreshToken = typeof secret.refreshToken === "string";
+      const hasLegacyPlaintext = hasLegacyAccessToken || hasLegacyRefreshToken;
 
       if (!hasLegacyPlaintext) {
         skippedCount += 1;
         continue;
       }
 
-      if (!secret.accessToken) {
-        skippedCount += 1;
-        continue;
+      try {
+        const provider = assertIntegrationProvider(secret.provider);
+        const cryptoContext = {
+          userId: String(secret.userId),
+          provider,
+          tokenRef: secret.tokenRef,
+        };
+
+        let accessTokenForMigration: string | undefined;
+
+        if (hasLegacyAccessToken) {
+          accessTokenForMigration = secret.accessToken;
+        } else if (secret.encryptedAccessToken) {
+          accessTokenForMigration = await decryptIntegrationSecret(
+            secret.encryptedAccessToken,
+            cryptoContext,
+          );
+        }
+
+        if (!accessTokenForMigration) {
+          skippedCount += 1;
+          continue;
+        }
+
+        await upsertIntegrationSecret(ctx.db as never, {
+          userId: secret.userId,
+          provider,
+          accessToken: accessTokenForMigration,
+          refreshToken: hasLegacyRefreshToken ? secret.refreshToken : undefined,
+          accessTokenExpiresAt: secret.accessTokenExpiresAt,
+          lastRefreshAt: secret.lastRefreshAt,
+          existingTokenRef: secret.tokenRef,
+        });
+
+        migratedCount += 1;
+      } catch {
+        failedCount += 1;
       }
-
-      await upsertIntegrationSecret(ctx.db as never, {
-        userId: secret.userId,
-        provider: assertIntegrationProvider(secret.provider),
-        accessToken: secret.accessToken,
-        refreshToken: secret.refreshToken,
-        accessTokenExpiresAt: secret.accessTokenExpiresAt,
-        lastRefreshAt: secret.lastRefreshAt,
-        existingTokenRef: secret.tokenRef,
-      });
-
-      migratedCount += 1;
     }
 
     return {
       migratedCount,
       skippedCount,
+      failedCount,
       continueCursor: page.continueCursor,
       isDone: page.isDone,
     };

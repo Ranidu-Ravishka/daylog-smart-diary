@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { mutation, query, MutationCtx } from "./_generated/server";
 import { requireAdmin } from "./authz";
-import { validateDayKey, validateRating } from "./validators";
+import { clampLimit, validateDayKey, validateRating } from "./validators";
 import { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { assertIntegrationProvider } from "./integrationProviders";
@@ -19,6 +19,7 @@ import {
 } from "./dashboardMetrics";
 
 const OPAQUE_TOKEN_REF_PREFIX = "tokref_";
+const DELETE_BATCH_SIZE = 256;
 
 // ────────────────────────────────────────────────────────────
 // All functions in this file require admin privileges.
@@ -1015,14 +1016,21 @@ export const adminDeleteIntegration = mutation({
     const integration = await ctx.db.get(args.integrationId);
     if (!integration) throw new Error("Integration not found");
 
-    const linkedDailyRows = await ctx.db
-      .query("integrationDailyData")
-      .withIndex("by_user_provider", (q) =>
-        q.eq("userId", integration.userId).eq("provider", integration.provider),
-      )
-      .collect();
-    for (const row of linkedDailyRows) {
-      await ctx.db.delete(row._id);
+    while (true) {
+      const linkedDailyRows = await ctx.db
+        .query("integrationDailyData")
+        .withIndex("by_user_provider", (q) =>
+          q
+            .eq("userId", integration.userId)
+            .eq("provider", integration.provider),
+        )
+        .take(DELETE_BATCH_SIZE);
+
+      if (linkedDailyRows.length === 0) break;
+
+      for (const row of linkedDailyRows) {
+        await ctx.db.delete(row._id);
+      }
     }
 
     const tokenRef = integration.tokenRef;
@@ -1036,14 +1044,21 @@ export const adminDeleteIntegration = mutation({
       }
     }
 
-    const syncRuns = await ctx.db
-      .query("integrationSyncRuns")
-      .withIndex("by_user_provider", (q) =>
-        q.eq("userId", integration.userId).eq("provider", integration.provider),
-      )
-      .collect();
-    for (const run of syncRuns) {
-      await ctx.db.delete(run._id);
+    while (true) {
+      const syncRuns = await ctx.db
+        .query("integrationSyncRuns")
+        .withIndex("by_user_provider", (q) =>
+          q
+            .eq("userId", integration.userId)
+            .eq("provider", integration.provider),
+        )
+        .take(DELETE_BATCH_SIZE);
+
+      if (syncRuns.length === 0) break;
+
+      for (const run of syncRuns) {
+        await ctx.db.delete(run._id);
+      }
     }
 
     await ctx.db.delete(args.integrationId);
@@ -1070,7 +1085,7 @@ export const listAuditLogs = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
-    const limit = args.limit ?? 100;
+    const limit = clampLimit(args.limit ?? 100, 500);
     return await ctx.db
       .query("auditLogs")
       .withIndex("by_createdAt")
@@ -1111,7 +1126,19 @@ export async function listAuditLogsPaginatedImpl(
 ) {
   await requireAdmin(ctx);
 
+  if (
+    args.fromTs !== undefined &&
+    args.toTs !== undefined &&
+    args.fromTs > args.toTs
+  ) {
+    throw new Error("fromTs must be less than or equal to toTs");
+  }
+
   const userId = args.userId ?? args.actorUserId;
+  const paginationOpts = {
+    ...args.paginationOpts,
+    numItems: clampLimit(args.paginationOpts.numItems, 200),
+  };
 
   if (
     args.userId !== undefined &&
@@ -1152,7 +1179,7 @@ export async function listAuditLogsPaginatedImpl(
         return q.eq("actorUserId", userId).eq("action", args.action!);
       })
       .order("desc")
-      .paginate(args.paginationOpts);
+      .paginate(paginationOpts);
   }
 
   if (userId) {
@@ -1177,7 +1204,7 @@ export async function listAuditLogsPaginatedImpl(
         return q.eq("actorUserId", userId);
       })
       .order("desc")
-      .paginate(args.paginationOpts);
+      .paginate(paginationOpts);
   }
 
   if (args.action) {
@@ -1202,7 +1229,7 @@ export async function listAuditLogsPaginatedImpl(
         return q.eq("action", args.action!);
       })
       .order("desc")
-      .paginate(args.paginationOpts);
+      .paginate(paginationOpts);
   }
 
   return await ctx.db
@@ -1223,7 +1250,7 @@ export async function listAuditLogsPaginatedImpl(
       return q;
     })
     .order("desc")
-    .paginate(args.paginationOpts);
+    .paginate(paginationOpts);
 }
 
 export const writeAuditLog = mutation({

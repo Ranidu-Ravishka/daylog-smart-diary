@@ -120,6 +120,36 @@ async function collectAllPages(
   return all;
 }
 
+async function collectAllPagesByActorAlias(
+  ctx: ReturnType<typeof createAuthCtx>,
+  filters: {
+    action?: string;
+    actorUserId?: Id<"user">;
+    fromTs?: number;
+    toTs?: number;
+  },
+): Promise<AuditLogShape[]> {
+  const all: AuditLogShape[] = [];
+  let cursor: string | null = null;
+
+  for (let guard = 0; guard < 50; guard += 1) {
+    const page = await listAuditLogsPaginatedImpl(ctx as never, {
+      paginationOpts: {
+        numItems: 5,
+        cursor,
+      },
+      ...filters,
+    });
+
+    all.push(...(page.page as unknown as AuditLogShape[]));
+
+    if (page.isDone) break;
+    cursor = page.continueCursor;
+  }
+
+  return all;
+}
+
 describe("audit log pagination behavior", () => {
   it("keeps strict continuity with combined action, user, and date filters", async () => {
     const { db, ctx } = seedAuditDb();
@@ -235,5 +265,39 @@ describe("audit log pagination behavior", () => {
     expect(page.page).toHaveLength(0);
     expect(page.isDone).toBe(true);
     expect(page.continueCursor).toBeNull();
+  });
+
+  it("keeps userId and actorUserId alias filters behaviorally equivalent", async () => {
+    const { ctx } = seedAuditDb();
+
+    const viaUserId = await collectAllPages(ctx, {
+      userId: MEMBER_USER_ID,
+      action: "update_role",
+      fromTs: BASE_TS + 2,
+      toTs: BASE_TS + 20,
+    });
+
+    const viaActorAlias = await collectAllPagesByActorAlias(ctx, {
+      actorUserId: MEMBER_USER_ID,
+      action: "update_role",
+      fromTs: BASE_TS + 2,
+      toTs: BASE_TS + 20,
+    });
+
+    expect(viaActorAlias.map((item) => item._id)).toEqual(
+      viaUserId.map((item) => item._id),
+    );
+  });
+
+  it("rejects inverted time ranges to prevent inconsistent pagination windows", async () => {
+    const { ctx } = seedAuditDb();
+
+    await expect(
+      listAuditLogsPaginatedImpl(ctx as never, {
+        paginationOpts: { numItems: 10, cursor: null },
+        fromTs: BASE_TS + 50,
+        toTs: BASE_TS + 10,
+      }),
+    ).rejects.toThrow("fromTs must be less than or equal to toTs");
   });
 });

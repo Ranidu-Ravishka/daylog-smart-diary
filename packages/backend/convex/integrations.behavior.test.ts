@@ -238,6 +238,23 @@ afterEach(() => {
 });
 
 describe("integration sync behavior", () => {
+  it("rejects invalid dayKey before issuing sync calls", async () => {
+    const state = createBaseState();
+    const ctx = createSyncContext(state);
+
+    await expect(
+      syncMyIntegrationForDayImpl(ctx, {
+        provider: "spotify",
+        dayKey: "2026-3-30",
+      }),
+    ).rejects.toThrow(
+      'Invalid dayKey "2026-3-30": must be in YYYY-MM-DD format',
+    );
+
+    expect(state.upsertCalls).toBe(0);
+    expect(state.recordSyncCalls).toBe(0);
+  });
+
   it("is idempotent for repeated day sync requests", async () => {
     const state = createBaseState({
       beginQueue: [
@@ -278,6 +295,72 @@ describe("integration sync behavior", () => {
       state.completeRuns.filter((run) => run.status === "success"),
     ).toHaveLength(1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries sync once after 401 by refreshing token and completes successfully", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+
+    const state = createBaseState();
+    const ctx = createSyncContext(state);
+
+    let playerCallCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+
+      if (url.includes("api.spotify.com/v1/me/player/recently-played")) {
+        playerCallCount += 1;
+        if (playerCallCount === 1) {
+          return new Response("unauthorized", {
+            status: 401,
+            statusText: "Unauthorized",
+          });
+        }
+
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                track: { id: "track-42" },
+                played_at: "2026-03-30T10:00:00.000Z",
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+
+      if (url.includes("accounts.spotify.com/api/token")) {
+        return new Response(
+          JSON.stringify({
+            access_token: "retry_access",
+            refresh_token: "retry_refresh",
+            expires_in: 3600,
+          }),
+          { status: 200 },
+        );
+      }
+
+      throw new Error(`Unexpected URL ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await syncMyIntegrationForDayImpl(ctx, {
+      provider: "spotify",
+      dayKey: "2026-03-30",
+    });
+
+    expect(result.success).toBe(true);
+    expect(playerCallCount).toBe(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(state.upsertCalls).toBe(1);
+    expect(state.completeRuns).toContainEqual(
+      expect.objectContaining({ status: "success" }),
+    );
+
+    const refreshed = state.secrets.get("tokref_test_ref_001");
+    expect(refreshed?.accessToken).toBe("retry_access");
+    expect(refreshed?.refreshToken).toBe("retry_refresh");
   });
 
   it("refreshes expired token before syncing and persists the refreshed secret", async () => {

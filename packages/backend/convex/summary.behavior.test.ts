@@ -64,6 +64,34 @@ describe("summary flow behavior", () => {
     expect(quotaRows[0]?.used).toBe(2);
   });
 
+  it("rolls quota over on UTC day boundary", async () => {
+    const db = createInMemoryDb();
+
+    const dayOne = Date.parse("2026-03-30T23:59:59.000Z");
+    const dayTwo = Date.parse("2026-03-31T00:00:01.000Z");
+
+    const first = await reserveSummaryGenerationSlotForUser(
+      db as never,
+      USER_ID,
+      dayOne,
+      1,
+    );
+    expect(first.used).toBe(1);
+    expect(first.quotaDayKey).toBe("2026-03-30");
+
+    const second = await reserveSummaryGenerationSlotForUser(
+      db as never,
+      USER_ID,
+      dayTwo,
+      1,
+    );
+    expect(second.used).toBe(1);
+    expect(second.quotaDayKey).toBe("2026-03-31");
+
+    const quotaRows = db.getTable("summaryGenerationQuotas");
+    expect(quotaRows).toHaveLength(2);
+  });
+
   it("upserts by user/day and never creates duplicates for retries", async () => {
     const db = createInMemoryDb();
 
@@ -152,6 +180,23 @@ describe("summary flow behavior", () => {
 
     await expect(generateSummaryWithOpenAi("2026-03-30", "[]")).rejects.toThrow(
       "OpenAI request failed (400)",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails deterministically when model returns malformed JSON content", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "{not-valid-json" } }],
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(generateSummaryWithOpenAi("2026-03-30", "[]")).rejects.toThrow(
+      "OpenAI summary output was not valid JSON.",
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

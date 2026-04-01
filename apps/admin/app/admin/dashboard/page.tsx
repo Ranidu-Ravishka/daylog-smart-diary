@@ -6,8 +6,10 @@ import { makeFunctionReference } from "convex/server";
 import { useConvexAuth, useQuery } from "convex/react";
 import { usePaginatedQuery } from "convex/react";
 
-type HealthRow = {
-  status: "connected" | "degraded" | "failed";
+type HealthSummary = {
+  connected: number;
+  degraded: number;
+  failed: number;
 };
 
 type RetentionRun = {
@@ -26,6 +28,9 @@ export default function AdminDashboardPage() {
   const qualityQueueRef = makeFunctionReference<"query">(
     "summaryQuality:listSummaryQualityEvaluationsPaginated",
   );
+  const healthSummaryRef = makeFunctionReference<"query">(
+    "integrationHealth:getIntegrationHealthSummary",
+  );
 
   const { isAuthenticated } = useConvexAuth();
   const isAdmin = useQuery(
@@ -37,10 +42,9 @@ export default function AdminDashboardPage() {
     isAdmin ? {} : "skip",
   );
 
-  const providerHealth = useQuery(
-    api.integrationHealth.listIntegrationProviderHealth,
-    isAdmin ? {} : "skip",
-  ) as HealthRow[] | undefined;
+  const healthSummary = useQuery(healthSummaryRef, isAdmin ? {} : "skip") as
+    | HealthSummary
+    | undefined;
 
   const { results: retentionRuns } = usePaginatedQuery(
     retentionRunsRef,
@@ -58,15 +62,9 @@ export default function AdminDashboardPage() {
     { initialNumItems: 20 },
   );
 
-  const connectedCount = (providerHealth ?? []).filter(
-    (row) => row.status === "connected",
-  ).length;
-  const degradedCount = (providerHealth ?? []).filter(
-    (row) => row.status === "degraded",
-  ).length;
-  const failedCount = (providerHealth ?? []).filter(
-    (row) => row.status === "failed",
-  ).length;
+  const connectedCount = healthSummary?.connected ?? 0;
+  const degradedCount = healthSummary?.degraded ?? 0;
+  const failedCount = healthSummary?.failed ?? 0;
 
   const lastRetentionRun = (retentionRuns as RetentionRun[])[0];
   const lowQualityOpen = (lowQualityQueue as QualityEval[]).filter(

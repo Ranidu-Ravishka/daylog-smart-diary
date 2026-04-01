@@ -72,4 +72,16 @@ describe("auth boundary behavior", () => {
       }),
     ).rejects.toThrow("Forbidden");
   });
+
+  it("rejects conflicting audit user filter aliases", async () => {
+    const adminCtx = createAuthCtx(seededDb(), "clerk_admin_001");
+
+    await expect(
+      listAuditLogsPaginatedImpl(adminCtx as never, {
+        paginationOpts: { numItems: 10, cursor: null },
+        userId: ADMIN_USER_ID,
+        actorUserId: MEMBER_USER_ID,
+      }),
+    ).rejects.toThrow("Conflicting userId and actorUserId filters provided");
+  });
 });
