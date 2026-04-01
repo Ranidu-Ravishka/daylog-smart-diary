@@ -249,6 +249,17 @@ export const reserveSummaryGenerationSlot = mutation({
   },
 });
 
+export const getSummaryGenerationIdentity = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await requireUser(ctx);
+    return {
+      userId: user._id,
+      clerkUserId: user.clerkUserId,
+    };
+  },
+});
+
 export const exportMyDiaryData = query({
   args: {
     includeLocationSignals: v.optional(v.boolean()),

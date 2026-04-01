@@ -18,6 +18,34 @@ const encryptedSecretEnvelopeValidator = v.object({
   createdAt: v.number(),
 });
 
+const integrationHealthStatusValidator = v.union(
+  v.literal("connected"),
+  v.literal("degraded"),
+  v.literal("failed"),
+);
+
+const tokenValidityStatusValidator = v.union(
+  v.literal("valid"),
+  v.literal("expiring_soon"),
+  v.literal("expired"),
+  v.literal("unknown"),
+);
+
+const retentionPolicySnapshotValidator = v.object({
+  key: v.string(),
+  retentionDays: v.number(),
+  sensitive: v.boolean(),
+  enabled: v.boolean(),
+});
+
+const summaryQualityScoresValidator = v.object({
+  overall: v.number(),
+  length: v.number(),
+  coherence: v.number(),
+  duplication: v.number(),
+  failure: v.number(),
+});
+
 export default defineSchema(
   {
     // ── CMS content (used by admin) ──────────────────────────
@@ -226,7 +254,142 @@ export default defineSchema(
     })
       .index("by_user_day", ["userId", "dayKey"])
       .index("by_user_provider_day", ["userId", "provider", "dayKey"])
-      .index("by_user_provider", ["userId", "provider"]),
+      .index("by_user_provider", ["userId", "provider"])
+      .index("by_syncedAt", ["syncedAt"])
+      .index("by_provider_syncedAt", ["provider", "syncedAt"]),
+
+    // ── Integration health snapshots/events (observability) ───────────────
+    integrationProviderHealth: defineTable({
+      provider: v.string(),
+      status: integrationHealthStatusValidator,
+      tokenValidityStatus: tokenValidityStatusValidator,
+      lastSyncAt: v.optional(v.number()),
+      lastFailureAt: v.optional(v.number()),
+      totalSyncAttempts: v.number(),
+      failedSyncAttempts: v.number(),
+      errorRate: v.number(),
+      recentOutcomes: v.array(
+        v.union(v.literal("success"), v.literal("error"), v.literal("skipped")),
+      ),
+      recentFailures: v.array(
+        v.object({
+          at: v.number(),
+          error: v.string(),
+          dayKey: v.optional(v.string()),
+          userId: v.optional(v.id("user")),
+        }),
+      ),
+      updatedAt: v.number(),
+    })
+      .index("by_provider", ["provider"])
+      .index("by_status_updatedAt", ["status", "updatedAt"]),
+
+    integrationHealthEvents: defineTable({
+      provider: v.string(),
+      userId: v.optional(v.id("user")),
+      integrationId: v.optional(v.id("integrations")),
+      dayKey: v.optional(v.string()),
+      outcome: v.union(
+        v.literal("success"),
+        v.literal("error"),
+        v.literal("skipped"),
+      ),
+      status: integrationHealthStatusValidator,
+      tokenValidityStatus: tokenValidityStatusValidator,
+      error: v.optional(v.string()),
+      latencyMs: v.optional(v.number()),
+      at: v.number(),
+    })
+      .index("by_provider_at", ["provider", "at"])
+      .index("by_status_at", ["status", "at"])
+      .index("by_outcome_at", ["outcome", "at"]),
+
+    // ── Data retention governance (policy + execution audit) ──────────────
+    dataRetentionPolicies: defineTable({
+      key: v.string(),
+      retentionDays: v.number(),
+      sensitive: v.boolean(),
+      enabled: v.boolean(),
+      updatedBy: v.optional(v.id("user")),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_key", ["key"]),
+
+    dataRetentionRuns: defineTable({
+      trigger: v.union(v.literal("cron"), v.literal("manual")),
+      status: v.union(v.literal("success"), v.literal("error")),
+      dryRun: v.boolean(),
+      startedAt: v.number(),
+      finishedAt: v.number(),
+      policySnapshot: v.array(retentionPolicySnapshotValidator),
+      deletedCounts: v.object({
+        memories: v.number(),
+        daySummaries: v.number(),
+        integrationDailyData: v.number(),
+        locationSignals: v.number(),
+        summaryGenerationEvents: v.number(),
+      }),
+      error: v.optional(v.string()),
+      actorUserId: v.optional(v.id("user")),
+    })
+      .index("by_startedAt", ["startedAt"])
+      .index("by_status_startedAt", ["status", "startedAt"]),
+
+    platformAuditEvents: defineTable({
+      category: v.union(
+        v.literal("retention"),
+        v.literal("summary_quality"),
+        v.literal("integration_health"),
+      ),
+      action: v.string(),
+      actorType: v.union(
+        v.literal("system"),
+        v.literal("admin"),
+        v.literal("user"),
+      ),
+      actorUserId: v.optional(v.id("user")),
+      target: v.optional(v.string()),
+      details: v.optional(v.string()),
+      at: v.number(),
+    })
+      .index("by_category_at", ["category", "at"])
+      .index("by_actor_at", ["actorType", "at"]),
+
+    // ── Summary quality harness artifacts ─────────────────────────────────
+    summaryGenerationEvents: defineTable({
+      userId: v.id("user"),
+      dayKey: v.string(),
+      modelProvider: v.string(),
+      modelName: v.string(),
+      modelInput: v.string(),
+      generatedStory: v.optional(v.string()),
+      generatedHighlights: v.optional(v.array(v.string())),
+      sourcesUsed: v.optional(v.array(v.string())),
+      success: v.boolean(),
+      failureReason: v.optional(v.string()),
+      summaryId: v.optional(v.id("daySummaries")),
+      createdAt: v.number(),
+    })
+      .index("by_createdAt", ["createdAt"])
+      .index("by_user_day_createdAt", ["userId", "dayKey", "createdAt"])
+      .index("by_success_createdAt", ["success", "createdAt"]),
+
+    summaryQualityEvaluations: defineTable({
+      userId: v.id("user"),
+      dayKey: v.string(),
+      generationEventId: v.id("summaryGenerationEvents"),
+      summaryId: v.optional(v.id("daySummaries")),
+      scores: summaryQualityScoresValidator,
+      wordCount: v.number(),
+      duplicateLineRatio: v.number(),
+      flags: v.array(v.string()),
+      lowQuality: v.boolean(),
+      evaluatedAt: v.number(),
+    })
+      .index("by_evaluatedAt", ["evaluatedAt"])
+      .index("by_lowQuality_evaluatedAt", ["lowQuality", "evaluatedAt"])
+      .index("by_generationEventId", ["generationEventId"])
+      .index("by_user_day_evaluatedAt", ["userId", "dayKey", "evaluatedAt"]),
 
     // ── Audit logs (admin + security) ────────────────────────
     auditLogs: defineTable({

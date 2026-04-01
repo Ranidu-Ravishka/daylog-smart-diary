@@ -24,23 +24,20 @@ import {
 } from "./integrationProviders";
 import { applyDashboardMetricsDelta } from "./dashboardMetrics";
 import {
+  resolveIntegrationSyncAdapter,
+  type NormalizedIntegrationDailySync,
+} from "./providerAdapters";
+import {
   constantTimeStringEquals,
   decryptIntegrationSecret,
   encryptIntegrationSecret,
   getActiveIntegrationSecretKeyId,
   type EncryptedSecretEnvelope,
 } from "./integrationSecretsCrypto";
-
-type NormalizedIntegrationDailySync = {
-  metrics?: {
-    steps?: number;
-    sleepMinutes?: number;
-    screenTimeMinutes?: number;
-    spendingTotal?: number;
-  };
-  summary?: string;
-  signals?: string[];
-};
+import {
+  deriveTokenValidityStatus,
+  recordIntegrationHealthEventInDb,
+} from "./integrationHealth";
 
 const OPAQUE_TOKEN_REF_PREFIX = "tokref_";
 const PROVIDER_SYNC_MAX_ATTEMPTS = 3;
@@ -106,12 +103,6 @@ function getProviderOAuthCredentials(
   };
 }
 
-function getUtcDayRange(dayKey: string) {
-  const start = new Date(`${dayKey}T00:00:00.000Z`).getTime();
-  const end = new Date(`${dayKey}T23:59:59.999Z`).getTime();
-  return { start, end };
-}
-
 function sanitizeSignals(signals: string[] | undefined) {
   return (signals ?? [])
     .map((item) => item.trim())
@@ -171,6 +162,25 @@ function sanitizeSyncError(error: unknown): string {
   const message =
     error instanceof Error ? error.message : "Provider sync failed";
   return message.slice(0, 220);
+}
+
+async function recordIntegrationHealthEvent(
+  ctx: Pick<ActionCtx, "runMutation">,
+  args: {
+    provider: string;
+    userId: Id<"user">;
+    integrationId: Id<"integrations">;
+    dayKey: string;
+    outcome: "success" | "error" | "skipped";
+    tokenValidityStatus: "valid" | "expiring_soon" | "expired" | "unknown";
+    error?: string;
+    latencyMs?: number;
+  },
+) {
+  await ctx.runMutation(
+    (internal as any).integrationHealth.recordIntegrationHealthEventInternal,
+    args,
+  );
 }
 
 function jitteredBackoff(attempt: number): number {
@@ -604,206 +614,19 @@ async function fetchJson<T>(
     : new Error("Provider sync failed after retries.");
 }
 
-async function syncGoogleCalendarForDay(
-  accessToken: string,
-  dayKey: string,
-  syncStartedAt: number,
-): Promise<NormalizedIntegrationDailySync> {
-  const { start, end } = getUtcDayRange(dayKey);
-
-  const result = await fetchJson<{
-    items?: Array<{
-      summary?: string;
-      start?: { dateTime?: string; date?: string };
-      end?: { dateTime?: string; date?: string };
-    }>;
-  }>(
-    `https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&timeMin=${encodeURIComponent(new Date(start).toISOString())}&timeMax=${encodeURIComponent(new Date(end).toISOString())}&maxResults=100`,
-    accessToken,
-    syncStartedAt,
-  );
-
-  const events = result.items ?? [];
-  let busyMinutes = 0;
-
-  for (const event of events) {
-    const from = event.start?.dateTime
-      ? new Date(event.start.dateTime).getTime()
-      : null;
-    const to = event.end?.dateTime
-      ? new Date(event.end.dateTime).getTime()
-      : null;
-    if (!from || !to || Number.isNaN(from) || Number.isNaN(to) || to <= from) {
-      continue;
-    }
-    busyMinutes += Math.round((to - from) / 60000);
-  }
-
-  const topEventTitles = events
-    .map((event) => event.summary?.trim())
-    .filter((value): value is string => Boolean(value))
-    .slice(0, 5);
-
-  return {
-    summary:
-      events.length > 0
-        ? `Google Calendar: ${events.length} events, ~${busyMinutes} busy minutes.`
-        : "Google Calendar: no events for this day.",
-    signals: sanitizeSignals([
-      events.length > 0
-        ? `${events.length} calendar events`
-        : "No calendar events",
-      busyMinutes > 0 ? `${busyMinutes} busy minutes` : "No timed events",
-      ...topEventTitles,
-    ]),
-  };
-}
-
-async function syncSpotifyForDay(
-  accessToken: string,
-  dayKey: string,
-  syncStartedAt: number,
-): Promise<NormalizedIntegrationDailySync> {
-  const { start, end } = getUtcDayRange(dayKey);
-
-  const result = await fetchJson<{
-    items?: Array<{
-      played_at?: string;
-      track?: {
-        name?: string;
-        artists?: Array<{ name?: string }>;
-      };
-    }>;
-  }>(
-    `https://api.spotify.com/v1/me/player/recently-played?limit=50&after=${Math.max(start - 1, 0)}`,
-    accessToken,
-    syncStartedAt,
-  );
-
-  const plays = (result.items ?? []).filter((item) => {
-    const playedAt = item.played_at ? new Date(item.played_at).getTime() : NaN;
-    return Number.isFinite(playedAt) && playedAt >= start && playedAt <= end;
-  });
-
-  const uniqueArtists = new Set<string>();
-  for (const play of plays) {
-    for (const artist of play.track?.artists ?? []) {
-      if (artist.name?.trim()) uniqueArtists.add(artist.name.trim());
-    }
-  }
-
-  const topTracks = plays
-    .map((play) => play.track?.name?.trim())
-    .filter((name): name is string => Boolean(name))
-    .slice(0, 5);
-
-  return {
-    summary:
-      plays.length > 0
-        ? `Spotify: ${plays.length} recent plays from ${uniqueArtists.size} artist(s).`
-        : "Spotify: no recent playback for this day.",
-    signals: sanitizeSignals([
-      plays.length > 0 ? `${plays.length} tracks played` : "No track playback",
-      uniqueArtists.size > 0
-        ? `${uniqueArtists.size} unique artists`
-        : "No artist activity",
-      ...topTracks,
-    ]),
-  };
-}
-
-async function syncGoogleFitForDay(
-  accessToken: string,
-  dayKey: string,
-  syncStartedAt: number,
-): Promise<NormalizedIntegrationDailySync> {
-  const { start, end } = getUtcDayRange(dayKey);
-
-  const aggregateResponse = await fetchJson<{
-    bucket?: Array<{
-      dataset?: Array<{
-        point?: Array<{
-          startTimeNanos?: string;
-          endTimeNanos?: string;
-          value?: Array<{ intVal?: number }>;
-          dataTypeName?: string;
-        }>;
-      }>;
-    }>;
-  }>(
-    "https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate",
-    accessToken,
-    syncStartedAt,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        aggregateBy: [
-          { dataTypeName: "com.google.step_count.delta" },
-          { dataTypeName: "com.google.sleep.segment" },
-        ],
-        bucketByTime: { durationMillis: 86_400_000 },
-        startTimeMillis: start,
-        endTimeMillis: end,
-      }),
-    },
-  );
-
-  const points = (aggregateResponse.bucket ?? []).flatMap((bucket) =>
-    (bucket.dataset ?? []).flatMap((dataset) => dataset.point ?? []),
-  );
-
-  const steps = points.reduce((acc, point) => {
-    const value = point.value?.[0]?.intVal;
-    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-      return acc + value;
-    }
-    return acc;
-  }, 0);
-
-  const sleepMinutes = points.reduce((acc, point) => {
-    const startNanos = Number(point.startTimeNanos ?? 0);
-    const endNanos = Number(point.endTimeNanos ?? 0);
-    if (!Number.isFinite(startNanos) || !Number.isFinite(endNanos)) return acc;
-    if (endNanos <= startNanos) return acc;
-    return acc + Math.round((endNanos - startNanos) / 1_000_000_000 / 60);
-  }, 0);
-
-  return {
-    metrics: {
-      steps: steps > 0 ? steps : undefined,
-      sleepMinutes: sleepMinutes > 0 ? sleepMinutes : undefined,
-    },
-    summary:
-      steps > 0 || sleepMinutes > 0
-        ? `Google Fit: ${steps.toLocaleString()} steps, ${sleepMinutes} sleep minutes.`
-        : "Google Fit: no measurable activity for this day.",
-    signals: sanitizeSignals([
-      steps > 0 ? `${steps.toLocaleString()} steps` : "No step count",
-      sleepMinutes > 0 ? `${sleepMinutes} sleep minutes` : "No sleep segments",
-    ]),
-  };
-}
-
 async function syncProviderForDay(
   provider: IntegrationProvider,
   accessToken: string,
   dayKey: string,
   syncStartedAt: number,
 ): Promise<NormalizedIntegrationDailySync> {
-  switch (provider) {
-    case "google_calendar":
-      return await syncGoogleCalendarForDay(accessToken, dayKey, syncStartedAt);
-    case "spotify":
-      return await syncSpotifyForDay(accessToken, dayKey, syncStartedAt);
-    case "google_fit":
-      return await syncGoogleFitForDay(accessToken, dayKey, syncStartedAt);
-    case "apple_health":
-      throw new Error(
-        "Apple Health sync requires client-device upload. Use syncAppleHealthDailyData from mobile.",
-      );
-    default:
-      throw new Error("Unsupported provider");
-  }
+  const adapter = resolveIntegrationSyncAdapter(provider);
+  return await adapter.execute({
+    accessToken,
+    dayKey,
+    syncStartedAt,
+    requestJson: fetchJson,
+  });
 }
 
 // ── Connect a new integration ───────────────────────────────
@@ -1377,6 +1200,15 @@ export const syncAppleHealthDailyData = mutation({
       lastSyncAt: Date.now(),
     });
 
+    await recordIntegrationHealthEventInDb(ctx.db, {
+      provider: "apple_health",
+      userId: user._id,
+      integrationId: integration._id,
+      dayKey: args.dayKey,
+      outcome: "success",
+      tokenValidityStatus: "unknown",
+    });
+
     return upserted;
   },
 });
@@ -1466,6 +1298,16 @@ export async function syncMyIntegrationForDayImpl(
   };
 
   if (!syncRunState.shouldSync) {
+    await recordIntegrationHealthEvent(ctx, {
+      provider,
+      userId: integration.userId,
+      integrationId: integration._id,
+      dayKey: args.dayKey,
+      outcome: "skipped",
+      tokenValidityStatus: "unknown",
+      error: `Sync skipped (${syncRunState.reason})`,
+    });
+
     return {
       success: true,
       provider,
@@ -1477,6 +1319,7 @@ export async function syncMyIntegrationForDayImpl(
 
   const syncStartedAt = Date.now();
   const oauthRefreshProvider = asOAuthRefreshProvider(provider);
+  let latestTokenValidityStatus = deriveTokenValidityStatus(undefined);
 
   try {
     if (!integration.tokenRef) {
@@ -1515,6 +1358,8 @@ export async function syncMyIntegrationForDayImpl(
       accessToken = secret.accessToken;
       refreshToken = secret.refreshToken;
       accessTokenExpiresAt = secret.accessTokenExpiresAt;
+      latestTokenValidityStatus =
+        deriveTokenValidityStatus(accessTokenExpiresAt);
 
       if (secret.isLegacyPlaintext || secret.needsKeyRotation) {
         currentTokenRef = await ctx.runMutation(
@@ -1580,6 +1425,8 @@ export async function syncMyIntegrationForDayImpl(
       accessToken = refreshed.accessToken;
       refreshToken = nextRefreshToken;
       accessTokenExpiresAt = refreshed.accessTokenExpiresAt;
+      latestTokenValidityStatus =
+        deriveTokenValidityStatus(accessTokenExpiresAt);
     }
 
     let normalized: NormalizedIntegrationDailySync;
@@ -1628,6 +1475,8 @@ export async function syncMyIntegrationForDayImpl(
       accessToken = refreshed.accessToken;
       refreshToken = nextRefreshToken;
       accessTokenExpiresAt = refreshed.accessTokenExpiresAt;
+      latestTokenValidityStatus =
+        deriveTokenValidityStatus(accessTokenExpiresAt);
 
       normalized = await syncProviderForDay(
         provider,
@@ -1663,6 +1512,16 @@ export async function syncMyIntegrationForDayImpl(
       },
     );
 
+    await recordIntegrationHealthEvent(ctx, {
+      provider,
+      userId: integration.userId,
+      integrationId: integration._id,
+      dayKey: args.dayKey,
+      outcome: "success",
+      tokenValidityStatus: latestTokenValidityStatus,
+      latencyMs: Date.now() - syncStartedAt,
+    });
+
     return {
       success: true,
       provider,
@@ -1686,6 +1545,17 @@ export async function syncMyIntegrationForDayImpl(
         lastError: message,
       },
     );
+
+    await recordIntegrationHealthEvent(ctx, {
+      provider,
+      userId: integration.userId,
+      integrationId: integration._id,
+      dayKey: args.dayKey,
+      outcome: "error",
+      tokenValidityStatus: latestTokenValidityStatus,
+      error: message,
+      latencyMs: Date.now() - syncStartedAt,
+    });
 
     throw error;
   }

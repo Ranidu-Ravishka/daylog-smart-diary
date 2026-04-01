@@ -9,7 +9,10 @@ const navLinks = [
   { href: "/memories", label: "Memories" },
   { href: "/days", label: "Days" },
   { href: "/summaries", label: "Summaries" },
+  { href: "/summaries/quality", label: "Summary Quality" },
   { href: "/integrations", label: "Integrations" },
+  { href: "/integrations/health", label: "Integration Health" },
+  { href: "/retention", label: "Retention" },
   { href: "/preferences", label: "Preferences" },
   { href: "/audit-logs", label: "Audit Logs" },
 ];
