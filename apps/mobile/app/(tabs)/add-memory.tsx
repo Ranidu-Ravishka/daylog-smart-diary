@@ -16,6 +16,7 @@ import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "@repo/backend/convex";
+import { SETTINGS_DEFAULTS } from "@repo/ui/lib/constants";
 import type { GenericId } from "convex/values";
 import {
   Colors,
@@ -60,7 +61,7 @@ export default function AddMemoryScreen() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([]);
-  const [mood, setMood] = useState("happy");
+  const [mood, setMood] = useState<string>(SETTINGS_DEFAULTS.defaultMemoryMood);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -188,7 +189,9 @@ export default function AddMemoryScreen() {
       setTitle("");
       setDescription("");
       setSelectedImages([]);
-      setMood(preferences?.defaultMemoryMood ?? "happy");
+      setMood(
+        preferences?.defaultMemoryMood ?? SETTINGS_DEFAULTS.defaultMemoryMood,
+      );
       hasSelectedMoodManually.current = false;
 
       Alert.alert("Memory Saved", "Your memory has been captured!", [

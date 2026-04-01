@@ -8,7 +8,8 @@
     "build": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true})\" && next build",
     "start": "next start",
     "lint": "eslint --max-warnings 0",
-    "check-types": "next typegen && tsc --noEmit"
+    "check-types": "next typegen && tsc --noEmit",
+    "test:oauth-abuse": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.37.3",
@@ -39,6 +40,7 @@
     "@types/react-dom": "19.2.2",
     "eslint": "^9.39.1",
     "tailwindcss": "^4.1.17",
-    "typescript": "5.9.2"
+    "typescript": "5.9.2",
+    "vitest": "^4.1.2"
   }
 }

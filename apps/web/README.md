@@ -2,6 +2,12 @@
 
 User-facing Next.js application for DayLog.
 
+## Product boundary notes
+
+- Web supports journaling, mood tracking, integration connect/sync, and OpenAI summary generation.
+- Current integrations: Google Calendar, Google Fit, Spotify, and Apple Health uploads.
+- Mobile app supports optional foreground location tracking (coarse, while app is open); background location and call-log collection are not part of the current shipped feature set.
+
 ## Required environment variables
 
 Create `apps/web/.env.local` from `apps/web/.env.example`.
@@ -11,6 +17,9 @@ Required:
 - `NEXT_PUBLIC_CONVEX_URL`
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
 - `CLERK_SECRET_KEY`
+- `NEXT_PUBLIC_APP_URL` (for OAuth callback URL generation)
+- `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (Google Calendar/Fit OAuth)
+- `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` (Spotify OAuth)
 
 ## Local development
 

@@ -2,11 +2,114 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { requireUser, requireOwnership } from "./authz";
 import { validateDayKey, clampLimit } from "./validators";
-
-export const DAILY_SUMMARY_GENERATION_LIMIT = 5;
+import { getSummaryDailyGenerationLimit } from "./runtimeConfig";
+import type { Id } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
+import { applyDashboardMetricsDelta } from "./dashboardMetrics";
 
 export function getUtcDayKey(timestamp: number): string {
   return new Date(timestamp).toISOString().slice(0, 10);
+}
+
+type SummaryDb = MutationCtx["db"];
+
+type UpsertSummaryInput = {
+  dayKey: string;
+  story: string;
+  highlights: string[];
+  metrics?: {
+    steps?: number;
+    sleepMinutes?: number;
+    screenTimeMinutes?: number;
+    spendingTotal?: number;
+  };
+  sourcesUsed: string[];
+};
+
+export async function upsertSummaryForUserDay(
+  db: SummaryDb,
+  userId: Id<"user">,
+  args: UpsertSummaryInput,
+  now: number,
+) {
+  const existing = await db
+    .query("daySummaries")
+    .withIndex("by_user_day", (q) =>
+      q.eq("userId", userId).eq("dayKey", args.dayKey),
+    )
+    .unique();
+
+  if (existing) {
+    await db.patch(existing._id, {
+      story: args.story,
+      highlights: args.highlights,
+      metrics: args.metrics,
+      sourcesUsed: args.sourcesUsed,
+      generatedAt: now,
+    });
+
+    return await db.get(existing._id);
+  }
+
+  const id = await db.insert("daySummaries", {
+    userId,
+    dayKey: args.dayKey,
+    story: args.story,
+    highlights: args.highlights,
+    metrics: args.metrics,
+    sourcesUsed: args.sourcesUsed,
+    generatedAt: now,
+  });
+
+  await applyDashboardMetricsDelta(db, {
+    totalSummaries: 1,
+  });
+
+  return await db.get(id);
+}
+
+export async function reserveSummaryGenerationSlotForUser(
+  db: SummaryDb,
+  userId: Id<"user">,
+  now: number,
+  limit: number,
+) {
+  const quotaDayKey = getUtcDayKey(now);
+
+  const existing = await db
+    .query("summaryGenerationQuotas")
+    .withIndex("by_user_day", (q) =>
+      q.eq("userId", userId).eq("quotaDayKey", quotaDayKey),
+    )
+    .unique();
+
+  const used = existing?.used ?? 0;
+  if (used >= limit) {
+    throw new Error(
+      `Daily summary limit reached (${limit}/day). Please try again tomorrow.`,
+    );
+  }
+
+  if (existing) {
+    await db.patch(existing._id, {
+      used: used + 1,
+      updatedAt: now,
+    });
+  } else {
+    await db.insert("summaryGenerationQuotas", {
+      userId,
+      quotaDayKey,
+      used: 1,
+      updatedAt: now,
+    });
+  }
+
+  return {
+    quotaDayKey,
+    used: used + 1,
+    limit,
+    remaining: Math.max(limit - (used + 1), 0),
+  };
 }
 
 // ── Get summary for a specific day ──────────────────────────
@@ -76,39 +179,8 @@ export const upsertSummary = mutation({
     const user = await requireUser(ctx);
 
     validateDayKey(args.dayKey);
-
-    const existing = await ctx.db
-      .query("daySummaries")
-      .withIndex("by_user_day", (q) =>
-        q.eq("userId", user._id).eq("dayKey", args.dayKey),
-      )
-      .unique();
-
     const now = Date.now();
-
-    if (existing) {
-      await ctx.db.patch(existing._id, {
-        story: args.story,
-        highlights: args.highlights,
-        metrics: args.metrics,
-        sourcesUsed: args.sourcesUsed,
-        generatedAt: now,
-      });
-
-      return await ctx.db.get(existing._id);
-    }
-
-    const id = await ctx.db.insert("daySummaries", {
-      userId: user._id,
-      dayKey: args.dayKey,
-      story: args.story,
-      highlights: args.highlights,
-      metrics: args.metrics,
-      sourcesUsed: args.sourcesUsed,
-      generatedAt: now,
-    });
-
-    return await ctx.db.get(id);
+    return await upsertSummaryForUserDay(ctx.db, user._id, args, now);
   },
 });
 
@@ -126,6 +198,11 @@ export const deleteSummary = mutation({
     requireOwnership(user, summary.userId);
 
     await ctx.db.delete(args.summaryId);
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalSummaries: -1,
+    });
+
     return { success: true };
   },
 });
@@ -136,6 +213,7 @@ export const getSummaryQuotaForDay = query({
   handler: async (ctx) => {
     const user = await requireUser(ctx);
     const quotaDayKey = getUtcDayKey(Date.now());
+    const limit = getSummaryDailyGenerationLimit();
 
     const quota = await ctx.db
       .query("summaryGenerationQuotas")
@@ -148,8 +226,8 @@ export const getSummaryQuotaForDay = query({
     return {
       quotaDayKey,
       used,
-      limit: DAILY_SUMMARY_GENERATION_LIMIT,
-      remaining: Math.max(DAILY_SUMMARY_GENERATION_LIMIT - used, 0),
+      limit,
+      remaining: Math.max(limit - used, 0),
     };
   },
 });
@@ -160,41 +238,98 @@ export const reserveSummaryGenerationSlot = mutation({
   handler: async (ctx) => {
     const user = await requireUser(ctx);
     const now = Date.now();
-    const quotaDayKey = getUtcDayKey(now);
+    const limit = getSummaryDailyGenerationLimit();
 
-    const existing = await ctx.db
-      .query("summaryGenerationQuotas")
-      .withIndex("by_user_day", (q) =>
-        q.eq("userId", user._id).eq("quotaDayKey", quotaDayKey),
-      )
-      .unique();
+    return await reserveSummaryGenerationSlotForUser(
+      ctx.db,
+      user._id,
+      now,
+      limit,
+    );
+  },
+});
 
-    const used = existing?.used ?? 0;
-    if (used >= DAILY_SUMMARY_GENERATION_LIMIT) {
-      throw new Error(
-        "Daily summary limit reached (5/day). Please try again tomorrow.",
-      );
-    }
+export const getSummaryGenerationIdentity = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await requireUser(ctx);
+    return {
+      userId: user._id,
+      clerkUserId: user.clerkUserId,
+    };
+  },
+});
 
-    if (existing) {
-      await ctx.db.patch(existing._id, {
-        used: used + 1,
-        updatedAt: now,
-      });
-    } else {
-      await ctx.db.insert("summaryGenerationQuotas", {
-        userId: user._id,
-        quotaDayKey,
-        used: 1,
-        updatedAt: now,
-      });
-    }
+export const exportMyDiaryData = query({
+  args: {
+    includeLocationSignals: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    const includeLocationSignals = args.includeLocationSignals ?? false;
+
+    const summaries = await ctx.db
+      .query("daySummaries")
+      .withIndex("by_user_generatedAt", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .collect();
+
+    const memories = await ctx.db
+      .query("memories")
+      .withIndex("by_user_happenedAt", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .collect();
+
+    const days = await ctx.db
+      .query("days")
+      .withIndex("by_user_day", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .collect();
+
+    const integrations = await ctx.db
+      .query("integrationDailyData")
+      .withIndex("by_user_day", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .collect();
+
+    const integrationDailyData = integrations
+      .filter((item) => includeLocationSignals || item.provider !== "location")
+      .map((item) => ({
+        provider: item.provider,
+        dayKey: item.dayKey,
+        syncedAt: item.syncedAt,
+        summary: item.summary,
+        metrics: item.metrics,
+        signals:
+          item.provider === "location" && !includeLocationSignals
+            ? []
+            : (item.signals ?? []),
+      }));
 
     return {
-      quotaDayKey,
-      used: used + 1,
-      limit: DAILY_SUMMARY_GENERATION_LIMIT,
-      remaining: Math.max(DAILY_SUMMARY_GENERATION_LIMIT - (used + 1), 0),
+      exportedAt: Date.now(),
+      summaries: summaries.map((summary) => ({
+        dayKey: summary.dayKey,
+        story: summary.story,
+        highlights: summary.highlights,
+        metrics: summary.metrics,
+        sourcesUsed: summary.sourcesUsed,
+        generatedAt: summary.generatedAt,
+      })),
+      memories: memories.map((memory) => ({
+        dayKey: memory.dayKey,
+        title: memory.title,
+        description: memory.description,
+        mood: memory.mood,
+        happenedAt: memory.happenedAt,
+      })),
+      days: days.map((day) => ({
+        dayKey: day.dayKey,
+        rating: day.rating,
+        manualNotes: day.manualNotes ?? [],
+        peopleTags: day.peopleTags ?? [],
+      })),
+      integrationDailyData,
     };
   },
 });

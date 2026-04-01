@@ -3,6 +3,7 @@ import { mutation, query } from "./_generated/server";
 import { requireUser, requireOwnership } from "./authz";
 import { validateDayKey, validateRating, clampLimit } from "./validators";
 import { deleteDayCascadeData } from "./cascadeCleanup";
+import { applyDashboardMetricsDelta } from "./dashboardMetrics";
 
 // ── Get or create a day record ──────────────────────────────
 export const upsertDay = mutation({
@@ -42,6 +43,10 @@ export const upsertDay = mutation({
       rating: args.rating,
       manualNotes: args.manualNotes,
       peopleTags: args.peopleTags,
+    });
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalDays: 1,
     });
 
     return await ctx.db.get(id);
@@ -120,6 +125,10 @@ export const updateDayRating = mutation({
         rating: args.rating,
       });
 
+      await applyDashboardMetricsDelta(ctx.db, {
+        totalDays: 1,
+      });
+
       return await ctx.db.get(id);
     }
 
@@ -141,12 +150,19 @@ export const deleteDay = mutation({
 
     requireOwnership(user, day.userId);
 
-    await deleteDayCascadeData(ctx, {
+    const deleted = await deleteDayCascadeData(ctx, {
       userId: day.userId,
       dayKey: day.dayKey,
     });
 
     await ctx.db.delete(args.dayId);
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalDays: -1,
+      totalMemories: -deleted.deletedMemories,
+      totalSummaries: -deleted.deletedSummaries,
+    });
+
     return { success: true };
   },
 });

@@ -10,9 +10,10 @@ import {
   Alert,
   Image,
 } from "react-native";
+import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useQuery, useMutation, useConvexAuth } from "convex/react";
+import { useQuery, useMutation, useAction, useConvexAuth } from "convex/react";
 import { api } from "@repo/backend/convex";
 import type { GenericId } from "convex/values";
 import { MOOD_EMOJI } from "@repo/ui/lib/constants";
@@ -37,6 +38,14 @@ type MemoryThumbnailDoc = {
   thumbnailUrl: string | null;
 };
 
+type IntegrationDailyDataDoc = {
+  _id: string;
+  provider: string;
+  summary?: string;
+  signals?: string[];
+  syncedAt: number;
+};
+
 function isMemoryDoc(value: unknown): value is MemoryDoc {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Record<string, unknown>;
@@ -59,9 +68,71 @@ function isMemoryThumbnailDoc(value: unknown): value is MemoryThumbnailDoc {
   );
 }
 
+function isIntegrationDailyDataDoc(
+  value: unknown,
+): value is IntegrationDailyDataDoc {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate._id === "string" &&
+    typeof candidate.provider === "string" &&
+    typeof candidate.syncedAt === "number" &&
+    (candidate.summary === undefined ||
+      typeof candidate.summary === "string") &&
+    (candidate.signals === undefined || Array.isArray(candidate.signals))
+  );
+}
+
+function toProviderLabel(provider: string): string {
+  const labels: Record<string, string> = {
+    google_calendar: "Google Calendar",
+    google_fit: "Google Fit",
+    spotify: "Spotify",
+    apple_health: "Apple Health",
+    location: "Location (foreground)",
+  };
+
+  return labels[provider] ?? provider;
+}
+
 function getTodayDayKey(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function getSummaryGenerationErrorMessage(error: unknown): string {
+  const fallback = "Could not generate summary right now.";
+  if (!(error instanceof Error) || !error.message) return fallback;
+
+  const rawMessage = error.message;
+  const noDataSignature =
+    "No memories, day metadata, or integration sync data found for this date";
+
+  if (rawMessage.includes(noDataSignature)) {
+    return "Add at least one memory, day note/rating/tag, or synced integration data before generating a summary.";
+  }
+
+  const lines = rawMessage
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const candidate = lines.find(
+    (line) =>
+      !line.startsWith("[CONVEX ") &&
+      !line.startsWith("[Request ID:") &&
+      !line.startsWith("Called by client") &&
+      !line.startsWith("at handler"),
+  );
+
+  if (!candidate) return fallback;
+
+  const cleaned = candidate
+    .replace(/^Uncaught Error:\s*/i, "")
+    .replace(/^Error:\s*/i, "")
+    .trim();
+
+  return cleaned || fallback;
 }
 
 function MemorySkeleton() {
@@ -83,8 +154,12 @@ function MemorySkeleton() {
 }
 
 const DailyDetailView = () => {
+  const router = useRouter();
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
   const dayKey = getTodayDayKey();
+  const scrollRef = React.useRef<ScrollView>(null);
+  const manualNotesSectionYRef = React.useRef(0);
+  const manualEntryInputRef = React.useRef<TextInput>(null);
 
   const summary = useQuery(
     api.summaries.getSummaryByDay,
@@ -99,6 +174,17 @@ const DailyDetailView = () => {
     return memories.filter(isMemoryDoc);
   }, [memories]);
   const day = useQuery(api.days.getDay, isAuthenticated ? { dayKey } : "skip");
+  const summaryQuota = useQuery(
+    api.summaries.getSummaryQuotaForDay,
+    isAuthenticated ? {} : "skip",
+  );
+  const rawIntegrationDailyData = useQuery(
+    api.integrations.listMyIntegrationDailyDataForDay,
+    isAuthenticated ? { dayKey } : "skip",
+  );
+  const generateSummaryForDay = useAction(
+    api.summaryGeneration.generateSummaryForDay,
+  );
   const memoryIds = React.useMemo(
     () => resolvedMemories.map((memory) => memory._id),
     [resolvedMemories],
@@ -111,6 +197,11 @@ const DailyDetailView = () => {
     if (!Array.isArray(rawMemoryThumbnails)) return [];
     return rawMemoryThumbnails.filter(isMemoryThumbnailDoc);
   }, [rawMemoryThumbnails]);
+
+  const integrationDailyData = React.useMemo(() => {
+    if (!Array.isArray(rawIntegrationDailyData)) return [];
+    return rawIntegrationDailyData.filter(isIntegrationDailyDataDoc);
+  }, [rawIntegrationDailyData]);
 
   const thumbnailCacheRef = React.useRef<Map<string, string | null>>(new Map());
 
@@ -142,6 +233,10 @@ const DailyDetailView = () => {
   const [manualEntry, setManualEntry] = useState("");
   const [personInput, setPersonInput] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [summaryGenerationError, setSummaryGenerationError] = useState<
+    string | null
+  >(null);
   const [refreshing, setRefreshing] = useState(false);
   const [optimisticRating, setOptimisticRating] = useState<number | null>(null);
 
@@ -220,16 +315,58 @@ const DailyDetailView = () => {
     [peopleTags, dayKey, upsertDay],
   );
 
+  const hasDayMetadataForSummary =
+    day?.rating !== undefined ||
+    (day?.manualNotes?.length ?? 0) > 0 ||
+    (day?.peopleTags?.length ?? 0) > 0;
+  const hasSummaryInputs =
+    resolvedMemories.length > 0 ||
+    hasDayMetadataForSummary ||
+    integrationDailyData.length > 0;
+  const isSummaryActionDisabled = isGeneratingSummary || !hasSummaryInputs;
+
+  const handleGenerateSummary = useCallback(async () => {
+    if (!hasSummaryInputs) {
+      setSummaryGenerationError(
+        "Add at least one memory, day note/rating/tag, or synced integration data before generating a summary.",
+      );
+      return;
+    }
+
+    setIsGeneratingSummary(true);
+    setSummaryGenerationError(null);
+
+    try {
+      await generateSummaryForDay({ dayKey });
+    } catch (error) {
+      setSummaryGenerationError(getSummaryGenerationErrorMessage(error));
+    } finally {
+      setIsGeneratingSummary(false);
+    }
+  }, [dayKey, generateSummaryForDay, hasSummaryInputs]);
+
+  const handleJumpToManualNotes = useCallback(() => {
+    const targetY = Math.max(0, manualNotesSectionYRef.current - Spacing.xl);
+    scrollRef.current?.scrollTo({ y: targetY, animated: true });
+
+    setTimeout(() => {
+      manualEntryInputRef.current?.focus();
+    }, 260);
+  }, []);
+
   if (isLoading) return <MemorySkeleton />;
 
   const moodFromMemories =
     resolvedMemories.length > 0 ? (resolvedMemories[0]?.mood ?? null) : null;
 
   const sourcesUsed = summary?.sourcesUsed ?? [];
+  const hasDataSources =
+    sourcesUsed.length > 0 || integrationDailyData.length > 0;
 
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -286,14 +423,74 @@ const DailyDetailView = () => {
                     ))}
                   </View>
                 )}
+                <Text style={styles.summaryMetaText}>
+                  Generated at{" "}
+                  {new Date(summary.generatedAt).toLocaleTimeString()}
+                </Text>
               </>
             ) : (
               <EmptyState
                 icon="book-outline"
                 title="No story yet"
-                subtitle="Add memories and check back later for your daily narrative."
+                subtitle="Generate a summary from your memories and connected integration data."
+                actionLabel="Add Memory"
+                onAction={() => router.push("/add-memory")}
               />
             )}
+
+            <View style={{ marginTop: Spacing.md, gap: Spacing.sm }}>
+              {!summary && !hasSummaryInputs ? (
+                <AppButton
+                  title="Add Day Note"
+                  onPress={handleJumpToManualNotes}
+                  variant="secondary"
+                  size="md"
+                  icon={
+                    <Ionicons name="create-outline" size={16} color={c.tint} />
+                  }
+                />
+              ) : null}
+
+              <AppButton
+                title={
+                  summary
+                    ? isGeneratingSummary
+                      ? "Refreshing..."
+                      : hasSummaryInputs
+                        ? "Refresh Summary"
+                        : "Add data to refresh"
+                    : isGeneratingSummary
+                      ? "Generating..."
+                      : hasSummaryInputs
+                        ? "Generate Summary"
+                        : "Add data to generate"
+                }
+                onPress={handleGenerateSummary}
+                disabled={isSummaryActionDisabled}
+                loading={isGeneratingSummary}
+                size="md"
+              />
+
+              {summaryQuota ? (
+                <Text style={styles.summaryHintText}>
+                  Daily summary quota: {summaryQuota.remaining} remaining of{" "}
+                  {summaryQuota.limit}
+                </Text>
+              ) : null}
+
+              {!hasSummaryInputs ? (
+                <Text style={styles.summaryBlockedHintText}>
+                  This day has no memories, notes, rating, people tags, or
+                  synced integration data yet.
+                </Text>
+              ) : null}
+
+              {summaryGenerationError ? (
+                <Text style={styles.summaryErrorText}>
+                  {summaryGenerationError}
+                </Text>
+              ) : null}
+            </View>
           </AppCard>
         </View>
 
@@ -343,30 +540,73 @@ const DailyDetailView = () => {
                 icon="time-outline"
                 title="No memories today"
                 subtitle="Everything is working—this day just has no memories yet. Add one to get started."
+                actionLabel="Add Memory"
+                onAction={() => router.push("/add-memory")}
               />
             </AppCard>
           </View>
         )}
 
         {/* ── Data Sources ─────────────────────────────── */}
-        {sourcesUsed.length > 0 && (
+        {hasDataSources && (
           <View style={styles.section}>
             <SectionHeader title="Data Sources" />
             <AppCard>
-              <View style={styles.sourcesWrap}>
-                {sourcesUsed.map((source: string, index: number) => (
-                  <View key={index} style={styles.sourceChip}>
-                    <Ionicons name="link-outline" size={12} color={c.tint} />
-                    <Text style={styles.sourceText}>{source}</Text>
+              <Text style={styles.sourcesHeaderText}>
+                Connected providers synced today
+              </Text>
+              {integrationDailyData.length > 0 ? (
+                <View style={styles.sourcesWrap}>
+                  {integrationDailyData.map((entry) => (
+                    <View key={entry._id} style={styles.sourceChip}>
+                      <Ionicons name="link-outline" size={12} color={c.tint} />
+                      <Text style={styles.sourceText}>
+                        {toProviderLabel(entry.provider)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.sourcesEmptyText}>
+                  No provider data synced for this day.
+                </Text>
+              )}
+
+              {sourcesUsed.length > 0 && (
+                <>
+                  <Text
+                    style={[
+                      styles.sourcesHeaderText,
+                      { marginTop: Spacing.md },
+                    ]}
+                  >
+                    Sources used in the latest summary
+                  </Text>
+                  <View style={styles.sourcesWrap}>
+                    {sourcesUsed.map((source: string, index: number) => (
+                      <View key={index} style={styles.sourceChip}>
+                        <Ionicons
+                          name="flash-outline"
+                          size={12}
+                          color={c.tint}
+                        />
+                        <Text style={styles.sourceText}>{source}</Text>
+                      </View>
+                    ))}
                   </View>
-                ))}
-              </View>
+                </>
+              )}
             </AppCard>
           </View>
         )}
 
         {/* ── Manual Notes ─────────────────────────────── */}
-        <View style={styles.section}>
+        <View
+          style={styles.section}
+          onLayout={(event) => {
+            manualNotesSectionYRef.current = event.nativeEvent.layout.y;
+          }}
+        >
           <SectionHeader title="Manual Notes" />
           <AppCard>
             {manualNotes.length > 0 && (
@@ -380,6 +620,7 @@ const DailyDetailView = () => {
               </View>
             )}
             <TextInput
+              ref={manualEntryInputRef}
               style={styles.input}
               placeholder="Add what mattered today..."
               placeholderTextColor={c.textTertiary}
@@ -543,6 +784,23 @@ const styles = StyleSheet.create({
     ...Typography.body,
     color: c.text,
   },
+  summaryMetaText: {
+    ...Typography.caption2,
+    color: c.textSecondary,
+    marginTop: Spacing.md,
+  },
+  summaryHintText: {
+    ...Typography.caption2,
+    color: c.textSecondary,
+  },
+  summaryBlockedHintText: {
+    ...Typography.caption2,
+    color: c.textSecondary,
+  },
+  summaryErrorText: {
+    ...Typography.caption2,
+    color: c.error,
+  },
   highlightsWrap: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -602,6 +860,15 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: Spacing.sm,
+  },
+  sourcesHeaderText: {
+    ...Typography.caption,
+    color: c.textSecondary,
+    marginBottom: Spacing.sm,
+  },
+  sourcesEmptyText: {
+    ...Typography.caption,
+    color: c.textSecondary,
   },
   sourceChip: {
     flexDirection: "row",

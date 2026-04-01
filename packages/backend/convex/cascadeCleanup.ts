@@ -13,6 +13,20 @@ type DayCascadeInput = {
   dayKey: string;
 };
 
+export type UserCascadeDeleteCounts = {
+  deletedMemories: number;
+  deletedSummaries: number;
+  deletedDays: number;
+  deletedIntegrations: number;
+  deletedPreferences: number;
+  deletedAuditLogs: number;
+};
+
+export type DayCascadeDeleteCounts = {
+  deletedMemories: number;
+  deletedSummaries: number;
+};
+
 async function safeDeleteStorageBlob(
   ctx: CascadeCtx,
   storageId: string,
@@ -27,72 +41,90 @@ async function safeDeleteStorageBlob(
 export async function deleteMemoryMediaByMemoryId(
   ctx: CascadeCtx,
   memoryId: Id<"memories">,
-): Promise<void> {
+): Promise<number> {
   const media = await ctx.db
     .query("memoryMedia")
     .withIndex("by_memory", (q) => q.eq("memoryId", memoryId))
     .collect();
 
+  let deletedMediaCount = 0;
   for (const mediaDoc of media) {
     await safeDeleteStorageBlob(ctx, mediaDoc.storageId);
     await ctx.db.delete(mediaDoc._id);
+    deletedMediaCount += 1;
   }
+
+  return deletedMediaCount;
 }
 
 async function deleteMemoriesByUser(
   ctx: CascadeCtx,
   userId: Id<"user">,
-): Promise<void> {
+): Promise<number> {
   const memories = await ctx.db
     .query("memories")
     .withIndex("by_user_day", (q) => q.eq("userId", userId))
     .collect();
 
+  let deletedMemories = 0;
   for (const memory of memories) {
     await deleteMemoryMediaByMemoryId(ctx, memory._id);
     await ctx.db.delete(memory._id);
+    deletedMemories += 1;
   }
+
+  return deletedMemories;
 }
 
 async function deleteSummariesByUser(
   ctx: CascadeCtx,
   userId: Id<"user">,
-): Promise<void> {
+): Promise<number> {
   const summaries = await ctx.db
     .query("daySummaries")
     .withIndex("by_user_day", (q) => q.eq("userId", userId))
     .collect();
 
+  let deletedSummaries = 0;
   for (const summary of summaries) {
     await ctx.db.delete(summary._id);
+    deletedSummaries += 1;
   }
+
+  return deletedSummaries;
 }
 
 async function deleteDaysByUser(
   ctx: CascadeCtx,
   userId: Id<"user">,
-): Promise<void> {
+): Promise<number> {
   const days = await ctx.db
     .query("days")
     .withIndex("by_user_day", (q) => q.eq("userId", userId))
     .collect();
 
+  let deletedDays = 0;
   for (const day of days) {
     await ctx.db.delete(day._id);
+    deletedDays += 1;
   }
+
+  return deletedDays;
 }
 
 async function deleteIntegrationsByUser(
   ctx: CascadeCtx,
   userId: Id<"user">,
-): Promise<void> {
+): Promise<number> {
   const integrations = await ctx.db
     .query("integrations")
     .withIndex("by_user_provider", (q) => q.eq("userId", userId))
     .collect();
 
+  let deletedIntegrations = 0;
   for (const integration of integrations) {
     await ctx.db.delete(integration._id);
+    deletedIntegrations += 1;
   }
 
   const integrationDailyData = await ctx.db
@@ -121,34 +153,44 @@ async function deleteIntegrationsByUser(
   for (const run of integrationSyncRuns) {
     await ctx.db.delete(run._id);
   }
+
+  return deletedIntegrations;
 }
 
 async function deletePreferencesByClerkUserId(
   ctx: CascadeCtx,
   clerkUserId: string,
-): Promise<void> {
+): Promise<number> {
   const preferences = await ctx.db
     .query("userPreferences")
     .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", clerkUserId))
     .collect();
 
+  let deletedPreferences = 0;
   for (const preference of preferences) {
     await ctx.db.delete(preference._id);
+    deletedPreferences += 1;
   }
+
+  return deletedPreferences;
 }
 
 async function deleteAuditLogsByUser(
   ctx: CascadeCtx,
   userId: Id<"user">,
-): Promise<void> {
+): Promise<number> {
   const auditLogs = await ctx.db
     .query("auditLogs")
-    .withIndex("by_actor", (q) => q.eq("actorUserId", userId))
+    .withIndex("by_userId", (q) => q.eq("actorUserId", userId))
     .collect();
 
+  let deletedAuditLogs = 0;
   for (const log of auditLogs) {
     await ctx.db.delete(log._id);
+    deletedAuditLogs += 1;
   }
+
+  return deletedAuditLogs;
 }
 
 async function deleteSummaryQuotasByUser(
@@ -168,20 +210,32 @@ async function deleteSummaryQuotasByUser(
 export async function deleteUserCascadeData(
   ctx: CascadeCtx,
   input: UserCascadeInput,
-): Promise<void> {
-  await deleteMemoriesByUser(ctx, input.userId);
-  await deleteDaysByUser(ctx, input.userId);
-  await deleteSummariesByUser(ctx, input.userId);
-  await deleteIntegrationsByUser(ctx, input.userId);
-  await deletePreferencesByClerkUserId(ctx, input.clerkUserId);
-  await deleteAuditLogsByUser(ctx, input.userId);
+): Promise<UserCascadeDeleteCounts> {
+  const deletedMemories = await deleteMemoriesByUser(ctx, input.userId);
+  const deletedDays = await deleteDaysByUser(ctx, input.userId);
+  const deletedSummaries = await deleteSummariesByUser(ctx, input.userId);
+  const deletedIntegrations = await deleteIntegrationsByUser(ctx, input.userId);
+  const deletedPreferences = await deletePreferencesByClerkUserId(
+    ctx,
+    input.clerkUserId,
+  );
+  const deletedAuditLogs = await deleteAuditLogsByUser(ctx, input.userId);
   await deleteSummaryQuotasByUser(ctx, input.userId);
+
+  return {
+    deletedMemories,
+    deletedSummaries,
+    deletedDays,
+    deletedIntegrations,
+    deletedPreferences,
+    deletedAuditLogs,
+  };
 }
 
 export async function deleteDayCascadeData(
   ctx: CascadeCtx,
   input: DayCascadeInput,
-): Promise<void> {
+): Promise<DayCascadeDeleteCounts> {
   const summaries = await ctx.db
     .query("daySummaries")
     .withIndex("by_user_day", (q) =>
@@ -189,8 +243,10 @@ export async function deleteDayCascadeData(
     )
     .collect();
 
+  let deletedSummaries = 0;
   for (const summary of summaries) {
     await ctx.db.delete(summary._id);
+    deletedSummaries += 1;
   }
 
   const memories = await ctx.db
@@ -200,8 +256,15 @@ export async function deleteDayCascadeData(
     )
     .collect();
 
+  let deletedMemories = 0;
   for (const memory of memories) {
     await deleteMemoryMediaByMemoryId(ctx, memory._id);
     await ctx.db.delete(memory._id);
+    deletedMemories += 1;
   }
+
+  return {
+    deletedMemories,
+    deletedSummaries,
+  };
 }

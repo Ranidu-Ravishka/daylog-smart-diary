@@ -12,8 +12,8 @@
     "predev": "convex dev --until-success",
     "logs": "convex logs",
     "lint": "tsc -p convex && eslint . --report-unused-disable-directives --max-warnings 0",
-    "test": "vitest",
-    "test:run": "vitest run"
+    "test": "vitest run --coverage",
+    "test:run": "vitest run --coverage"
   },
   "dependencies": {
     "convex": "^1.29.3",
@@ -29,7 +29,8 @@
     "eslint": "^9.39.1",
     "globals": "^16.5.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.0"
+    "@vitest/coverage-v8": "^4.1.2",
+    "vitest": "^4.1.2"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

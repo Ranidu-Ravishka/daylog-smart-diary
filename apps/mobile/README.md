@@ -2,6 +2,79 @@
 
 Expo + React Native client for DayLog.
 
+## Feature scope (current)
+
+- Mobile supports memory capture, mood tagging, day-detail review, integration connect/sync, and daily summary generation from the Memory tab.
+- Connected data providers shown in mobile are: Google Calendar, Google Fit, Spotify, and Apple Health uploads.
+- Mobile supports optional foreground location tracking (coarse location, only while the app is open).
+- Background location tracking and call-log collection are not implemented in the current app.
+
+## Foreground location MVP setup (mobile)
+
+Location signals use `expo-location` and require user permission.
+
+- Install dependencies in `apps/mobile`:
+
+```bash
+pnpm --filter mobile add expo-location
+```
+
+- Run the app (Expo Go or development build).
+- In app: Profile → Integration Preferences → Foreground Location Tracking.
+- Grant foreground location permission when prompted.
+
+Behavior and privacy limits:
+
+- Collection is foreground-only (no background tracking).
+- Stored signal is coarse approximate area (`lat,lng` rounded), not high-frequency raw traces.
+- Tracking stops when permission is denied or toggle is turned off.
+
+## Apple Health real-device sync setup (iOS)
+
+Apple Health sync requires a native iOS build (not Expo Go) because HealthKit access is a native capability.
+
+- Add native dependency in `apps/mobile`:
+
+```bash
+pnpm --filter mobile add react-native-health
+```
+
+- Enable HealthKit entitlement in iOS app configuration and include required privacy usage text.
+
+- Build and run a development client (`expo prebuild` + iOS dev build), then use:
+
+- Profile → Integrations → Apple Health → Connect
+- Profile → Integrations → Apple Health → Sync now
+
+If the native module is missing, the app will show an explicit setup error when syncing Apple Health.
+
+## Android screen-time real-data setup
+
+Android screen-time collection requires usage-stats access from a native Android build.
+
+- Add native dependency in `apps/mobile`:
+
+```bash
+pnpm --filter mobile add react-native-usage-stats-manager
+```
+
+- Build and run Android development client (not Expo Go).
+- In app: Profile → Integrations → Google Fit → Sync now.
+- On first attempt, grant Usage Access in Android settings when prompted.
+
+When granted, synced Google Fit daily data will include `screenTimeMinutes` from Android usage stats.
+
+## iOS screen-time real-data setup
+
+True iOS Screen Time access requires Apple Screen Time / Family Controls APIs and entitlement approval.
+
+- Add an iOS native bridge module that exposes daily screen time to React Native.
+- Enable required Apple capabilities/entitlements (Family Controls / Device Activity) for your app ID.
+- Use an iOS native development build (not Expo Go).
+- In app: Profile → Integrations → Google Fit → Sync now.
+
+If entitlement/module setup is missing, sync still completes for Google Fit metrics while screen time is skipped with a clear message.
+
 ## Required environment variables
 
 Create `apps/mobile/.env.local` from `apps/mobile/.env.example`.
@@ -10,6 +83,7 @@ Required:
 
 - `EXPO_PUBLIC_CONVEX_URL`
 - `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`
+- `EXPO_PUBLIC_WEB_APP_URL` (web app base URL used for OAuth connect flow)
 
 ## Local development
 

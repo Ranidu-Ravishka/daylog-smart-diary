@@ -12,7 +12,7 @@ This folder contains DayLog backend domains and shared backend infrastructure.
 Domain files:
 
 - `users.ts`
-- `preferences.ts`
+- `userPreferences.ts`
 - `memories.ts`
 - `days.ts`
 - `summaries.ts`

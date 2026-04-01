@@ -221,7 +221,9 @@ const HomeScreen = () => {
               <EmptyState
                 icon="sunny-outline"
                 title="No summary yet"
-                subtitle="Add memories throughout the day to generate your daily story."
+                subtitle="Generate your day story from the Memory tab using your memories and connected integrations."
+                actionLabel="Generate now"
+                onAction={() => router.push("/memory")}
               />
             )}
           </AppCard>

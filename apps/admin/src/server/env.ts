@@ -83,12 +83,24 @@ function failIfInvalid(errors: EnvError[]): void {
 }
 
 export type AdminServerEnv = {
+  adminCacheSecret: string;
   clerkSecretKey: string;
   convexUrl: string;
 };
 
+function validateAdminCacheSecret(value: string): string | null {
+  if (value.length < 32) {
+    return "must be at least 32 characters";
+  }
+  return null;
+}
+
 function validateAdminServerEnv(): AdminServerEnv {
   const errors: EnvError[] = [];
+
+  const adminCacheSecret = readRequiredEnv("ADMIN_CACHE_SECRET", errors, {
+    validate: validateAdminCacheSecret,
+  });
 
   const clerkSecretKey = readRequiredEnv("CLERK_SECRET_KEY", errors, {
     validate: validateClerkSecretKey,
@@ -101,6 +113,7 @@ function validateAdminServerEnv(): AdminServerEnv {
   failIfInvalid(errors);
 
   return {
+    adminCacheSecret,
     clerkSecretKey,
     convexUrl,
   };

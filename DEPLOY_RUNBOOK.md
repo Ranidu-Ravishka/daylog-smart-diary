@@ -31,19 +31,22 @@ See [CONVEX_SETUP.md](CONVEX_SETUP.md) for setup details and validation behavior
 
 ## 2) CI/CD gates (source of truth)
 
-CI workflow file: [.github/workflows/feature.yml](.github/workflows/feature.yml)
+CI workflow file: [.github/workflows/backend-validation.yml](.github/workflows/backend-validation.yml)
 
 Required checks:
 
-- `Feature Branch CI / ci-checks`
-- `Feature Branch CI / Backend Tests`
-- `Feature Branch CI / Mobile Validation`
+- `backend-validation`
 
 What each check enforces:
 
-- `ci-checks`: install, secret scan, repo lint, repo typecheck, selective web/admin builds
-- `Backend Tests`: `pnpm --filter @repo/backend test:run`
-- `Mobile Validation`: mobile typecheck + lint + Expo web export (`build:ci`)
+- `backend-validation`: install, secret scan, repo lint, repo typecheck, selective web/admin builds, backend lint/tests, mobile typecheck/lint/build
+
+Branch protection alignment (manual GitHub setting):
+
+1. Open repository Settings -> Branches -> Branch protection rules.
+2. Edit the rule for `main` (and any release branch rules).
+3. Under required status checks, keep only `backend-validation`.
+4. Remove stale checks such as `Feature Branch CI / ci-checks`, `Feature Branch CI / Backend Tests`, and `Feature Branch CI / Mobile Validation` if present.
 
 ## 3) Pre-merge local checklist
 
@@ -83,6 +86,10 @@ Backend:
 
 - Verify Clerk webhook events are accepted
 - Verify summary generation succeeds (OpenAI key valid)
+- Verify integration secrets are encrypted at rest:
+  - Run `integrations:adminAuditIntegrationSecretsEncryptionStatus`
+  - Confirm `legacyPlaintextRows = 0` and `missingEncryptedAccessRows = 0`
+  - If non-zero, run `integrations:adminMigrateLegacyIntegrationSecretsAll` and re-check
 
 Mobile:
 
@@ -108,6 +115,12 @@ pnpm --filter @repo/backend dev
 
 - Set `ADMIN_BOOTSTRAP_CLERK_USER_IDS` in Convex env.
 - Call mutation `users:bootstrapMakeMeAdmin` while signed in as an allowed Clerk user.
+
+### Integration secret migration sweep
+
+- Audit current status: `integrations:adminAuditIntegrationSecretsEncryptionStatus`
+- Migrate all legacy plaintext rows: `integrations:adminMigrateLegacyIntegrationSecretsAll`
+- Re-audit and ensure plaintext counters are zero before declaring production ready
 
 ## 7) Troubleshooting quick notes
 

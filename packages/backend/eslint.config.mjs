@@ -57,6 +57,6 @@ export default defineConfig([
       "@typescript-eslint/require-await": "off",
     },
   },
-  globalIgnores(["convex/_generated"]),
+  globalIgnores(["convex/_generated", "coverage/**"]),
   ...convexPlugin.configs.recommended,
 ]);

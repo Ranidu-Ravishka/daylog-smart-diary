@@ -1,11 +1,9 @@
 import { v } from "convex/values";
 import { action, internalAction } from "./_generated/server";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { validateDayKey } from "./validators";
 import { convexServerEnv } from "./env";
-
-const OPENAI_MAX_ATTEMPTS = 3;
-const OPENAI_BASE_BACKOFF_MS = 400;
+import { resolveSummaryModelAdapter } from "./providerAdapters";
 
 export class OpenAiRequestError extends Error {
   status: number;
@@ -17,10 +15,6 @@ export class OpenAiRequestError extends Error {
     this.status = status;
     this.retryable = retryable;
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function isRetryableOpenAiStatus(status: number): boolean {
@@ -108,6 +102,7 @@ function toSourceLabel(provider: string): string {
     google_fit: "Google Fit",
     spotify: "Spotify",
     apple_health: "Apple Health",
+    location: "Location (foreground)",
   };
 
   return labels[provider] ?? provider;
@@ -166,127 +161,28 @@ function buildIntegrationContextForModel(entries: IntegrationDailyData[]) {
   };
 }
 
-async function generateSummaryWithOpenAi(dayKey: string, modelInput: string) {
+export async function generateSummaryWithOpenAi(
+  dayKey: string,
+  modelInput: string,
+) {
   const openAiKey = convexServerEnv.openAiApiKey;
+  const adapter = resolveSummaryModelAdapter("openai");
 
-  const callOpenAi = async () => {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${openAiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        temperature: 0.3,
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "day_summary",
-            strict: true,
-            schema: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                story: { type: "string" },
-                highlights: {
-                  type: "array",
-                  items: { type: "string" },
-                  maxItems: 6,
-                },
-                metrics: {
-                  type: "object",
-                  additionalProperties: false,
-                  properties: {
-                    steps: { type: "number" },
-                    sleepMinutes: { type: "number" },
-                    screenTimeMinutes: { type: "number" },
-                    spendingTotal: { type: "number" },
-                  },
-                },
-                sourcesUsed: {
-                  type: "array",
-                  items: { type: "string" },
-                  maxItems: 8,
-                },
-              },
-              required: ["story", "highlights", "sourcesUsed"],
-            },
-          },
-        },
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are a concise wellbeing journaling assistant. Create an honest, grounded summary with no invented facts. Keep the narrative under 120 words and highlights short.",
-          },
-          {
-            role: "user",
-            content: `Generate a summary for ${dayKey}. Use only this JSON input:\n${modelInput}`,
-          },
-        ],
-      }),
+  try {
+    return await adapter.execute({
+      dayKey,
+      modelInput,
+      apiKey: openAiKey,
     });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      const status = response.status;
-      const retryable = isRetryableOpenAiStatus(status);
-      throw new OpenAiRequestError(
-        status,
-        `OpenAI request failed (${status}): ${errorText.slice(0, 300)}`,
-        retryable,
-      );
-    }
-
-    const json = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    return json.choices?.[0]?.message?.content;
-  };
-
-  let content: string | undefined;
-  let lastError: unknown;
-
-  for (let attempt = 1; attempt <= OPENAI_MAX_ATTEMPTS; attempt++) {
-    try {
-      content = await callOpenAi();
-      break;
-    } catch (error) {
-      lastError = error;
-      const shouldRetry =
-        attempt < OPENAI_MAX_ATTEMPTS && isRetryableOpenAiError(error);
-
-      if (!shouldRetry) {
-        break;
-      }
-
-      const backoffMs = OPENAI_BASE_BACKOFF_MS * 2 ** (attempt - 1);
-      console.warn(
-        `[summaryGeneration] OpenAI attempt ${attempt} failed; retrying in ${backoffMs}ms`,
-      );
-      await sleep(backoffMs);
-    }
-  }
-
-  if (!content) {
-    if (lastError instanceof OpenAiRequestError) {
-      throw new Error(lastError.message);
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(error.message);
     }
 
     throw new Error(
       "Summary generation failed after retries. Please try again in a moment.",
     );
   }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(content);
-  } catch {
-    throw new Error("OpenAI summary output was not valid JSON");
-  }
-
-  return normalizeModelOutput(parsed);
 }
 
 // Internal-only action for backend workflows (cron/jobs) to call later.
@@ -349,6 +245,13 @@ export const generateSummaryForDay = action({
       integrationData ?? [],
     );
 
+    const generationIdentity = (await ctx.runQuery(
+      (api as any).summaries.getSummaryGenerationIdentity,
+      {},
+    )) as {
+      userId: string;
+    };
+
     await ctx.runMutation(
       (api as any).summaries.reserveSummaryGenerationSlot,
       {},
@@ -384,7 +287,49 @@ export const generateSummaryForDay = action({
       },
     });
 
-    const generated = await generateSummaryWithOpenAi(args.dayKey, modelInput);
+    let generated:
+      | {
+          story: string;
+          highlights: string[];
+          metrics?: {
+            steps?: number;
+            sleepMinutes?: number;
+            screenTimeMinutes?: number;
+            spendingTotal?: number;
+          };
+          sourcesUsed: string[];
+        }
+      | undefined;
+
+    try {
+      generated = await generateSummaryWithOpenAi(args.dayKey, modelInput);
+    } catch (error) {
+      try {
+        await ctx.runMutation(
+          (internal as any).summaryQuality
+            .recordSummaryGenerationEvaluationInternal,
+          {
+            userId: generationIdentity.userId,
+            dayKey: args.dayKey,
+            modelProvider: "openai",
+            modelName: "gpt-4o",
+            modelInput,
+            success: false,
+            failureReason:
+              error instanceof Error
+                ? error.message
+                : "Summary generation failed",
+          },
+        );
+      } catch (qualityLoggingError) {
+        console.warn(
+          "[summaryGeneration] Failed to log summary quality failure",
+          qualityLoggingError,
+        );
+      }
+
+      throw error;
+    }
 
     const mergedMetrics = {
       steps:
@@ -418,6 +363,30 @@ export const generateSummaryForDay = action({
       metrics: hasMergedMetrics ? mergedMetrics : undefined,
       sourcesUsed: mergedSourcesUsed,
     })) as { _id?: string; generatedAt?: number } | null;
+
+    try {
+      await ctx.runMutation(
+        (internal as any).summaryQuality
+          .recordSummaryGenerationEvaluationInternal,
+        {
+          userId: generationIdentity.userId,
+          dayKey: args.dayKey,
+          modelProvider: "openai",
+          modelName: "gpt-4o",
+          modelInput,
+          success: true,
+          generatedStory: generated.story,
+          generatedHighlights: generated.highlights,
+          sourcesUsed: mergedSourcesUsed,
+          summaryId: saved?._id,
+        },
+      );
+    } catch (qualityLoggingError) {
+      console.warn(
+        "[summaryGeneration] Failed to log summary quality evaluation",
+        qualityLoggingError,
+      );
+    }
 
     return {
       success: true,

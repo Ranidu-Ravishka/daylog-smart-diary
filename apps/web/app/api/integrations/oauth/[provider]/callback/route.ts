@@ -1,0 +1,232 @@
+import { ConvexHttpClient } from "convex/browser";
+import { auth } from "@clerk/nextjs/server";
+import { NextRequest, NextResponse } from "next/server";
+import { api } from "@repo/backend/convex";
+import {
+  getAppBaseUrl,
+  getOAuthProviderConfig,
+  isOAuthProvider,
+  safeReturnPath,
+} from "@/lib/integrations-oauth";
+
+const OAUTH_COOKIE_PREFIX = "daylog_oauth_state_";
+
+type OAuthStateCookiePayload = {
+  state: string;
+  userId: string;
+  provider: string;
+  returnPath: string;
+};
+
+export const runtime = "nodejs";
+
+function rejectOAuthCallback(
+  oauthCookieName: string,
+  status: 400 | 403 | 502,
+  message = "OAuth callback rejected.",
+) {
+  const response = NextResponse.json(
+    {
+      error: message,
+    },
+    {
+      status,
+    },
+  );
+
+  response.cookies.delete(oauthCookieName);
+  return response;
+}
+
+function buildSettingsRedirect(
+  request: NextRequest,
+  provider: string,
+  status: "success" | "error",
+  message: string,
+  returnPath?: string,
+) {
+  const appBaseUrl = getAppBaseUrl(request.nextUrl.origin);
+  const safePath = safeReturnPath(returnPath ?? "/dashboard/settings");
+  const destination = new URL(`${appBaseUrl}${safePath}`);
+  destination.searchParams.set("integrationProvider", provider);
+  destination.searchParams.set("integrationStatus", status);
+  destination.searchParams.set("integrationMessage", message);
+  return destination;
+}
+
+async function exchangeCodeForAccessToken(
+  provider: "google_calendar" | "google_fit" | "spotify",
+  code: string,
+  redirectUri: string,
+): Promise<{
+  accessToken: string;
+  refreshToken?: string;
+  accessTokenExpiresAt?: number;
+  grantedScope: string[];
+}> {
+  const config = getOAuthProviderConfig(provider);
+
+  const body = new URLSearchParams();
+  body.set("grant_type", "authorization_code");
+  body.set("code", code);
+  body.set("redirect_uri", redirectUri);
+  body.set("client_id", config.clientId);
+  body.set("client_secret", config.clientSecret);
+
+  const response = await fetch(config.tokenUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: body.toString(),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `OAuth token exchange failed with status ${response.status}`,
+    );
+  }
+
+  const tokenPayload = (await response.json()) as {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+    scope?: string;
+  };
+
+  if (!tokenPayload.access_token) {
+    throw new Error("OAuth token exchange returned no access token");
+  }
+
+  const expiresInSeconds =
+    typeof tokenPayload.expires_in === "number" &&
+    Number.isFinite(tokenPayload.expires_in) &&
+    tokenPayload.expires_in > 0
+      ? tokenPayload.expires_in
+      : undefined;
+
+  return {
+    accessToken: tokenPayload.access_token,
+    refreshToken:
+      typeof tokenPayload.refresh_token === "string" &&
+      tokenPayload.refresh_token.trim().length > 0
+        ? tokenPayload.refresh_token
+        : undefined,
+    accessTokenExpiresAt: expiresInSeconds
+      ? Date.now() + expiresInSeconds * 1000
+      : undefined,
+    grantedScope: tokenPayload.scope
+      ? tokenPayload.scope.split(" ").filter(Boolean)
+      : config.scopes,
+  };
+}
+
+export async function GET(
+  request: NextRequest,
+  context: { params: Promise<{ provider: string }> },
+) {
+  const params = await context.params;
+  const provider = params.provider;
+
+  if (!isOAuthProvider(provider)) {
+    return NextResponse.json(
+      { error: "Unsupported OAuth provider" },
+      { status: 400 },
+    );
+  }
+
+  const oauthCookieName = `${OAUTH_COOKIE_PREFIX}${provider}`;
+  const encodedStateCookie = request.cookies.get(oauthCookieName)?.value;
+  let statePayload: OAuthStateCookiePayload | null = null;
+
+  if (encodedStateCookie) {
+    try {
+      statePayload = JSON.parse(
+        Buffer.from(encodedStateCookie, "base64url").toString("utf8"),
+      ) as OAuthStateCookiePayload;
+    } catch {
+      statePayload = null;
+    }
+  }
+
+  const nextState = request.nextUrl.searchParams.get("state");
+  const code = request.nextUrl.searchParams.get("code");
+  const providerError = request.nextUrl.searchParams.get("error");
+
+  if (providerError) {
+    return rejectOAuthCallback(
+      oauthCookieName,
+      400,
+      "OAuth authorization was denied.",
+    );
+  }
+
+  if (
+    !statePayload ||
+    !nextState ||
+    statePayload.state !== nextState ||
+    !code
+  ) {
+    return rejectOAuthCallback(oauthCookieName, 400);
+  }
+
+  const { userId, getToken } = await auth();
+  if (!userId || userId !== statePayload.userId) {
+    return rejectOAuthCallback(oauthCookieName, 403);
+  }
+
+  const config = getOAuthProviderConfig(provider);
+  if (!config.clientId || !config.clientSecret) {
+    return NextResponse.redirect(
+      buildSettingsRedirect(
+        request,
+        provider,
+        "error",
+        "OAuth credentials are not configured on the server.",
+        statePayload.returnPath,
+      ),
+    );
+  }
+
+  try {
+    const appBaseUrl = getAppBaseUrl(request.nextUrl.origin);
+    const callbackUrl = `${appBaseUrl}/api/integrations/oauth/${provider}/callback`;
+    const { accessToken, refreshToken, accessTokenExpiresAt, grantedScope } =
+      await exchangeCodeForAccessToken(provider, code, callbackUrl);
+
+    const convexToken = await getToken({ template: "convex" });
+    if (!convexToken) {
+      throw new Error("Missing Convex auth token for OAuth callback");
+    }
+
+    const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+    if (!convexUrl) {
+      throw new Error("Missing NEXT_PUBLIC_CONVEX_URL");
+    }
+
+    const convex = new ConvexHttpClient(convexUrl);
+    convex.setAuth(convexToken);
+
+    await convex.mutation(api.integrations.connectIntegration, {
+      provider,
+      scopes: grantedScope,
+      accessToken,
+      refreshToken,
+      accessTokenExpiresAt,
+    });
+
+    const successRedirect = buildSettingsRedirect(
+      request,
+      provider,
+      "success",
+      "Integration connected successfully.",
+      statePayload.returnPath,
+    );
+
+    const response = NextResponse.redirect(successRedirect);
+    response.cookies.delete(oauthCookieName);
+    return response;
+  } catch {
+    return rejectOAuthCallback(oauthCookieName, 502, "OAuth callback failed.");
+  }
+}

@@ -13,6 +13,17 @@ pnpm --filter @repo/backend lint
 pnpm --filter @repo/backend test:run
 ```
 
+## Backend CI gate
+
+The canonical `backend-validation` CI check executes:
+
+```bash
+pnpm --filter @repo/backend lint
+pnpm --filter @repo/backend test:run
+```
+
+Keep these commands green locally before opening a PR with backend changes.
+
 ## Backend structure
 
 - Convex functions: `packages/backend/convex/*.ts`
@@ -25,10 +36,18 @@ pnpm --filter @repo/backend test:run
 - `CLERK_JWT_ISSUER_DOMAIN`
 - `CLERK_WEBHOOK_SECRET`
 - `OPENAI_API_KEY`
+- `SUMMARY_DAILY_GENERATION_LIMIT`
 
 Optional:
 
 - `ADMIN_BOOTSTRAP_CLERK_USER_IDS`
+- `RETENTION_MEMORIES_DAYS`
+- `RETENTION_DAY_SUMMARIES_DAYS`
+- `RETENTION_INTEGRATION_DATA_DAYS`
+- `RETENTION_LOCATION_SIGNALS_DAYS`
+- `RETENTION_SUMMARY_EVENTS_DAYS`
+- `RETENTION_DELETE_BATCH_SIZE`
+- `SUMMARY_LOW_QUALITY_THRESHOLD`
 
 ## Admin bootstrap (Clerk)
 
@@ -69,3 +88,33 @@ dashboard environment settings and restart `convex dev`.
 - Supported providers currently include `google_calendar`, `google_fit`, `spotify`, `apple_health`.
 - Provider daily sync data is normalized into `integrationDailyData`.
 - Summary generation consumes integration daily data as additional model context.
+
+## Integration secret encryption operations
+
+- Encryption status audit (no secret values returned): `integrations:adminAuditIntegrationSecretsEncryptionStatus`
+- Full migration sweep (paginated, resumable): `integrations:adminMigrateLegacyIntegrationSecretsAll`
+- Single-page migration (manual paging): `integrations:adminMigrateLegacyIntegrationSecretsPage`
+
+Production readiness target for secrets at rest:
+
+- `legacyPlaintextRows = 0`
+- `missingEncryptedAccessRows = 0`
+
+## Maturity layer modules
+
+- Integration provider adapters: `packages/backend/convex/providerAdapters.ts`
+- Integration health snapshots/events: `packages/backend/convex/integrationHealth.ts`
+- Retention policies + cleanup jobs: `packages/backend/convex/retention.ts`
+- Summary quality harness: `packages/backend/convex/summaryQuality.ts`
+- Scheduled cleanup registration: `packages/backend/convex/crons.ts`
+
+### Retention operations
+
+- Scheduled cleanup: every 6 hours via `retention:runScheduledRetentionCleanupInternal`.
+- Manual admin trigger: `retention:runRetentionCleanupNow`.
+- Admin policy override: `retention:upsertRetentionPolicy`.
+
+### Summary quality operations
+
+- Automatic generation logging + scoring is wired into `summaryGeneration:generateSummaryForDay`.
+- Admin backlog evaluation for historical data: `summaryQuality:backfillSummaryQualityEvaluations`.
