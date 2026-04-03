@@ -2,7 +2,12 @@
   "name": "@repo/backend",
   "private": true,
   "version": "0.0.0",
+  "types": "./index.ts",
   "exports": {
+    ".": {
+      "types": "./index.ts",
+      "default": "./index.ts"
+    },
     "./convex": "./convex/_generated/api.js",
     "./convex/*": "./convex/_generated/*"
   },

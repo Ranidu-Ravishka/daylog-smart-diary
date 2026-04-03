@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Image from "next/image";
-import type { Id } from "../../../packages/backend/convex/_generated/dataModel";
+import type { Id } from "@repo/backend";
 import { EllipsisVertical, Trash, Edit } from "lucide-react";
 import { MOOD_EMOJI } from "@repo/ui/lib/constants";
 import { Card, CardContent } from "@/components/ui/card";
