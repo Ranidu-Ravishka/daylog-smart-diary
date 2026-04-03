@@ -1,29 +1,43 @@
 # DayLog Deep Technical Review (Senior Engineering Pass)
 
-Last updated: 2026-03-30
+Last updated: 2026-04-03
 
 ## Executive Summary (Leadership Readout)
 
-DayLog has evolved from a multi-app bootstrap into a functionally complete cross-platform journaling system with shared backend contracts, production-grade auth integration, AI summary generation, and contextual integrations (calendar/fitness/music/location/health). The overall architecture direction is strong and scalable in shape, but there are targeted implementation risks that should be resolved before high-growth usage.
+DayLog has evolved from a multi-app bootstrap into a functionally complete cross-platform journaling system with shared backend contracts, production-grade auth integration, AI summary generation, and contextual integrations (calendar/fitness/music/location/health). The architecture direction is strong, and many previously identified high risks have been fixed. A strict evidence-based final production gate audit was re-run on 2026-04-03.
+
+Final production-readiness gate (2026-04-03): **NOT READY**.
+
+Section verdict count:
+
+- PASS: 1, 2, 5, 6, 9
+- FAIL: 3, 4, 7, 8
+
+Blocking issues to clear before READY:
+
+1. Backend coverage gate is mis-scoped (it currently measures behavior tests/harness rather than backend source modules).
+2. No repository-level proof/migration sweep for legacy non-opaque integration `tokenRef` values in `integrations` rows.
+3. Cross-package boundary violations exist in web components via deep relative imports into backend generated paths.
+4. Live GitHub branch-protection required-check configuration remains externally unverified from repository code alone.
 
 Current maturity snapshot:
 
 1. **Core product loop is shipped** across web and mobile: memory capture, day metadata, and summary rendering.
-2. **Admin control plane is broad** (CRUD, audit surfaces, role gates), but has a few query-performance/correctness concerns.
-3. **Integration subsystem is thoughtfully designed** (provider allowlists, token refs, sync-run idempotency), but secret-at-rest hardening remains a priority.
-4. **Operational posture is improving** (strict env validation + CI validation + secret scan) with a single canonical CI gate (`backend-validation`).
-5. **Testing depth lags feature depth**, especially for highest-risk backend behavior.
+2. **Admin control plane is broad and mostly hardened**: indexed paginated audit logs and summary-backed dashboard health cards are in place.
+3. **Integration subsystem is mature in design** (provider allowlists, token refs, sync-run idempotency, envelope encryption), but migration assurance remains incomplete.
+4. **Operational posture is stronger** (strict env validation + CI validation + secret scan) with a single canonical CI gate (`backend-validation`).
+5. **Behavioral testing has expanded materially**, but coverage gate scope still reduces confidence in source-level risk detection.
 
 Executive risk ranking (highest first):
 
-1. Audit-log filtered pagination correctness risk.
-2. Admin dashboard full-table scan scalability risk.
-3. Plaintext integration token storage risk.
-4. Backend behavior-test coverage risk.
+1. Coverage gate mis-scoping risk.
+2. Legacy non-opaque integration tokenRef migration/proof risk.
+3. Cross-package boundary hygiene risk.
+4. External branch-protection verification risk.
 
 Recommended near-term objective:
 
-- Complete a 2-6 week hardening cycle focused on correctness, performance baselines, security uplift, and deterministic backend behavior tests, without broad product-surface expansion.
+- Complete a focused production hardening sprint to clear the four gate blockers above, then re-run the final production audit and close with evidence.
 
 ## 1) Purpose
 
@@ -54,26 +68,24 @@ Evidence model:
 
 ## Program Status Matrix (Current Snapshot)
 
-| Area                            | Current State          | Implementation Depth | Confidence  | Primary Risk | Next Gate                                      |
-| ------------------------------- | ---------------------- | -------------------- | ----------- | ------------ | ---------------------------------------------- |
-| Monorepo foundation             | Stable                 | High                 | High        | Low          | Keep config drift low across packages          |
-| Backend schema/domain model     | Stable                 | High                 | High        | Low          | Maintain schema/index discipline with growth   |
-| Auth + authorization boundaries | Stable                 | High                 | High        | Medium       | Add more negative-path tests for authz         |
-| Web dashboard core flow         | Shipped                | High                 | High        | Medium       | Continued UX and resilience polish             |
-| Mobile core flow                | Shipped                | High                 | Medium-High | Medium       | Device-level regression matrix for services    |
-| Admin CRUD surface              | Shipped                | High                 | Medium      | Medium       | Query performance and pagination correctness   |
-| Audit log review flow           | Partially robust       | Medium               | Medium      | High         | Fix cursor/filter semantics                    |
-| AI summary generation           | Shipped                | Medium-High          | Medium-High | Medium       | Add quality-eval + failure-path tests          |
-| Integration sync architecture   | Strong direction       | High                 | Medium-High | Medium       | Harden token security + provider observability |
-| Data export/privacy controls    | Shipped                | Medium-High          | Medium-High | Low-Medium   | Clarify retention and location policy          |
-| CI and release gates            | Stable                 | Medium-High          | Medium-High | Low-Medium   | Maintain canonical `backend-validation` policy |
-| Backend automated tests         | Underpowered for scope | Low-Medium           | Medium      | High         | Restore behavior tests for critical flows      |
+- Monorepo foundation: Stable, high depth/high confidence, low risk. Next gate: keep config drift low across packages.
+- Backend schema/domain model: Stable, high depth/high confidence, low risk. Next gate: maintain schema/index discipline with growth.
+- Auth and authorization boundaries: Stable, high depth/high confidence, low-medium risk. Next gate: keep negative-path authz tests expanding.
+- Web dashboard core flow: Shipped, high depth/high confidence, medium risk. Next gate: continue UX and resilience polish.
+- Mobile core flow: Shipped, high depth/medium-high confidence, medium risk. Next gate: maintain device-level regression matrix for services.
+- Admin CRUD surface: Shipped, high depth/medium-high confidence, medium risk. Next gate: remove remaining top-200 helper usage drift.
+- Audit log review flow: Hardened, high depth/high confidence, low risk. Next gate: maintain continuity tests with index changes.
+- AI summary generation: Shipped, medium-high depth/medium-high confidence, medium risk. Next gate: continue quality evaluation calibration.
+- Integration sync architecture: Strong direction, high depth/medium-high confidence, medium-high risk. Next gate: prove non-opaque tokenRef migration completion.
+- Data export/privacy controls: Shipped, medium-high depth/medium-high confidence, low-medium risk. Next gate: maintain privacy-default export behavior.
+- CI and release gates: Mostly aligned, medium-high depth/medium confidence, medium risk. Next gate: verify live branch protection configuration.
+- Backend automated tests: Broad behavior suite, medium-high depth/medium confidence, high risk. Next gate: fix source coverage gating scope.
 
 Interpretation:
 
 - Platform architecture is in a good state.
 - Product surface is broad enough for user validation.
-- Next maturity gains come mostly from hardening, not feature count.
+- Remaining production gate risk is concentrated in verification/governance gaps rather than missing product capabilities.
 
 ## 3) Evolution Timeline (Beginning -> Current)
 
@@ -195,11 +207,11 @@ Key architecture patterns:
 - per-user/provider/day sync-run idempotency state in `integrationSyncRuns`,
 - normalized daily context rows in `integrationDailyData`.
 
-This is a mature integration architecture direction, with clear extension points for new providers.
+This remains a strong integration architecture direction, with clear extension points for new providers.
 
 #### 4.2.5 Admin backend surface
 
-- Admin dashboard metrics query.
+- Admin dashboard metrics query and operational cards.
 - Admin CRUD endpoints per major domain entity.
 - Audit log read/write operations.
 - Paginated queries exist for large entities.
@@ -285,75 +297,44 @@ Notable mobile strength:
 2. **Good authz discipline** (user/admin/ownership helper model is explicit and repeatable).
 3. **Integration reliability patterns are mature** (allowlists, refresh logic, idempotency state).
 4. **AI summary pipeline is governed** (quota and retries, not just raw model calls).
-5. **Privacy-aware export controls** (optional location inclusion) are a good product trust decision.
-6. **Operational quality improved** with stricter env validation and CI secret scanning.
+5. **Privacy-aware export controls** (optional location inclusion) are a strong trust design choice.
+6. **Operational quality improved** with stricter env validation and CI security checks.
 
 ## 7) Findings: Risks, Inconsistencies, and Debt
 
 ### 7.1 High severity
 
-#### Finding H1: Audit log pagination can omit valid rows under filters
+#### Finding H1: Backend coverage gate is mis-scoped
 
-- Current behavior paginates first then applies action/time filters in memory.
-- This can drop records across page boundaries because cursor progression is done on unfiltered set.
-
-Impact:
-
-- Incomplete or misleading audit review results for admins.
-
-Recommendation:
-
-- Move filter conditions into index-constrained query paths where possible.
-- Add additional indexes for high-value filter combinations.
-- Add regression tests for filtered cursor continuity.
-
-#### Finding H2: Admin dashboard metrics perform full table collects
-
-- Dashboard counts are built via `collect()` on major tables.
-- As data grows, this becomes an O(N) hot path for an always-visible screen.
+- Coverage thresholds are configured at 80%, but coverage `include` targets behavior test files plus the in-memory harness rather than backend source modules.
 
 Impact:
 
-- Higher latency, more memory pressure, eventual dashboard instability at scale.
+- CI can report strong coverage while source-level regressions remain under-detected.
 
 Recommendation:
 
-- Introduce incrementally maintained counters/materialized metrics.
-- Or split counts into targeted indexed count flows where feasible.
+- Re-scope coverage `include` to backend source modules (`convex/**/*.ts`) and exclude tests/generated files.
+- Rebaseline and keep thresholds enforced in CI after source-level coverage is measured.
+
+#### Finding H2: Missing migration proof for legacy non-opaque integration tokenRef values
+
+- Integration secrets encryption and migration helpers exist, but there is no repository-level audit proving all `integrations.tokenRef` values are opaque references.
+
+Impact:
+
+- Legacy direct-token rows can persist unnoticed, weakening secrets-at-rest assurance.
+
+Recommendation:
+
+- Add admin audit + migration functions for `integrations` rows with non-opaque `tokenRef` values.
+- Add runbook steps and release evidence requirements to show zero remaining legacy rows.
 
 ### 7.2 Medium severity
 
-#### Finding M1: Integration secrets are server-side but not application-encrypted
+#### Finding M1: Cross-package type import boundaries are brittle in web
 
-- Tokens are in dedicated secrets table, which is good boundary design.
-- They are still stored as plaintext fields in DB records.
-
-Impact:
-
-- DB compromise yields immediately usable provider tokens.
-
-Recommendation:
-
-- Add application-layer envelope encryption (KMS/key rotation compatible).
-- Keep current `tokenRef` addressing model.
-
-#### Finding M2: Test coverage does not match backend complexity
-
-- Current visible backend tests are provider parsing + validators unit tests.
-- High-risk flows (summary generation, integration sync idempotency, authz boundaries, admin query correctness) need behavior tests.
-
-Impact:
-
-- Regression risk is concentrated in the most business-critical modules.
-
-Recommendation:
-
-- Reintroduce handler-level behavior tests with deterministic harnesses.
-- Gate on core-flow test suites in CI.
-
-#### Finding M3: Cross-package type import boundaries are brittle in web
-
-- Some web components import generated backend model types via deep relative path.
+- Some web components import generated backend model types via deep relative paths.
 
 Impact:
 
@@ -363,19 +344,26 @@ Recommendation:
 
 - Re-export needed types from package entry points and consume through alias imports only.
 
-### 7.3 Low severity
+#### Finding M2: Branch-protection required checks are not verifiable from repository code
 
-#### Finding L1: CI naming canonicalized
-
-- CI workflow and docs now use a single canonical required check name: `backend-validation`.
+- CI/docs are aligned on `backend-validation`, but live GitHub branch rule state is external and was not API-verified in this review.
 
 Impact:
 
-- Branch protection setup and release checklists are now unambiguous.
+- Production readiness cannot be closed with full evidence without branch-rule verification.
 
 Recommendation:
 
-- Keep branch protection required checks pinned only to `backend-validation`.
+- Add explicit release checklist evidence: screenshot/API output of required checks for `main`.
+- Optionally add automated policy checks (GitHub API script) in release workflow.
+
+### 7.3 Closed since prior review
+
+The following previously high-risk issues are now closed by implementation and test evidence:
+
+1. Audit log filtered pagination correctness.
+2. Admin dashboard full-table collect hot path risk.
+3. OAuth abuse-path test coverage (tampered state, replay, user mismatch, malformed payloads).
 
 ## 8) Security and Compliance Posture Snapshot
 
@@ -383,97 +371,113 @@ Current positives:
 
 - Required env validation for critical backend/admin secrets.
 - Clerk webhook signature verification.
-- CI secret-scan gate in feature workflow.
+- CI secret-scan gate.
 - Admin middleware gate + signed admin-cache cookie strategy.
+- Integration secret envelope encryption with keyring + active key id controls.
+- Privacy-first export default excluding location signals unless explicitly enabled.
 
 Security backlog to prioritize:
 
-1. Token encryption at application level.
-2. Formalized security tests for OAuth callback abuse cases (state mismatch, replay, wrong user, malformed return path).
-3. Audit logging coverage verification for all admin mutating paths.
+1. Close legacy non-opaque `tokenRef` migration proof gap.
+2. Enforce source-level backend coverage in CI.
+3. Add lint guardrails for package-boundary imports.
+4. Add branch-protection verification evidence to release readiness checklist.
 
 ## 9) Testing and Quality Status
 
 Current:
 
-- Backend lint/test steps exist in CI.
-- Mobile validation includes typecheck/lint/build:ci.
+- Backend behavior suites are present for auth, audit logs, summaries, integrations, and in-memory harness behavior.
+- Web OAuth abuse suite is present and passing.
+- CI/local validation commands passed in this review window:
+  - `pnpm --filter @repo/backend lint`
+  - `pnpm --filter @repo/backend test:run`
+  - `pnpm --filter admin build`
+  - `pnpm --filter web test:oauth-abuse`
+  - `pnpm lint`
+  - `pnpm typecheck`
 
 Gap:
 
-- Current backend tests are narrow for present feature depth.
+- Backend coverage gate currently does not measure backend source modules directly.
+- No dedicated behavior tests yet for `integrations` non-opaque tokenRef audit/migration flows.
 
 Recommended minimal high-value test suites:
 
-1. Summary generation quota enforcement and failure/retry behavior.
-2. Integration sync idempotency and refresh-token update paths.
-3. Audit log pagination/filter correctness.
-4. Authz negative-path tests (forbidden/unauthorized) on core handlers.
-5. OAuth callback state/user mismatch hard-fail tests.
+1. Source-level coverage enforcement for backend Convex modules.
+2. Behavior tests for non-opaque tokenRef migration/audit utilities.
+3. Contract tests for package-boundary type exports consumed by web/mobile/admin.
 
 ## 10) Delivery Plan (Prioritized)
 
-### 0-2 weeks (stability + correctness)
+### 0-2 weeks (production gate closure)
 
-1. Fix audit log filter/pagination correctness.
-2. Keep CI required-check naming pinned to `backend-validation`.
-3. Add focused behavior tests for summaries + integrations + audit logs.
+1. Re-scope backend coverage gate to source modules and rebaseline thresholds.
+2. Add and run admin audit/migration for non-opaque `integrations.tokenRef` rows.
+3. Replace deep relative backend type imports in web with package exports.
+4. Capture branch-protection required-check evidence for `main`.
 
-### 2-6 weeks (scale + security)
+### 2-6 weeks (hardening and automation)
 
-1. Replace collect-based admin dashboard metrics with scalable counters.
-2. Add token encryption migration path for `integrationSecrets`.
-3. Harden OAuth callback tests and observability events.
-
-### 6-12 weeks (platform maturity)
-
-1. Add full provider health dashboard/alerts (sync error rates, stale syncs).
-2. Introduce data retention and lifecycle policy docs (especially for location signals).
-3. Expand integration provider SDK abstraction for easier provider onboarding.
+1. Add automated branch-policy verification script to release process.
+2. Add lint rules preventing cross-package deep relative imports.
+3. Expand integration migration tests and release runbook checks.
 
 ## Action Tickets (Owner + Effort + Outcome)
 
 The following backlog translates this review into execution-ready engineering tickets.
 
-### Priority P0 (Correctness and risk containment)
+### Priority P0 (Gate blockers)
 
-| Ticket | Title                                                   | Owner      | Effort | Outcome                                | Acceptance Criteria                                                                           |
-| ------ | ------------------------------------------------------- | ---------- | ------ | -------------------------------------- | --------------------------------------------------------------------------------------------- |
-| P0-01  | Fix audit-log filtered pagination semantics             | Backend    | M      | Correct admin audit visibility         | Date/action filters are query-level where possible; cursor pages do not skip matching records |
-| P0-02  | Add regression tests for audit log pagination/filtering | Backend QA | S-M    | Prevent future correctness regressions | Tests prove stable ordering and complete coverage across multi-page filtered queries          |
-| P0-03  | Align CI/check naming across docs and branch protection | DevEx      | S      | Remove operational ambiguity           | README, workflow doc, deploy runbook, and branch rule names are identical                     |
-| P0-04  | Re-establish backend behavior test baseline             | Backend    | M      | Raise confidence in critical flows     | Tests cover summaries, integrations idempotency, authz negative paths, and key admin queries  |
+1. P0-01: Re-scope backend coverage gate to source modules.
+   Owner: Backend + DevEx.
+   Effort: S-M.
+   Outcome: Trustworthy CI quality signal.
+   Acceptance criteria: Coverage include points to backend source files; thresholds enforced and green.
+2. P0-02: Audit and migrate non-opaque integrations tokenRef.
+   Owner: Backend + Security.
+   Effort: M.
+   Outcome: Secrets-at-rest assurance closure.
+   Acceptance criteria: Audit shows zero non-opaque rows after migration; runbook contains evidence steps.
+3. P0-03: Fix web deep relative backend type imports.
+   Owner: Web + Backend.
+   Effort: S.
+   Outcome: Stable package boundaries.
+   Acceptance criteria: No imports from `../../../packages/backend/**` remain in app code.
+4. P0-04: Verify branch protection required checks.
+   Owner: DevEx + Release.
+   Effort: S.
+   Outcome: Production gate evidence completeness.
+   Acceptance criteria: `main` branch rule evidence shows required checks include only `backend-validation`.
 
-### Priority P1 (Performance and security hardening)
+### Priority P1 (Follow-on hardening)
 
-| Ticket | Title                                                                  | Owner              | Effort | Outcome                                 | Acceptance Criteria                                                                                   |
-| ------ | ---------------------------------------------------------------------- | ------------------ | ------ | --------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| P1-01  | Replace collect-based admin metrics with counters/materialized metrics | Backend            | M-L    | Predictable dashboard performance       | No full-table collect on admin dashboard path; latency baseline documented                            |
-| P1-02  | Add app-layer encryption for integration secrets                       | Security + Backend | L      | Token-compromise blast radius reduction | Access/refresh tokens encrypted at rest with managed key strategy and migration completed             |
-| P1-03  | Add OAuth callback abuse-path test suite                               | Security QA        | M      | Better auth-flow resilience             | State mismatch, user mismatch, malformed return paths, and replay attempts are hard-failed and tested |
-| P1-04  | Add integration sync observability contract                            | Backend + Ops      | M      | Faster production diagnosis             | Sync success/error rates and stale-run signals are queryable with basic alert thresholds              |
-
-### Priority P2 (Consistency and maintainability)
-
-| Ticket | Title                                                   | Owner                        | Effort | Outcome                                  | Acceptance Criteria                                                                     |
-| ------ | ------------------------------------------------------- | ---------------------------- | ------ | ---------------------------------------- | --------------------------------------------------------------------------------------- |
-| P2-01  | Remove deep relative backend type imports from web      | Web + Backend                | S-M    | Better package boundaries                | Web consumes backend types through package export surface only                          |
-| P2-02  | Standardize mobile auth screen theming primitives       | Mobile                       | S-M    | UI consistency and maintainability       | `forgot-password` shares tokenized theme approach used in sign-in/sign-up               |
-| P2-03  | Add retention policy for location-derived daily signals | Product + Security + Backend | M      | Privacy clarity and governance           | Documented retention + deletion behavior and corresponding backend policy controls      |
-| P2-04  | Build summary quality evaluation harness                | AI + Backend                 | M      | Measure summary output quality over time | Evaluation dataset + pass/fail rubric + trend report exists in CI or scheduled workflow |
+1. P1-01: Add lint rule for package-boundary import hygiene.
+   Owner: DevEx.
+   Effort: S.
+   Outcome: Prevent recurrence of boundary drift.
+   Acceptance criteria: CI fails on deep relative imports into sibling package internals.
+2. P1-02: Add migration behavior tests for legacy token paths.
+   Owner: Backend QA.
+   Effort: S-M.
+   Outcome: Regression safety for secrets uplift.
+   Acceptance criteria: Deterministic tests cover audit + migration + idempotent reruns.
+3. P1-03: Automate branch policy verification.
+   Owner: DevEx + Security.
+   Effort: M.
+   Outcome: Repeatable release governance checks.
+   Acceptance criteria: Scripted API check runs in release checklist and outputs pass/fail evidence.
 
 ### Suggested sequencing
 
-1. Execute all P0 tickets first (correctness and confidence).
-2. Parallelize P1-01 and P1-03 while P1-02 is being designed.
-3. Finish P2 tickets as part of the same hardening release train.
+1. Close all P0 tickets first and re-run final production gate.
+2. Execute P1 automation and anti-regression controls in the next hardening cycle.
 
 ### Suggested ownership model
 
-1. Backend lead owns P0-01, P0-02, P0-04, P1-01.
-2. Security lead co-owns P1-02, P1-03, P2-03.
-3. Mobile/web leads own P2-01 and P2-02 with backend support.
-4. AI/backend pair owns P2-04.
+1. Backend lead owns coverage gating and tokenRef migration deliverables.
+2. DevEx/release lead owns branch-protection verification evidence and automation.
+3. Web lead owns import-boundary remediations with backend support.
 
 ## 11) Architecture Decisions Worth Keeping
 
@@ -489,11 +493,11 @@ Keep these as long-term patterns:
 
 The next milestone should be considered complete when all are true:
 
-1. Audit logs filter/pagination returns consistent results across cursor pages.
-2. Admin metrics no longer rely on whole-table collect patterns.
-3. Integration secrets are encrypted at application layer.
-4. Core backend behavior test suites exist and are green in CI.
-5. Docs, CI job names, and branch protection checks are aligned.
+1. Backend source-level coverage gating is enforced in CI and passing.
+2. Integration token migration audit reports zero non-opaque `integrations.tokenRef` rows.
+3. Web package-boundary imports no longer reference backend internals via deep relative paths.
+4. Core backend and OAuth abuse behavior suites are green in CI.
+5. Branch protection evidence confirms required checks for `main` include only `backend-validation`.
 
 ## 13) Commit Milestones (Recent High-Signal Markers)
 
@@ -507,6 +511,7 @@ Selected timeline markers (chronological):
 - 2026-03-23: integration secrets + sync run tracking + preference sync + stabilization.
 - 2026-03-25: reminders/integrations OAuth + foreground location + health/screen-time.
 - 2026-03-28: provider validation centralization and validators tests.
+- 2026-04-03: final evidence-based production gate audit completed; status remains NOT READY pending four explicit blockers.
 
 ## 14) Quick Reference: Key Files by Concern
 

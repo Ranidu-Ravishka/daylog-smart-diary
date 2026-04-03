@@ -13,11 +13,26 @@ type GenericDoc = {
 };
 
 type TableName =
+  | "content"
   | "user"
+  | "userPreferences"
+  | "memories"
+  | "memoryMedia"
+  | "days"
   | "summaryGenerationQuotas"
   | "daySummaries"
   | "auditLogs"
+  | "integrations"
+  | "integrationSecrets"
+  | "integrationSyncRuns"
   | "integrationDailyData"
+  | "integrationProviderHealth"
+  | "integrationHealthEvents"
+  | "summaryGenerationEvents"
+  | "summaryQualityEvaluations"
+  | "dataRetentionPolicies"
+  | "dataRetentionRuns"
+  | "platformAuditEvents"
   | "adminDashboardMetrics";
 
 type SeedData = Partial<Record<TableName, GenericDoc[]>>;
@@ -28,14 +43,38 @@ type PaginationOpts = {
 };
 
 const INDEX_FIELDS: Record<TableName, Record<string, string[]>> = {
+  content: {
+    by_slug: ["slug"],
+  },
   user: {
     by_clerkUserId: ["clerkUserId"],
+    by_email: ["email"],
+  },
+  userPreferences: {
+    by_clerkUserId: ["clerkUserId"],
+    by_updatedAt: ["updatedAt"],
+  },
+  memories: {
+    by_user_day: ["userId", "dayKey"],
+    by_user_happenedAt: ["userId", "happenedAt"],
+    by_happenedAt: ["happenedAt"],
+    by_day_happenedAt: ["dayKey", "happenedAt"],
+  },
+  memoryMedia: {
+    by_memory: ["memoryId"],
+  },
+  days: {
+    by_user_day: ["userId", "dayKey"],
+    by_dayKey: ["dayKey"],
   },
   summaryGenerationQuotas: {
     by_user_day: ["userId", "quotaDayKey"],
   },
   daySummaries: {
     by_user_day: ["userId", "dayKey"],
+    by_user_generatedAt: ["userId", "generatedAt"],
+    by_generatedAt: ["generatedAt"],
+    by_day_generatedAt: ["dayKey", "generatedAt"],
   },
   auditLogs: {
     by_userId: ["actorUserId"],
@@ -44,9 +83,54 @@ const INDEX_FIELDS: Record<TableName, Record<string, string[]>> = {
     by_action_createdAt: ["action", "at"],
     by_userId_action_createdAt: ["actorUserId", "action", "at"],
   },
-  integrationDailyData: {
-    by_user_provider_day: ["userId", "provider", "dayKey"],
+  integrations: {
+    by_user_provider: ["userId", "provider"],
+    by_status: ["status"],
+    by_provider: ["provider"],
+    by_status_provider: ["status", "provider"],
   },
+  integrationSecrets: {
+    by_tokenRef: ["tokenRef"],
+    by_user_provider: ["userId", "provider"],
+  },
+  integrationSyncRuns: {
+    by_user_provider_day: ["userId", "provider", "dayKey"],
+    by_user_provider: ["userId", "provider"],
+    by_user_day_updatedAt: ["userId", "dayKey", "updatedAt"],
+  },
+  integrationDailyData: {
+    by_user_day: ["userId", "dayKey"],
+    by_user_provider_day: ["userId", "provider", "dayKey"],
+    by_user_provider: ["userId", "provider"],
+    by_syncedAt: ["syncedAt"],
+    by_provider_syncedAt: ["provider", "syncedAt"],
+  },
+  integrationProviderHealth: {
+    by_provider: ["provider"],
+    by_status_updatedAt: ["status", "updatedAt"],
+  },
+  integrationHealthEvents: {
+    by_provider_at: ["provider", "at"],
+    by_status_at: ["status", "at"],
+    by_outcome_at: ["outcome", "at"],
+  },
+  summaryGenerationEvents: {
+    by_createdAt: ["createdAt"],
+    by_success_createdAt: ["success", "createdAt"],
+  },
+  summaryQualityEvaluations: {
+    by_evaluatedAt: ["evaluatedAt"],
+    by_lowQuality_evaluatedAt: ["lowQuality", "evaluatedAt"],
+    by_generationEventId: ["generationEventId"],
+  },
+  dataRetentionPolicies: {
+    by_key: ["key"],
+  },
+  dataRetentionRuns: {
+    by_startedAt: ["startedAt"],
+    by_status_startedAt: ["status", "startedAt"],
+  },
+  platformAuditEvents: {},
   adminDashboardMetrics: {
     by_key: ["key"],
   },
@@ -271,11 +355,26 @@ export class InMemoryDb {
 
   constructor(seed?: SeedData) {
     this.tables = {
+      content: [...(seed?.content ?? [])],
       user: [...(seed?.user ?? [])],
+      userPreferences: [...(seed?.userPreferences ?? [])],
+      memories: [...(seed?.memories ?? [])],
+      memoryMedia: [...(seed?.memoryMedia ?? [])],
+      days: [...(seed?.days ?? [])],
       summaryGenerationQuotas: [...(seed?.summaryGenerationQuotas ?? [])],
       daySummaries: [...(seed?.daySummaries ?? [])],
       auditLogs: [...(seed?.auditLogs ?? [])],
+      integrations: [...(seed?.integrations ?? [])],
+      integrationSecrets: [...(seed?.integrationSecrets ?? [])],
+      integrationSyncRuns: [...(seed?.integrationSyncRuns ?? [])],
       integrationDailyData: [...(seed?.integrationDailyData ?? [])],
+      integrationProviderHealth: [...(seed?.integrationProviderHealth ?? [])],
+      integrationHealthEvents: [...(seed?.integrationHealthEvents ?? [])],
+      summaryGenerationEvents: [...(seed?.summaryGenerationEvents ?? [])],
+      summaryQualityEvaluations: [...(seed?.summaryQualityEvaluations ?? [])],
+      dataRetentionPolicies: [...(seed?.dataRetentionPolicies ?? [])],
+      dataRetentionRuns: [...(seed?.dataRetentionRuns ?? [])],
+      platformAuditEvents: [...(seed?.platformAuditEvents ?? [])],
       adminDashboardMetrics: [...(seed?.adminDashboardMetrics ?? [])],
     };
   }

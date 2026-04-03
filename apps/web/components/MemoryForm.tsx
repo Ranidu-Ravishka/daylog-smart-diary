@@ -5,7 +5,7 @@ import Image from "next/image";
 import { useMutation } from "convex/react";
 import { api } from "@repo/backend/convex";
 import { MOOD_EMOJI, MOODS } from "@repo/ui/lib/constants";
-import type { Id } from "../../../packages/backend/convex/_generated/dataModel";
+import type { Id } from "@repo/backend";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

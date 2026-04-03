@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint --max-warnings 0",
     "check-types": "next typegen && tsc --noEmit",
+    "check:boundaries": "node ./scripts/check-backend-boundary-imports.mjs",
     "test:oauth-abuse": "vitest run --config vitest.config.ts"
   },
   "dependencies": {

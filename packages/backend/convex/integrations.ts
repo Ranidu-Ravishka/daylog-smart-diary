@@ -5,6 +5,7 @@ import {
   internalMutation,
   internalQuery,
   type MutationCtx,
+  type QueryCtx,
   mutation,
   query,
 } from "./_generated/server";
@@ -54,6 +55,12 @@ const LEGACY_SECRETS_AUDIT_DEFAULT_PAGE_SIZE = 200;
 const LEGACY_SECRETS_AUDIT_MAX_PAGE_SIZE = 500;
 const LEGACY_SECRETS_AUDIT_DEFAULT_MAX_PAGES = 100;
 const LEGACY_SECRETS_AUDIT_MAX_PAGES = 2_000;
+const LEGACY_TOKEN_REF_AUDIT_DEFAULT_MAX_ROWS = 500;
+const LEGACY_TOKEN_REF_AUDIT_MAX_ROWS = 5_000;
+const LEGACY_TOKEN_REF_MIGRATION_AUDIT_ACTION =
+  "migrate_legacy_integration_token_ref";
+const OPAQUE_TOKEN_REF_DEFINITION =
+  'A tokenRef is opaque when it is a non-empty string prefixed with "tokref_" and does not store raw provider tokens.';
 
 class ProviderRequestError extends Error {
   status: number;
@@ -102,6 +109,49 @@ type IntegrationSecretRecord = {
   refreshToken?: string;
   accessTokenExpiresAt?: number;
   lastRefreshAt?: number;
+  createdAt?: number;
+  updatedAt?: number;
+};
+
+type IntegrationRecord = {
+  _id: Id<"integrations">;
+  userId: Id<"user">;
+  provider: string;
+  status: "connected" | "disconnected" | "error";
+  tokenRef?: string;
+};
+
+type LegacyIntegrationTokenRefAuditRow = {
+  integrationId: Id<"integrations">;
+  userId: Id<"user">;
+  provider: string;
+  status: "connected" | "disconnected" | "error";
+  tokenRefPreview: string;
+  tokenRefLength: number;
+};
+
+type LegacyIntegrationTokenRefAuditCounts = {
+  totalRows: number;
+  nonOpaqueCount: number;
+  opaqueCount: number;
+  missingTokenRefRows: number;
+  pagesScanned: number;
+  pageSize: number;
+  isDone: boolean;
+  continueCursor: string | null;
+  rows: LegacyIntegrationTokenRefAuditRow[];
+  rowsTruncated: boolean;
+};
+
+type LegacyIntegrationTokenRefMigrationCounts = {
+  migratedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  auditLogCount: number;
+  scannedRows: number;
+  nonOpaqueDetectedCount: number;
+  opaqueCount: number;
+  missingTokenRefRows: number;
 };
 
 type LegacySecretMigrationCounts = {
@@ -204,6 +254,13 @@ function normalizeAuditMaxPages(value: number | undefined): number {
   );
 }
 
+function normalizeAuditMaxRows(value: number | undefined): number {
+  return clampLimit(
+    value ?? LEGACY_TOKEN_REF_AUDIT_DEFAULT_MAX_ROWS,
+    LEGACY_TOKEN_REF_AUDIT_MAX_ROWS,
+  );
+}
+
 function getProviderOAuthCredentials(
   provider: OAuthRefreshProvider,
 ): ProviderOAuthCredentials {
@@ -233,12 +290,192 @@ function isOpaqueTokenRef(value: string): boolean {
   return value.startsWith(OPAQUE_TOKEN_REF_PREFIX);
 }
 
+function normalizeTokenRef(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const next = value.trim();
+  return next.length > 0 ? next : null;
+}
+
+function isLegacyNonOpaqueTokenRef(value: unknown): value is string {
+  const tokenRef = normalizeTokenRef(value);
+  return tokenRef !== null && !isOpaqueTokenRef(tokenRef);
+}
+
+function redactTokenRef(value: string): string {
+  if (value.length < 9) {
+    return "<redacted>";
+  }
+
+  return `${value.slice(0, 4)}...${value.slice(-4)}`;
+}
+
 function createOpaqueTokenRef(): string {
   const uuid =
     typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
       : `${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
   return `${OPAQUE_TOKEN_REF_PREFIX}${uuid}`;
+}
+
+async function scanLegacyIntegrationTokenRefs(
+  db: QueryCtx["db"] | MutationCtx["db"],
+  options: {
+    pageSize: number;
+    maxPages: number;
+    includeRows: boolean;
+    maxRows: number;
+  },
+): Promise<LegacyIntegrationTokenRefAuditCounts> {
+  let cursor: string | null = null;
+  let pagesScanned = 0;
+
+  let totalRows = 0;
+  let nonOpaqueCount = 0;
+  let opaqueCount = 0;
+  let missingTokenRefRows = 0;
+
+  const rows: LegacyIntegrationTokenRefAuditRow[] = [];
+
+  while (pagesScanned < options.maxPages) {
+    const page = await db.query("integrations").paginate({
+      numItems: options.pageSize,
+      cursor,
+    });
+
+    pagesScanned += 1;
+
+    for (const integration of page.page as IntegrationRecord[]) {
+      totalRows += 1;
+
+      const tokenRef = normalizeTokenRef(integration.tokenRef);
+      if (!tokenRef) {
+        missingTokenRefRows += 1;
+        continue;
+      }
+
+      if (isOpaqueTokenRef(tokenRef)) {
+        opaqueCount += 1;
+        continue;
+      }
+
+      nonOpaqueCount += 1;
+
+      if (options.includeRows && rows.length < options.maxRows) {
+        rows.push({
+          integrationId: integration._id,
+          userId: integration.userId,
+          provider: integration.provider,
+          status: integration.status,
+          tokenRefPreview: redactTokenRef(tokenRef),
+          tokenRefLength: tokenRef.length,
+        });
+      }
+    }
+
+    if (page.isDone) {
+      return {
+        totalRows,
+        nonOpaqueCount,
+        opaqueCount,
+        missingTokenRefRows,
+        pagesScanned,
+        pageSize: options.pageSize,
+        isDone: true,
+        continueCursor: null,
+        rows,
+        rowsTruncated: options.includeRows && rows.length < nonOpaqueCount,
+      };
+    }
+
+    cursor = page.continueCursor;
+    if (!cursor) break;
+  }
+
+  return {
+    totalRows,
+    nonOpaqueCount,
+    opaqueCount,
+    missingTokenRefRows,
+    pagesScanned,
+    pageSize: options.pageSize,
+    isDone: false,
+    continueCursor: cursor,
+    rows,
+    rowsTruncated: options.includeRows && rows.length < nonOpaqueCount,
+  };
+}
+
+async function findExistingOpaqueTokenRef(
+  db: MutationCtx["db"],
+  integration: IntegrationRecord,
+): Promise<string | undefined> {
+  const existingSecrets = (await db
+    .query("integrationSecrets")
+    .withIndex("by_user_provider", (q) =>
+      q.eq("userId", integration.userId).eq("provider", integration.provider),
+    )
+    .collect()) as IntegrationSecretRecord[];
+
+  let selected: IntegrationSecretRecord | undefined;
+
+  for (const secret of existingSecrets) {
+    if (!isOpaqueTokenRef(secret.tokenRef)) continue;
+
+    if (!selected) {
+      selected = secret;
+      continue;
+    }
+
+    const selectedTs = selected.updatedAt ?? selected.createdAt ?? 0;
+    const candidateTs = secret.updatedAt ?? secret.createdAt ?? 0;
+
+    if (candidateTs >= selectedTs) {
+      selected = secret;
+    }
+  }
+
+  return selected?.tokenRef;
+}
+
+async function migrateLegacyIntegrationTokenRef(
+  ctx: MutationCtx,
+  adminUserId: Id<"user">,
+  integration: IntegrationRecord,
+): Promise<"migrated" | "skipped"> {
+  const legacyTokenRef = normalizeTokenRef(integration.tokenRef);
+  if (!legacyTokenRef || isOpaqueTokenRef(legacyTokenRef)) {
+    return "skipped";
+  }
+
+  const provider = assertIntegrationProvider(integration.provider);
+  const existingTokenRef = await findExistingOpaqueTokenRef(
+    ctx.db,
+    integration,
+  );
+
+  const nextTokenRef = await upsertIntegrationSecret(ctx.db as never, {
+    userId: integration.userId,
+    provider,
+    accessToken: legacyTokenRef,
+    existingTokenRef,
+  });
+
+  await ctx.db.patch(integration._id, {
+    tokenRef: nextTokenRef,
+  });
+
+  await ctx.db.insert("auditLogs", {
+    actorUserId: adminUserId,
+    action: LEGACY_TOKEN_REF_MIGRATION_AUDIT_ACTION,
+    target: String(integration._id),
+    at: Date.now(),
+  });
+
+  await applyDashboardMetricsDelta(ctx.db, {
+    totalAuditLogs: 1,
+  });
+
+  return "migrated";
 }
 
 function isRetryableProviderStatus(status: number): boolean {
@@ -1702,6 +1939,205 @@ export async function syncMyIntegrationForDayImpl(
     throw error;
   }
 }
+
+// Runbook (legacy integrations.tokenRef migration):
+// 1) Audit candidates with adminAuditLegacyIntegrationTokenRefs.
+// 2) Execute migration with adminMigrateLegacyIntegrationTokenRefsAll.
+// 3) Verify completion with adminCountLegacyNonOpaqueIntegrationTokenRefs.
+// 4) A successful rollout ends with nonOpaqueCount === 0.
+type LegacyTokenRefAuditArgs = {
+  pageSize?: number;
+  maxPages?: number;
+  maxRows?: number;
+};
+
+type LegacyTokenRefCountArgs = {
+  pageSize?: number;
+  maxPages?: number;
+};
+
+export async function adminAuditLegacyIntegrationTokenRefsImpl(
+  ctx: QueryCtx,
+  args: LegacyTokenRefAuditArgs,
+) {
+  await requireAdmin(ctx as never);
+
+  const pageSize = normalizeAuditPageSize(args.pageSize);
+  const maxPages = normalizeAuditMaxPages(args.maxPages);
+  const maxRows = normalizeAuditMaxRows(args.maxRows);
+
+  const counts = await scanLegacyIntegrationTokenRefs(ctx.db, {
+    pageSize,
+    maxPages,
+    includeRows: true,
+    maxRows,
+  });
+
+  return {
+    ...counts,
+    maxRows,
+    opaqueTokenRefDefinition: OPAQUE_TOKEN_REF_DEFINITION,
+  };
+}
+
+export async function adminCountLegacyNonOpaqueIntegrationTokenRefsImpl(
+  ctx: QueryCtx,
+  args: LegacyTokenRefCountArgs,
+) {
+  await requireAdmin(ctx as never);
+
+  const pageSize = normalizeAuditPageSize(args.pageSize);
+  const maxPages = normalizeAuditMaxPages(args.maxPages);
+
+  const counts = await scanLegacyIntegrationTokenRefs(ctx.db, {
+    pageSize,
+    maxPages,
+    includeRows: false,
+    maxRows: 0,
+  });
+
+  return {
+    nonOpaqueCount: counts.nonOpaqueCount,
+    totalRows: counts.totalRows,
+    opaqueCount: counts.opaqueCount,
+    missingTokenRefRows: counts.missingTokenRefRows,
+    pagesScanned: counts.pagesScanned,
+    pageSize: counts.pageSize,
+    isDone: counts.isDone,
+    continueCursor: counts.continueCursor,
+    opaqueTokenRefDefinition: OPAQUE_TOKEN_REF_DEFINITION,
+  };
+}
+
+export async function adminMigrateLegacyIntegrationTokenRefsAllImpl(
+  ctx: MutationCtx,
+  args: LegacyTokenRefCountArgs,
+) {
+  const adminUser = await requireAdmin(ctx as never);
+
+  const pageSize = normalizeAuditPageSize(args.pageSize);
+  const maxPages = normalizeAuditMaxPages(args.maxPages);
+
+  let cursor: string | null = null;
+  let pagesScanned = 0;
+
+  const counts: LegacyIntegrationTokenRefMigrationCounts = {
+    migratedCount: 0,
+    skippedCount: 0,
+    failedCount: 0,
+    auditLogCount: 0,
+    scannedRows: 0,
+    nonOpaqueDetectedCount: 0,
+    opaqueCount: 0,
+    missingTokenRefRows: 0,
+  };
+
+  while (pagesScanned < maxPages) {
+    const page = await ctx.db.query("integrations").paginate({
+      numItems: pageSize,
+      cursor,
+    });
+
+    pagesScanned += 1;
+
+    for (const integration of page.page as IntegrationRecord[]) {
+      counts.scannedRows += 1;
+
+      if (isLegacyNonOpaqueTokenRef(integration.tokenRef)) {
+        counts.nonOpaqueDetectedCount += 1;
+
+        try {
+          const status = await migrateLegacyIntegrationTokenRef(
+            ctx,
+            adminUser._id,
+            integration,
+          );
+
+          if (status === "migrated") {
+            counts.migratedCount += 1;
+            counts.auditLogCount += 1;
+          } else {
+            counts.skippedCount += 1;
+          }
+        } catch {
+          counts.failedCount += 1;
+        }
+
+        continue;
+      }
+
+      const tokenRef = normalizeTokenRef(integration.tokenRef);
+      if (!tokenRef) {
+        counts.missingTokenRefRows += 1;
+      } else if (isOpaqueTokenRef(tokenRef)) {
+        counts.opaqueCount += 1;
+      }
+
+      counts.skippedCount += 1;
+    }
+
+    if (page.isDone) {
+      return {
+        ...counts,
+        pagesScanned,
+        pageSize,
+        isDone: true,
+        continueCursor: null,
+        opaqueTokenRefDefinition: OPAQUE_TOKEN_REF_DEFINITION,
+      };
+    }
+
+    cursor = page.continueCursor;
+    if (!cursor) break;
+  }
+
+  return {
+    ...counts,
+    pagesScanned,
+    pageSize,
+    isDone: false,
+    continueCursor: cursor,
+    opaqueTokenRefDefinition: OPAQUE_TOKEN_REF_DEFINITION,
+  };
+}
+
+export const adminAuditLegacyIntegrationTokenRefs = query({
+  args: {
+    pageSize: v.optional(v.number()),
+    maxPages: v.optional(v.number()),
+    maxRows: v.optional(v.number()),
+  },
+  handler: (ctx, args) =>
+    adminAuditLegacyIntegrationTokenRefsImpl(ctx, {
+      pageSize: args.pageSize,
+      maxPages: args.maxPages,
+      maxRows: args.maxRows,
+    }),
+});
+
+export const adminCountLegacyNonOpaqueIntegrationTokenRefs = query({
+  args: {
+    pageSize: v.optional(v.number()),
+    maxPages: v.optional(v.number()),
+  },
+  handler: (ctx, args) =>
+    adminCountLegacyNonOpaqueIntegrationTokenRefsImpl(ctx, {
+      pageSize: args.pageSize,
+      maxPages: args.maxPages,
+    }),
+});
+
+export const adminMigrateLegacyIntegrationTokenRefsAll = mutation({
+  args: {
+    pageSize: v.optional(v.number()),
+    maxPages: v.optional(v.number()),
+  },
+  handler: (ctx, args) =>
+    adminMigrateLegacyIntegrationTokenRefsAllImpl(ctx, {
+      pageSize: args.pageSize,
+      maxPages: args.maxPages,
+    }),
+});
 
 export const adminMigrateLegacyIntegrationSecretsPage = mutation({
   args: {

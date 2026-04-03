@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "@repo/backend/convex";
-import type { Id } from "../../../packages/backend/convex/_generated/dataModel";
+import type { Id } from "@repo/backend";
 import {
   Dialog,
   DialogContent,
