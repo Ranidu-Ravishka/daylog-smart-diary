@@ -147,6 +147,9 @@ jobs:
       - name: Backend tests
         run: pnpm --filter @repo/backend test:run
 
+      - name: Backend coverage gate
+        run: pnpm test:coverage:backend
+
       - name: Web OAuth abuse tests
         run: pnpm --filter web test:oauth-abuse
 

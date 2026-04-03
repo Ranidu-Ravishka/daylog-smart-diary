@@ -15,12 +15,19 @@
     "lint:mobile": "turbo run lint --filter=mobile",
     "lint:admin": "turbo run lint --filter=admin",
     "format": "prettier --write  \"**/*.{ts,tsx,md}\"",
-    "typecheck": "turbo run check-types"
+    "typecheck": "turbo run check-types",
+    "test:coverage:backend": "pnpm --filter @repo/backend test:coverage:backend"
   },
   "devDependencies": {
     "prettier": "^3.6.2",
     "turbo": "^2.6.1",
     "typescript": "5.9.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "@tailwindcss/oxide"
+    ]
   },
   "packageManager": "pnpm@10.29.3",
   "engines": {
