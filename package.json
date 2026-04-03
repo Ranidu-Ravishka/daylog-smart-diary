@@ -16,7 +16,8 @@
     "lint:admin": "turbo run lint --filter=admin",
     "format": "prettier --write  \"**/*.{ts,tsx,md}\"",
     "typecheck": "turbo run check-types",
-    "test:coverage:backend": "pnpm --filter @repo/backend test:coverage:backend"
+    "test:coverage:backend": "pnpm --filter @repo/backend test:coverage:backend",
+    "verify:branch-protection": "node scripts/verify-branch-protection.ts"
   },
   "devDependencies": {
     "prettier": "^3.6.2",

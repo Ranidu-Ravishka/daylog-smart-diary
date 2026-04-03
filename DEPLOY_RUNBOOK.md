@@ -48,6 +48,25 @@ Branch protection alignment (manual GitHub setting):
 3. Under required status checks, keep only `backend-validation`.
 4. Remove stale checks such as `Feature Branch CI / ci-checks`, `Feature Branch CI / Backend Tests`, and `Feature Branch CI / Mobile Validation` if present.
 
+Automated verification (recommended for release checks):
+
+1. Generate a GitHub token with permission to read branch protection rules (repository Administration read).
+2. Run from repo root:
+
+```bash
+GITHUB_TOKEN=<token> GITHUB_REPOSITORY=<owner>/<repo> pnpm verify:branch-protection
+```
+
+Optional flags:
+
+- `pnpm verify:branch-protection -- --repo <owner/repo>` to override `GITHUB_REPOSITORY`
+- `pnpm verify:branch-protection -- --branch <branch>` to verify non-default branches (defaults to `main`)
+
+Expected result:
+
+- `PASS` when required checks are exactly `backend-validation`
+- `FAIL` when checks are missing, extra checks exist, or API access fails
+
 ## 3) Pre-merge local checklist
 
 Run from repo root:
@@ -73,6 +92,10 @@ pnpm build:admin
 4. Merge to the deployment branch according to your release policy.
 5. Deploy web/admin from latest green commit.
 6. Publish/distribute mobile build as needed.
+
+Release checklist add-on:
+
+- Run `pnpm verify:branch-protection` before creating a release tag or cutover.
 
 ## 5) Post-deploy smoke checks
 
