@@ -33,6 +33,10 @@ See [CONVEX_SETUP.md](CONVEX_SETUP.md) for setup details and validation behavior
 
 CI workflow file: [.github/workflows/backend-validation.yml](.github/workflows/backend-validation.yml)
 
+Branch protection policy file (repo source of truth):
+
+- [.github/branch-protection.expected.json](.github/branch-protection.expected.json)
+
 Required checks:
 
 - `backend-validation`
@@ -40,6 +44,10 @@ Required checks:
 What each check enforces:
 
 - `backend-validation`: install, secret scan, repo lint, repo typecheck, selective web/admin builds, backend lint/tests, mobile typecheck/lint/build
+
+Additional CI guardrail job (not a branch protection required check):
+
+- `branch-protection-verification`: verifies `main` branch protection required checks against repository policy JSON
 
 Branch protection alignment (manual GitHub setting):
 
@@ -61,11 +69,17 @@ Optional flags:
 
 - `pnpm verify:branch-protection -- --repo <owner/repo>` to override `GITHUB_REPOSITORY`
 - `pnpm verify:branch-protection -- --branch <branch>` to verify non-default branches (defaults to `main`)
+- `pnpm verify:branch-protection -- --expected-file <path>` to override `.github/branch-protection.expected.json`
 
 Expected result:
 
-- `PASS` when required checks are exactly `backend-validation`
+- `PASS` when required checks exactly match expected policy JSON
 - `FAIL` when checks are missing, extra checks exist, or API access fails
+
+CI note:
+
+- Workflow job `branch-protection-verification` uses `secrets.BRANCH_PROTECTION_TOKEN` and runs on pull requests (non-forks) and on `main`.
+- Configure `BRANCH_PROTECTION_TOKEN` in repository secrets before enabling enforcement.
 
 ## 3) Pre-merge local checklist
 
