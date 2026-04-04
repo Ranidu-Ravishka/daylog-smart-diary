@@ -70,6 +70,7 @@ Optional flags:
 - `pnpm verify:branch-protection -- --repo <owner/repo>` to override `GITHUB_REPOSITORY`
 - `pnpm verify:branch-protection -- --branch <branch>` to verify non-default branches (defaults to `main`)
 - `pnpm verify:branch-protection -- --expected-file <path>` to override `.github/branch-protection.expected.json`
+- `pnpm verify:branch-protection -- --allow-plan-limited-skip` to allow a controlled skip on known GitHub plan limitation responses
 
 Expected result:
 
@@ -80,6 +81,7 @@ CI note:
 
 - Workflow job `branch-protection-verification` uses `secrets.BRANCH_PROTECTION_TOKEN` and runs on pull requests (non-forks) and on `main`.
 - Configure `BRANCH_PROTECTION_TOKEN` in repository secrets before enabling enforcement.
+- The workflow enables `ALLOW_BRANCH_PROTECTION_PLAN_LIMITATION_SKIP=true` so private repos on plans without branch protection API access do not hard-fail CI.
 
 ## 3) Pre-merge local checklist
 

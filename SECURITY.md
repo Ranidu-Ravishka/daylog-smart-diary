@@ -21,6 +21,7 @@ This project uses Clerk, Convex, and OpenAI credentials. Treat all secrets as se
 - The verifier compares live GitHub settings against policy JSON and exits non-zero on mismatch.
 - Required secret: `BRANCH_PROTECTION_TOKEN` with least privilege to read repository branch protection settings (Administration read).
 - The workflow avoids exposing this secret on forked pull requests.
+- In private repos without GitHub plan support for branch protection API, CI can use `ALLOW_BRANCH_PROTECTION_PLAN_LIMITATION_SKIP=true` to convert that specific 403 response into an explicit `SKIP` instead of a hard failure.
 
 ## Immediate rotation guidance
 

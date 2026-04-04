@@ -5,11 +5,17 @@ import path from "node:path";
 const EXPECTED_REQUIRED_CHECKS = ["backend-validation"];
 const DEFAULT_BRANCH = "main";
 const DEFAULT_EXPECTED_FILE = ".github/branch-protection.expected.json";
+const PLAN_LIMITATION_SNIPPET =
+  "Upgrade to GitHub Pro or make this repository public to enable this feature.";
 
 function parseArgs(argv) {
   let branch = DEFAULT_BRANCH;
   let repoArg = null;
   let expectedFile = null;
+  let allowPlanLimitedSkip =
+    (process.env.ALLOW_BRANCH_PROTECTION_PLAN_LIMITATION_SKIP ?? "")
+      .trim()
+      .toLowerCase() === "true";
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -46,13 +52,30 @@ function parseArgs(argv) {
       expectedFile = arg.slice("--expected-file=".length);
       continue;
     }
+
+    if (arg === "--allow-plan-limited-skip") {
+      allowPlanLimitedSkip = true;
+      continue;
+    }
+
+    if (arg === "--disallow-plan-limited-skip") {
+      allowPlanLimitedSkip = false;
+      continue;
+    }
   }
 
   return {
     branch: branch.trim() || DEFAULT_BRANCH,
     repoArg: repoArg?.trim() || null,
     expectedFile: expectedFile?.trim() || null,
+    allowPlanLimitedSkip,
   };
+}
+
+function isPlanLimitedApiResponse(status, details) {
+  if (status !== 403) return false;
+
+  return details.includes(PLAN_LIMITATION_SNIPPET);
 }
 
 function resolveOwnerRepo(repoArg) {
@@ -199,7 +222,9 @@ function resolveExpectedChecks(args) {
 }
 
 async function main() {
-  const { branch, repoArg, expectedFile } = parseArgs(process.argv.slice(2));
+  const { branch, repoArg, expectedFile, allowPlanLimitedSkip } = parseArgs(
+    process.argv.slice(2),
+  );
   const { owner, repo } = resolveOwnerRepo(repoArg);
   const token = resolveToken();
   const expected = resolveExpectedChecks({
@@ -221,6 +246,17 @@ async function main() {
 
   if (!response.ok) {
     const details = await response.text();
+
+    if (allowPlanLimitedSkip && isPlanLimitedApiResponse(response.status, details)) {
+      console.warn(
+        "SKIP: Branch protection API is unavailable for the current GitHub plan on this private repository.",
+      );
+      console.warn(
+        "SKIP: Continuing because ALLOW_BRANCH_PROTECTION_PLAN_LIMITATION_SKIP is enabled.",
+      );
+      process.exit(0);
+    }
+
     console.error(
       `FAIL: Unable to fetch branch protection for ${owner}/${repo}@${branch}.`,
     );

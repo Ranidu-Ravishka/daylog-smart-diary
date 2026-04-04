@@ -49,6 +49,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.BRANCH_PROTECTION_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          ALLOW_BRANCH_PROTECTION_PLAN_LIMITATION_SKIP: "true"
         run: pnpm verify:branch-protection -- --branch main
 
   backend-validation:
