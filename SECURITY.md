@@ -12,6 +12,16 @@ This project uses Clerk, Convex, and OpenAI credentials. Treat all secrets as se
   - EAS/Expo secure environment configuration
 - If a secret is exposed, rotate it first, then update docs/examples.
 - CI runs a high-confidence secret scan on feature branches and PRs.
+- CI branch protection verification uses a dedicated repository secret: `BRANCH_PROTECTION_TOKEN`.
+
+## Branch protection verification security
+
+- Branch protection policy is versioned in `.github/branch-protection.expected.json`.
+- CI job `branch-protection-verification` runs `pnpm verify:branch-protection -- --branch main`.
+- The verifier compares live GitHub settings against policy JSON and exits non-zero on mismatch.
+- Required secret: `BRANCH_PROTECTION_TOKEN` with least privilege to read repository branch protection settings (Administration read).
+- The workflow avoids exposing this secret on forked pull requests.
+- In private repos without GitHub plan support for branch protection API, CI can use `ALLOW_BRANCH_PROTECTION_PLAN_LIMITATION_SKIP=true` to convert that specific 403 response into an explicit `SKIP` instead of a hard failure.
 
 ## Immediate rotation guidance
 

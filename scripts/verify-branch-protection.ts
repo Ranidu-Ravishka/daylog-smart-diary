@@ -1,9 +1,23 @@
+import { existsSync, readFileSync } from "node:fs";
+import { execSync } from "node:child_process";
+import path from "node:path";
+
 const EXPECTED_REQUIRED_CHECKS = ["backend-validation"];
 const DEFAULT_BRANCH = "main";
+const DEFAULT_EXPECTED_FILE = ".github/branch-protection.expected.json";
+
+type BranchExpectedConfig = {
+  requiredStatusChecks: string[];
+};
+
+type ExpectedConfigFile = {
+  branches?: Record<string, Partial<BranchExpectedConfig>>;
+};
 
 function parseArgs(argv: string[]) {
   let branch = DEFAULT_BRANCH;
   let repoArg: string | null = null;
+  let expectedFile: string | null = null;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -29,25 +43,65 @@ function parseArgs(argv: string[]) {
       repoArg = arg.slice("--repo=".length);
       continue;
     }
+
+    if (arg === "--expected-file") {
+      expectedFile = argv[i + 1] ?? "";
+      i += 1;
+      continue;
+    }
+
+    if (arg?.startsWith("--expected-file=")) {
+      expectedFile = arg.slice("--expected-file=".length);
+      continue;
+    }
   }
 
   return {
     branch: branch.trim() || DEFAULT_BRANCH,
     repoArg: repoArg?.trim() || null,
+    expectedFile: expectedFile?.trim() || null,
   };
 }
 
 function resolveOwnerRepo(repoArg: string | null) {
-  const repoValue = repoArg ?? process.env.GITHUB_REPOSITORY ?? "";
+  const repoValue =
+    repoArg ??
+    process.env.GITHUB_REPOSITORY ??
+    detectRepoFromGitRemoteOrigin() ??
+    "";
   const [owner, repo] = repoValue.split("/");
 
   if (!owner || !repo) {
     throw new Error(
-      "Missing repository target. Provide --repo <owner/repo> or set GITHUB_REPOSITORY.",
+      "Missing repository target. Provide --repo <owner/repo>, set GITHUB_REPOSITORY, or ensure remote.origin.url points to GitHub.",
     );
   }
 
   return { owner, repo };
+}
+
+function detectRepoFromGitRemoteOrigin(): string | null {
+  let remoteUrl = "";
+
+  try {
+    remoteUrl = execSync("git config --get remote.origin.url", {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return null;
+  }
+
+  if (!remoteUrl) return null;
+
+  const match = remoteUrl.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/);
+  if (!match) return null;
+
+  const owner = match[1]?.trim();
+  const repo = match[2]?.trim();
+
+  if (!owner || !repo) return null;
+  return `${owner}/${repo}`;
 }
 
 function resolveToken() {
@@ -103,10 +157,69 @@ function sameChecks(actual: string[], expected: string[]): boolean {
   return actual.every((value, index) => value === expected[index]);
 }
 
+function normalizeChecks(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error("requiredStatusChecks must be an array of strings.");
+  }
+
+  const normalized = value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .sort();
+
+  return [...new Set(normalized)];
+}
+
+function resolveExpectedChecks(args: {
+  branch: string;
+  expectedFileArg: string | null;
+}): {
+  checks: string[];
+  source: string;
+} {
+  const expectedFile = path.resolve(
+    process.cwd(),
+    args.expectedFileArg ?? DEFAULT_EXPECTED_FILE,
+  );
+
+  if (!existsSync(expectedFile)) {
+    return {
+      checks: [...EXPECTED_REQUIRED_CHECKS].sort(),
+      source: "built-in defaults",
+    };
+  }
+
+  const raw = readFileSync(expectedFile, "utf8");
+
+  let parsed: ExpectedConfigFile;
+  try {
+    parsed = JSON.parse(raw) as ExpectedConfigFile;
+  } catch {
+    throw new Error(`Expected config file is not valid JSON: ${expectedFile}`);
+  }
+
+  const branchConfig = parsed.branches?.[args.branch];
+  if (!branchConfig) {
+    throw new Error(
+      `Expected config file does not define branch \"${args.branch}\": ${expectedFile}`,
+    );
+  }
+
+  return {
+    checks: normalizeChecks(branchConfig.requiredStatusChecks),
+    source: path.relative(process.cwd(), expectedFile) || expectedFile,
+  };
+}
+
 async function main() {
-  const { branch, repoArg } = parseArgs(process.argv.slice(2));
+  const { branch, repoArg, expectedFile } = parseArgs(process.argv.slice(2));
   const { owner, repo } = resolveOwnerRepo(repoArg);
   const token = resolveToken();
+  const expected = resolveExpectedChecks({
+    branch,
+    expectedFileArg: expectedFile,
+  });
 
   const url = `https://api.github.com/repos/${owner}/${repo}/branches/${encodeURIComponent(branch)}/protection`;
 
@@ -134,10 +247,11 @@ async function main() {
 
   const payload = await response.json();
   const actualChecks = extractRequiredChecks(payload);
-  const expectedChecks = [...EXPECTED_REQUIRED_CHECKS].sort();
+  const expectedChecks = expected.checks;
 
   console.log(`Repository: ${owner}/${repo}`);
   console.log(`Branch: ${branch}`);
+  console.log(`Expected checks source: ${expected.source}`);
   console.log("Required status checks:");
 
   if (actualChecks.length === 0) {
@@ -148,8 +262,10 @@ async function main() {
     }
   }
 
+  console.log(`Expected required checks: ${expectedChecks.join(", ") || "(none)"}`);
+
   if (sameChecks(actualChecks, expectedChecks)) {
-    console.log("PASS: required checks exactly match backend-validation.");
+    console.log("PASS: required checks match expected policy.");
     process.exit(0);
   }
 
