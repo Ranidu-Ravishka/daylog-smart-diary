@@ -262,7 +262,9 @@ async function main() {
     }
   }
 
-  console.log(`Expected required checks: ${expectedChecks.join(", ") || "(none)"}`);
+  console.log(
+    `Expected required checks: ${expectedChecks.join(", ") || "(none)"}`,
+  );
 
   if (sameChecks(actualChecks, expectedChecks)) {
     console.log("PASS: required checks match expected policy.");

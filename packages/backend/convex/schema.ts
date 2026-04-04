@@ -124,7 +124,9 @@ export default defineSchema(
       type: v.union(v.literal("image"), v.literal("video")),
       width: v.optional(v.number()),
       height: v.optional(v.number()),
-    }).index("by_memory", ["memoryId"]),
+    })
+      .index("by_memory", ["memoryId"])
+      .index("by_user", ["userId"]),
 
     // ── Days (one daily record per user per day) ─────────────
     days: defineTable({

@@ -2,6 +2,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import { api } from "@repo/backend/convex";
+import * as Sentry from "@sentry/nextjs";
 import {
   getAppBaseUrl,
   getOAuthProviderConfig,
@@ -226,7 +227,14 @@ export async function GET(
     const response = NextResponse.redirect(successRedirect);
     response.cookies.delete(oauthCookieName);
     return response;
-  } catch {
+  } catch (error) {
+    Sentry.captureException(error, {
+      tags: {
+        route: "oauth_callback",
+        provider,
+      },
+    });
+
     return rejectOAuthCallback(oauthCookieName, 502, "OAuth callback failed.");
   }
 }

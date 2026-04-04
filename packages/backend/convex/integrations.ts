@@ -40,6 +40,7 @@ import {
   deriveTokenValidityStatus,
   recordIntegrationHealthEventInDb,
 } from "./integrationHealth";
+import { captureException, logInfo } from "./observability";
 
 const OPAQUE_TOKEN_REF_PREFIX = "tokref_";
 const PROVIDER_SYNC_MAX_ATTEMPTS = 3;
@@ -1643,6 +1644,11 @@ export async function syncMyIntegrationForDayImpl(
   validateDayKey(args.dayKey);
   const provider = assertIntegrationProvider(args.provider);
 
+  logInfo("integration_sync.started", {
+    provider,
+    dayKey: args.dayKey,
+  });
+
   const integration = (await ctx.runQuery(
     api.integrations.getIntegrationByProvider,
     {
@@ -1685,6 +1691,13 @@ export async function syncMyIntegrationForDayImpl(
       outcome: "skipped",
       tokenValidityStatus: "unknown",
       error: `Sync skipped (${syncRunState.reason})`,
+    });
+
+    logInfo("integration_sync.skipped", {
+      provider,
+      dayKey: args.dayKey,
+      userId: integration.userId,
+      reason: syncRunState.reason,
     });
 
     return {
@@ -1901,6 +1914,14 @@ export async function syncMyIntegrationForDayImpl(
       latencyMs: Date.now() - syncStartedAt,
     });
 
+    logInfo("integration_sync.succeeded", {
+      provider,
+      dayKey: args.dayKey,
+      userId: integration.userId,
+      durationMs: Date.now() - syncStartedAt,
+      tokenValidityStatus: latestTokenValidityStatus,
+    });
+
     return {
       success: true,
       provider,
@@ -1934,6 +1955,14 @@ export async function syncMyIntegrationForDayImpl(
       tokenValidityStatus: latestTokenValidityStatus,
       error: message,
       latencyMs: Date.now() - syncStartedAt,
+    });
+
+    captureException("integration_sync.failed", error, {
+      provider,
+      dayKey: args.dayKey,
+      userId: integration.userId,
+      durationMs: Date.now() - syncStartedAt,
+      tokenValidityStatus: latestTokenValidityStatus,
     });
 
     throw error;

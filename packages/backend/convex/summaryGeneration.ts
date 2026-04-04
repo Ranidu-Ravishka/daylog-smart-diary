@@ -4,6 +4,7 @@ import { api, internal } from "./_generated/api";
 import { validateDayKey } from "./validators";
 import { convexServerEnv } from "./env";
 import { resolveSummaryModelAdapter } from "./providerAdapters";
+import { captureException, logInfo, logWarn } from "./observability";
 
 export class OpenAiRequestError extends Error {
   status: number;
@@ -210,7 +211,12 @@ export const generateSummaryForDay = action({
     summaryId?: string;
     generatedAt?: number;
   }> => {
+    const startedAt = Date.now();
     validateDayKey(args.dayKey);
+
+    logInfo("summary_generation.started", {
+      dayKey: args.dayKey,
+    });
 
     const memories = await ctx.runQuery(api.memories.listMemoriesByDay, {
       dayKey: args.dayKey,
@@ -304,6 +310,11 @@ export const generateSummaryForDay = action({
     try {
       generated = await generateSummaryWithOpenAi(args.dayKey, modelInput);
     } catch (error) {
+      captureException("summary_generation.failed", error, {
+        dayKey: args.dayKey,
+        userId: generationIdentity.userId,
+      });
+
       try {
         await ctx.runMutation(
           (internal as any).summaryQuality
@@ -322,10 +333,14 @@ export const generateSummaryForDay = action({
           },
         );
       } catch (qualityLoggingError) {
-        console.warn(
-          "[summaryGeneration] Failed to log summary quality failure",
-          qualityLoggingError,
-        );
+        logWarn("summary_generation.quality_logging_failed", {
+          dayKey: args.dayKey,
+          reason: "failure_logging",
+          error:
+            qualityLoggingError instanceof Error
+              ? qualityLoggingError.message
+              : "unknown",
+        });
       }
 
       throw error;
@@ -382,11 +397,22 @@ export const generateSummaryForDay = action({
         },
       );
     } catch (qualityLoggingError) {
-      console.warn(
-        "[summaryGeneration] Failed to log summary quality evaluation",
-        qualityLoggingError,
-      );
+      logWarn("summary_generation.quality_logging_failed", {
+        dayKey: args.dayKey,
+        reason: "success_logging",
+        error:
+          qualityLoggingError instanceof Error
+            ? qualityLoggingError.message
+            : "unknown",
+      });
     }
+
+    logInfo("summary_generation.succeeded", {
+      dayKey: args.dayKey,
+      userId: generationIdentity.userId,
+      summaryId: saved?._id,
+      durationMs: Date.now() - startedAt,
+    });
 
     return {
       success: true,

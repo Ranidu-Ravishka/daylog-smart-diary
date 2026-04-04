@@ -119,7 +119,10 @@ export const updateMemory = mutation({
     if (args.description !== undefined) updates.description = args.description;
     if (args.mood !== undefined) updates.mood = args.mood;
     if (args.happenedAt !== undefined) updates.happenedAt = args.happenedAt;
-    if (args.dayKey !== undefined) updates.dayKey = args.dayKey;
+    if (args.dayKey !== undefined) {
+      validateDayKey(args.dayKey);
+      updates.dayKey = args.dayKey;
+    }
 
     await ctx.db.patch(args.memoryId, updates);
     return await ctx.db.get(args.memoryId);
@@ -235,30 +238,68 @@ export const listMemoryMediaThumbnailsForMemories = query({
       .map((id) => id as Id<"memories">)
       .slice(0, 100);
 
-    const results: { memoryId: string; thumbnailUrl: string | null }[] = [];
-
-    for (const memoryId of uniqueIds) {
-      const memory = await ctx.db.get(memoryId);
-      if (!memory) continue;
-      if (String(memory.userId) !== String(user._id)) continue;
-
-      const media = await ctx.db
-        .query("memoryMedia")
-        .withIndex("by_memory", (q) => q.eq("memoryId", memory._id))
-        .collect();
-
-      const firstImage = media.find((item) => item.type === "image");
-      const thumbnailUrl = firstImage
-        ? await ctx.storage.getUrl(firstImage.storageId as any)
-        : null;
-
-      results.push({
-        memoryId: String(memoryId),
-        thumbnailUrl,
-      });
+    if (uniqueIds.length === 0) {
+      return [];
     }
 
-    return results;
+    const requestedMemoryIds = new Set(uniqueIds.map((id) => String(id)));
+    const firstImageStorageIdByMemoryId = new Map<string, string>();
+    let cursor: string | null = null;
+
+    while (firstImageStorageIdByMemoryId.size < requestedMemoryIds.size) {
+      const page = await ctx.db
+        .query("memoryMedia")
+        .withIndex("by_user", (q) => q.eq("userId", user._id))
+        .paginate({
+          numItems: 256,
+          cursor,
+        });
+
+      for (const media of page.page) {
+        if (media.type !== "image") continue;
+
+        const memoryId = String(media.memoryId);
+        if (!requestedMemoryIds.has(memoryId)) continue;
+        if (firstImageStorageIdByMemoryId.has(memoryId)) continue;
+
+        firstImageStorageIdByMemoryId.set(memoryId, media.storageId);
+      }
+
+      if (page.isDone || !page.continueCursor) {
+        break;
+      }
+
+      cursor = page.continueCursor;
+    }
+
+    const uniqueStorageIds = Array.from(
+      new Set(firstImageStorageIdByMemoryId.values()),
+    );
+
+    const storageIdToUrlEntries = await Promise.all(
+      uniqueStorageIds.map(
+        async (storageId): Promise<[string, string | null]> => [
+          storageId,
+          await ctx.storage.getUrl(storageId as any),
+        ],
+      ),
+    );
+
+    const storageIdToUrl = new Map<string, string | null>(
+      storageIdToUrlEntries,
+    );
+
+    return uniqueIds.map((memoryId) => {
+      const id = String(memoryId);
+      const storageId = firstImageStorageIdByMemoryId.get(id);
+
+      return {
+        memoryId: id,
+        thumbnailUrl: storageId
+          ? (storageIdToUrl.get(storageId) ?? null)
+          : null,
+      };
+    });
   },
 });
 

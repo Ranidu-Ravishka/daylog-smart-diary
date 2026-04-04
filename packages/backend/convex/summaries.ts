@@ -260,39 +260,117 @@ export const getSummaryGenerationIdentity = query({
   },
 });
 
+const exportDatasetValidator = v.union(
+  v.literal("summaries"),
+  v.literal("memories"),
+  v.literal("days"),
+  v.literal("integrationDailyData"),
+);
+
+const EXPORT_PAGE_SIZE_DEFAULT = 200;
+const EXPORT_PAGE_SIZE_MAX = 500;
+
 export const exportMyDiaryData = query({
   args: {
+    dataset: exportDatasetValidator,
+    cursor: v.optional(v.string()),
+    pageSize: v.optional(v.number()),
     includeLocationSignals: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
     const includeLocationSignals = args.includeLocationSignals ?? false;
+    const cursor = args.cursor ?? null;
+    const pageSize = clampLimit(
+      args.pageSize ?? EXPORT_PAGE_SIZE_DEFAULT,
+      EXPORT_PAGE_SIZE_MAX,
+    );
 
-    const summaries = await ctx.db
-      .query("daySummaries")
-      .withIndex("by_user_generatedAt", (q) => q.eq("userId", user._id))
-      .order("desc")
-      .collect();
+    if (args.dataset === "summaries") {
+      const page = await ctx.db
+        .query("daySummaries")
+        .withIndex("by_user_generatedAt", (q) => q.eq("userId", user._id))
+        .order("desc")
+        .paginate({
+          numItems: pageSize,
+          cursor,
+        });
 
-    const memories = await ctx.db
-      .query("memories")
-      .withIndex("by_user_happenedAt", (q) => q.eq("userId", user._id))
-      .order("desc")
-      .collect();
+      return {
+        exportedAt: Date.now(),
+        dataset: args.dataset,
+        page: page.page.map((summary) => ({
+          dayKey: summary.dayKey,
+          story: summary.story,
+          highlights: summary.highlights,
+          metrics: summary.metrics,
+          sourcesUsed: summary.sourcesUsed,
+          generatedAt: summary.generatedAt,
+        })),
+        continueCursor: page.continueCursor,
+        isDone: page.isDone,
+      };
+    }
 
-    const days = await ctx.db
-      .query("days")
-      .withIndex("by_user_day", (q) => q.eq("userId", user._id))
-      .order("desc")
-      .collect();
+    if (args.dataset === "memories") {
+      const page = await ctx.db
+        .query("memories")
+        .withIndex("by_user_happenedAt", (q) => q.eq("userId", user._id))
+        .order("desc")
+        .paginate({
+          numItems: pageSize,
+          cursor,
+        });
 
-    const integrations = await ctx.db
+      return {
+        exportedAt: Date.now(),
+        dataset: args.dataset,
+        page: page.page.map((memory) => ({
+          dayKey: memory.dayKey,
+          title: memory.title,
+          description: memory.description,
+          mood: memory.mood,
+          happenedAt: memory.happenedAt,
+        })),
+        continueCursor: page.continueCursor,
+        isDone: page.isDone,
+      };
+    }
+
+    if (args.dataset === "days") {
+      const page = await ctx.db
+        .query("days")
+        .withIndex("by_user_day", (q) => q.eq("userId", user._id))
+        .order("desc")
+        .paginate({
+          numItems: pageSize,
+          cursor,
+        });
+
+      return {
+        exportedAt: Date.now(),
+        dataset: args.dataset,
+        page: page.page.map((day) => ({
+          dayKey: day.dayKey,
+          rating: day.rating,
+          manualNotes: day.manualNotes ?? [],
+          peopleTags: day.peopleTags ?? [],
+        })),
+        continueCursor: page.continueCursor,
+        isDone: page.isDone,
+      };
+    }
+
+    const integrationPage = await ctx.db
       .query("integrationDailyData")
       .withIndex("by_user_day", (q) => q.eq("userId", user._id))
       .order("desc")
-      .collect();
+      .paginate({
+        numItems: pageSize,
+        cursor,
+      });
 
-    const integrationDailyData = integrations
+    const mappedIntegrationPage = integrationPage.page
       .filter((item) => includeLocationSignals || item.provider !== "location")
       .map((item) => ({
         provider: item.provider,
@@ -300,36 +378,15 @@ export const exportMyDiaryData = query({
         syncedAt: item.syncedAt,
         summary: item.summary,
         metrics: item.metrics,
-        signals:
-          item.provider === "location" && !includeLocationSignals
-            ? []
-            : (item.signals ?? []),
+        signals: item.signals ?? [],
       }));
 
     return {
       exportedAt: Date.now(),
-      summaries: summaries.map((summary) => ({
-        dayKey: summary.dayKey,
-        story: summary.story,
-        highlights: summary.highlights,
-        metrics: summary.metrics,
-        sourcesUsed: summary.sourcesUsed,
-        generatedAt: summary.generatedAt,
-      })),
-      memories: memories.map((memory) => ({
-        dayKey: memory.dayKey,
-        title: memory.title,
-        description: memory.description,
-        mood: memory.mood,
-        happenedAt: memory.happenedAt,
-      })),
-      days: days.map((day) => ({
-        dayKey: day.dayKey,
-        rating: day.rating,
-        manualNotes: day.manualNotes ?? [],
-        peopleTags: day.peopleTags ?? [],
-      })),
-      integrationDailyData,
+      dataset: args.dataset,
+      page: mappedIntegrationPage,
+      continueCursor: integrationPage.continueCursor,
+      isDone: integrationPage.isDone,
     };
   },
 });

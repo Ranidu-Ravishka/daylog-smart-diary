@@ -189,36 +189,55 @@ describe("summaries behavior", () => {
     });
 
     const exportMyDiaryData = handler<
-      { includeLocationSignals?: boolean },
       {
-        integrationDailyData: Array<{ provider: string; signals: string[] }>;
-        summaries: unknown[];
-        memories: unknown[];
-        days: unknown[];
+        dataset: "summaries" | "memories" | "days" | "integrationDailyData";
+        cursor?: string;
+        pageSize?: number;
+        includeLocationSignals?: boolean;
+      },
+      {
+        dataset: string;
+        page: Array<{ provider?: string; signals?: string[] }>;
+        continueCursor: string | null;
+        isDone: boolean;
       }
     >(summariesModule.exportMyDiaryData);
 
     const ctx = createAuthCtx(db, "clerk_member_001");
 
     const redacted = await exportMyDiaryData(ctx, {
+      dataset: "integrationDailyData",
       includeLocationSignals: false,
     });
 
-    const redactedLocation = redacted.integrationDailyData.find(
+    const redactedLocation = redacted.page.find(
       (row) => row.provider === "location",
     );
     expect(redactedLocation).toBeUndefined();
 
     const full = await exportMyDiaryData(ctx, {
+      dataset: "integrationDailyData",
       includeLocationSignals: true,
     });
-    const fullLocation = full.integrationDailyData.find(
-      (row) => row.provider === "location",
-    );
+    const fullLocation = full.page.find((row) => row.provider === "location");
 
     expect(fullLocation?.signals).toEqual(["home", "gym"]);
-    expect(full.summaries).toHaveLength(1);
-    expect(full.memories).toHaveLength(1);
-    expect(full.days).toHaveLength(1);
+
+    const summaries = await exportMyDiaryData(ctx, {
+      dataset: "summaries",
+      includeLocationSignals: false,
+    });
+    const memories = await exportMyDiaryData(ctx, {
+      dataset: "memories",
+      includeLocationSignals: false,
+    });
+    const days = await exportMyDiaryData(ctx, {
+      dataset: "days",
+      includeLocationSignals: false,
+    });
+
+    expect(summaries.page).toHaveLength(1);
+    expect(memories.page).toHaveLength(1);
+    expect(days.page).toHaveLength(1);
   });
 });

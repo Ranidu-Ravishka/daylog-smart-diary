@@ -22,6 +22,7 @@
     "test:coverage:backend": "vitest run --coverage"
   },
   "dependencies": {
+    "@sentry/node": "^10.47.0",
     "convex": "^1.29.3",
     "svix": "^1.58.0"
   },
@@ -32,10 +33,10 @@
     "@types/node": "^25.3.0",
     "@typescript-eslint/eslint-plugin": "^8.47.0",
     "@typescript-eslint/parser": "^8.47.0",
+    "@vitest/coverage-v8": "^4.1.2",
     "eslint": "^9.39.1",
     "globals": "^16.5.0",
     "typescript": "^5.9.3",
-    "@vitest/coverage-v8": "^4.1.2",
     "vitest": "^4.1.2"
   }
 }

@@ -201,4 +201,41 @@ describe("memories behavior", () => {
     expect(deleted.success).toBe(true);
     expect(db.getTable("memories")).toHaveLength(0);
   });
+
+  it("rejects invalid optional dayKey on memory update", async () => {
+    const db = seededDb();
+
+    const createMemory = handler<
+      {
+        title: string;
+        description?: string;
+        mood?: string;
+        happenedAt: number;
+        dayKey: string;
+      },
+      { _id: Id<"memories">; title: string } | null
+    >(memoriesModule.createMemory);
+
+    const updateMemory = handler<
+      {
+        memoryId: Id<"memories">;
+        dayKey?: string;
+      },
+      { title: string; mood?: string } | null
+    >(memoriesModule.updateMemory);
+
+    const ctx = createMemoryCtx(db, "clerk_member_001");
+    const created = await createMemory(ctx, {
+      title: "Validation target",
+      happenedAt: 100,
+      dayKey: "2026-04-02",
+    });
+
+    await expect(
+      updateMemory(ctx, {
+        memoryId: created?._id as Id<"memories">,
+        dayKey: "2026-13-40",
+      }),
+    ).rejects.toThrow("Invalid dayKey");
+  });
 });

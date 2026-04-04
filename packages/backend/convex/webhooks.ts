@@ -2,6 +2,7 @@ import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Webhook } from "svix";
 import { convexServerEnv } from "./env";
+import { captureException, logWarn } from "./observability";
 
 type ClerkWebhookEmailAddress = {
   id?: string;
@@ -96,12 +97,16 @@ export const clerkWebhook = httpAction(async (ctx, request) => {
   try {
     isValid = verifyWebhookSignature(payloadText, request.headers);
   } catch (error) {
-    console.error("[clerk-webhook] Configuration error:", error);
+    captureException("webhook.configuration_error", error, {
+      path: "/clerk/webhook",
+    });
     return new Response("Webhook not configured", { status: 500 });
   }
 
   if (!isValid) {
-    console.error("[clerk-webhook] Signature verification failed");
+    logWarn("webhook.signature_verification_failed", {
+      path: "/clerk/webhook",
+    });
     return new Response("Unauthorized: invalid signature", { status: 401 });
   }
 
@@ -130,22 +135,25 @@ export const clerkWebhook = httpAction(async (ctx, request) => {
           imageUrl,
         });
       } catch (err) {
-        console.error("[clerk-webhook] Failed to sync user:", err);
+        captureException("webhook.user_sync_failed", err, {
+          eventType,
+          clerkUserId,
+        });
         return new Response("Internal error", { status: 500 });
       }
     } else {
-      console.warn(
-        "[clerk-webhook] Missing clerkUserId or email, skipping sync",
-      );
+      logWarn("webhook.user_sync_skipped_missing_identity", {
+        eventType,
+      });
     }
   }
 
   if (eventType === "user.deleted" && user) {
     const clerkUserId: string | undefined = user.id;
     if (!clerkUserId) {
-      console.warn(
-        "[clerk-webhook] Missing clerk user id in user.deleted event",
-      );
+      logWarn("webhook.user_delete_skipped_missing_identity", {
+        eventType,
+      });
       return new Response(null, { status: 204 });
     }
 
@@ -154,7 +162,10 @@ export const clerkWebhook = httpAction(async (ctx, request) => {
         clerkUserId,
       });
     } catch (err) {
-      console.error("[clerk-webhook] Failed to cascade-delete user data:", err);
+      captureException("webhook.user_delete_failed", err, {
+        eventType,
+        clerkUserId,
+      });
       return new Response("Internal error", { status: 500 });
     }
   }

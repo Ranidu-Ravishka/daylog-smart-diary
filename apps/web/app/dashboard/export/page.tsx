@@ -1,16 +1,18 @@
 "use client";
 
-import { useQuery, useConvexAuth } from "convex/react";
+import { useConvex, useConvexAuth } from "convex/react";
 import { api } from "@repo/backend/convex";
 import { useState } from "react";
 import { Download, Check, FileText, BookOpen, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { toastError, toastSuccess } from "@/lib/toast";
 
 type ExportFormat = "json" | "txt";
+type ExportDataset = "summaries" | "memories" | "days" | "integrationDailyData";
 
-function toTextExport(data: {
+type ExportPayload = {
   exportedAt: number;
   summaries: Array<{
     dayKey: string;
@@ -22,6 +24,8 @@ function toTextExport(data: {
       screenTimeMinutes?: number;
       spendingTotal?: number;
     };
+    sourcesUsed: string[];
+    generatedAt: number;
   }>;
   memories: Array<{
     dayKey: string;
@@ -39,10 +43,27 @@ function toTextExport(data: {
   integrationDailyData: Array<{
     provider: string;
     dayKey: string;
+    syncedAt: number;
     summary?: string;
+    metrics?: {
+      steps?: number;
+      sleepMinutes?: number;
+      screenTimeMinutes?: number;
+      spendingTotal?: number;
+    };
     signals?: string[];
   }>;
-}) {
+};
+
+type ExportPageResponse<TItem> = {
+  exportedAt: number;
+  dataset: ExportDataset;
+  page: TItem[];
+  continueCursor: string | null;
+  isDone: boolean;
+};
+
+function toTextExport(data: ExportPayload) {
   const parts: string[] = [];
   parts.push(`DayLog Export`);
   parts.push(`Exported at: ${new Date(data.exportedAt).toISOString()}`);
@@ -108,22 +129,73 @@ function toTextExport(data: {
 }
 
 export default function ExportPage() {
+  const convex = useConvex();
   const { isAuthenticated } = useConvexAuth();
   const [isExporting, setIsExporting] = useState(false);
   const [exported, setExported] = useState(false);
   const [format, setFormat] = useState<ExportFormat>("json");
   const [includeLocationSignals, setIncludeLocationSignals] = useState(false);
-
-  const exportData = useQuery(
-    api.summaries.exportMyDiaryData,
-    isAuthenticated ? { includeLocationSignals } : "skip",
+  const [preparedExport, setPreparedExport] = useState<ExportPayload | null>(
+    null,
   );
 
-  const handleExport = () => {
-    if (!exportData) return;
+  const fetchDatasetPages = async <TItem,>(
+    dataset: ExportDataset,
+  ): Promise<TItem[]> => {
+    const rows: TItem[] = [];
+    let cursor: string | undefined;
+
+    while (true) {
+      const response = (await convex.query(api.summaries.exportMyDiaryData, {
+        dataset,
+        cursor,
+        pageSize: 250,
+        includeLocationSignals,
+      })) as ExportPageResponse<TItem>;
+
+      rows.push(...response.page);
+
+      if (response.isDone || !response.continueCursor) {
+        break;
+      }
+
+      cursor = response.continueCursor;
+    }
+
+    return rows;
+  };
+
+  const handleExport = async () => {
+    if (!isAuthenticated) {
+      toastError("You must be signed in to export data.");
+      return;
+    }
+
     setIsExporting(true);
 
     try {
+      const summaries =
+        await fetchDatasetPages<ExportPayload["summaries"][number]>(
+          "summaries",
+        );
+      const memories =
+        await fetchDatasetPages<ExportPayload["memories"][number]>("memories");
+      const days =
+        await fetchDatasetPages<ExportPayload["days"][number]>("days");
+      const integrationDailyData = await fetchDatasetPages<
+        ExportPayload["integrationDailyData"][number]
+      >("integrationDailyData");
+
+      const exportData: ExportPayload = {
+        exportedAt: Date.now(),
+        summaries,
+        memories,
+        days,
+        integrationDailyData,
+      };
+
+      setPreparedExport(exportData);
+
       const datePart = new Date().toISOString().split("T")[0];
       const fileName = `daylog-export-${datePart}.${format}`;
 
@@ -152,16 +224,20 @@ export default function ExportPage() {
       URL.revokeObjectURL(url);
 
       setExported(true);
+      toastSuccess("Data export downloaded.");
       setTimeout(() => setExported(false), 3000);
+    } catch (error) {
+      console.error("Export failed", error);
+      toastError("Failed to export data. Please try again.");
     } finally {
       setIsExporting(false);
     }
   };
 
-  const totalSummaries = exportData?.summaries.length ?? 0;
-  const totalMemories = exportData?.memories.length ?? 0;
-  const totalDays = exportData?.days.length ?? 0;
-  const totalIntegrationRows = exportData?.integrationDailyData.length ?? 0;
+  const totalSummaries = preparedExport?.summaries.length ?? 0;
+  const totalMemories = preparedExport?.memories.length ?? 0;
+  const totalDays = preparedExport?.days.length ?? 0;
+  const totalIntegrationRows = preparedExport?.integrationDailyData.length ?? 0;
 
   return (
     <div className="max-w-xl">
@@ -289,7 +365,7 @@ export default function ExportPage() {
       </Card>
 
       {/* ── Download ──────────────────────────────────── */}
-      <Button onClick={handleExport} disabled={isExporting || !exportData}>
+      <Button onClick={() => void handleExport()} disabled={isExporting}>
         <Download className="h-4 w-4" />
         {isExporting
           ? "Preparing…"
