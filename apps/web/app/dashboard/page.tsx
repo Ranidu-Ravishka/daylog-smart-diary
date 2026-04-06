@@ -3,6 +3,10 @@
 import { useAction, useQuery, useConvexAuth } from "convex/react";
 import { api } from "@repo/backend/convex";
 import { MOOD_EMOJI } from "@repo/ui/lib/constants";
+import {
+  getDayKeyForTimestamp,
+  getResolvedTimeZone,
+} from "@repo/ui/lib/day-window";
 import { useState } from "react";
 import {
   Sparkles,
@@ -23,10 +27,6 @@ import { MemoryForm } from "@/components/MemoryForm";
 import { MemoryCard, type MemoryData } from "@/components/MemoryCard";
 import { DashboardDatePicker } from "@/components/DashboardDatePicker";
 import { toastError, toastSuccess } from "@/lib/toast";
-
-function getDayKey(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
 
 function LoadingSkeleton() {
   return (
@@ -174,7 +174,8 @@ export default function DashboardPage() {
     string | null
   >(null);
 
-  const dayKey = getDayKey(selectedDate);
+  const userTimeZone = getResolvedTimeZone();
+  const dayKey = getDayKeyForTimestamp(selectedDate.getTime(), userTimeZone);
   const generateSummaryForDay = useAction(
     api.summaryGeneration.generateSummaryForDay,
   );

@@ -29,6 +29,7 @@ import {
   resolveIntegrationSyncAdapter,
   type NormalizedIntegrationDailySync,
 } from "./providerAdapters";
+import { getResolvedTimeZone, resolveTimeZone } from "../../ui/lib/day-window";
 import {
   constantTimeStringEquals,
   decryptIntegrationSecret,
@@ -1348,12 +1349,14 @@ async function syncProviderForDay(
   provider: IntegrationProvider,
   accessToken: string,
   dayKey: string,
+  timeZone: string,
   syncStartedAt: number,
 ): Promise<NormalizedIntegrationDailySync> {
   const adapter = resolveIntegrationSyncAdapter(provider);
   return await adapter.execute({
     accessToken,
     dayKey,
+    timeZone,
     syncStartedAt,
     requestJson: fetchJson,
   });
@@ -2312,6 +2315,7 @@ export const syncMyIntegrationForDay = action({
   args: {
     provider: v.string(),
     dayKey: v.string(),
+    timeZone: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     return await syncMyIntegrationForDayImpl(ctx, args);
@@ -2323,14 +2327,17 @@ export async function syncMyIntegrationForDayImpl(
   args: {
     provider: string;
     dayKey: string;
+    timeZone?: string;
   },
 ) {
   validateDayKey(args.dayKey);
   const provider = assertIntegrationProvider(args.provider);
+  const syncTimeZone = resolveTimeZone(args.timeZone, getResolvedTimeZone());
 
   logInfo("integration_sync.started", {
     provider,
     dayKey: args.dayKey,
+    timeZone: syncTimeZone,
   });
 
   const integration = (await ctx.runQuery(
@@ -2512,6 +2519,7 @@ export async function syncMyIntegrationForDayImpl(
         provider,
         accessToken,
         args.dayKey,
+        syncTimeZone,
         syncStartedAt,
       );
     } catch (error) {
@@ -2558,6 +2566,7 @@ export async function syncMyIntegrationForDayImpl(
         provider,
         accessToken,
         args.dayKey,
+        syncTimeZone,
         syncStartedAt,
       );
     }
@@ -3013,6 +3022,7 @@ export const adminMigrateLegacyIntegrationSecretsAll = mutation({
 export const syncAllMyIntegrationsForDay = action({
   args: {
     dayKey: v.string(),
+    timeZone: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     validateDayKey(args.dayKey);
@@ -3040,6 +3050,7 @@ export const syncAllMyIntegrationsForDay = action({
         await ctx.runAction(api.integrations.syncMyIntegrationForDay, {
           provider,
           dayKey: args.dayKey,
+          timeZone: args.timeZone,
         });
         results.push({ provider, success: true });
       } catch (error) {

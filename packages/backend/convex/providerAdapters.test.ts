@@ -1,11 +1,39 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ProviderAdapterError,
   executeWithProviderRetry,
+  resolveSummaryModelAdapter,
   isRetryableProviderAdapterError,
 } from "./providerAdapters";
 
-describe("provider adapter runtime", () => {
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+describe("provider adapter unit behavior", () => {
+  it("classifies retryable adapter errors", () => {
+    expect(
+      isRetryableProviderAdapterError(
+        new ProviderAdapterError({
+          provider: "openai",
+          operation: "summary_generation",
+          retryable: true,
+          statusCode: 503,
+          message: "temporarily unavailable",
+        }),
+      ),
+    ).toBe(true);
+
+    expect(isRetryableProviderAdapterError(new TypeError("network"))).toBe(
+      true,
+    );
+    expect(
+      isRetryableProviderAdapterError({ name: "AbortError", message: "x" }),
+    ).toBe(true);
+    expect(isRetryableProviderAdapterError(new Error("regular"))).toBe(false);
+  });
+
   it("retries retryable provider errors and succeeds", async () => {
     vi.useFakeTimers();
     vi.spyOn(Math, "random").mockReturnValue(0);
@@ -56,5 +84,24 @@ describe("provider adapter runtime", () => {
     ).rejects.toThrow("bad request");
 
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("wraps non-Error failures with a safe generic error", async () => {
+    const execute = vi.fn().mockRejectedValue("non-error-value");
+
+    await expect(
+      executeWithProviderRetry({
+        maxAttempts: 1,
+        baseBackoffMs: 100,
+        execute,
+        isRetryable: isRetryableProviderAdapterError,
+      }),
+    ).rejects.toThrow("Provider execution failed unexpectedly.");
+  });
+
+  it("rejects unsupported summary model providers", () => {
+    expect(() => resolveSummaryModelAdapter("anthropic")).toThrow(
+      "Unsupported summary model provider: anthropic",
+    );
   });
 });

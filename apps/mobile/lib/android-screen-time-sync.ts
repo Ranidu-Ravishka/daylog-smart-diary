@@ -1,4 +1,5 @@
 import { Platform } from "react-native";
+import { getDayWindow, getResolvedTimeZone } from "@repo/ui/lib/day-window";
 
 declare const require: (name: string) => unknown;
 
@@ -29,15 +30,15 @@ type AndroidUsageStatsBridge = {
   showUsageStatsPermissionPage?: () => Promise<void> | void;
 };
 
-function parseDayRange(dayKey: string): { startMs: number; endMs: number } {
-  const start = new Date(`${dayKey}T00:00:00.000Z`).getTime();
-  const end = new Date(`${dayKey}T23:59:59.999Z`).getTime();
-
-  if (!Number.isFinite(start) || !Number.isFinite(end)) {
-    throw new Error("Invalid day key. Expected YYYY-MM-DD.");
-  }
-
-  return { startMs: start, endMs: end };
+function parseDayRange(
+  dayKey: string,
+  timeZone: string,
+): { startMs: number; endMs: number } {
+  const window = getDayWindow(dayKey, timeZone);
+  return {
+    startMs: window.startMs,
+    endMs: window.endMs,
+  };
 }
 
 function getAndroidUsageBridge(): AndroidUsageStatsBridge {
@@ -91,6 +92,7 @@ function recordDurationMs(record: UsageRecord): number {
 
 export async function collectAndroidScreenTimeDailyDataForDay(
   dayKey: string,
+  timeZone = getResolvedTimeZone(),
 ): Promise<AndroidScreenTimePayload> {
   if (Platform.OS !== "android") {
     throw new Error("Android screen time sync is available only on Android.");
@@ -104,7 +106,7 @@ export async function collectAndroidScreenTimeDailyDataForDay(
     );
   }
 
-  const { startMs, endMs } = parseDayRange(dayKey);
+  const { startMs, endMs } = parseDayRange(dayKey, timeZone);
 
   await ensureUsageAccessPermission(bridge);
 

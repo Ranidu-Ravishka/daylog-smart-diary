@@ -31,10 +31,10 @@ export const LIFE_CONTEXT_DISCLOSURE: Record<
     consentLabel: "I consent to call metadata tracking",
   },
   moodDetection: {
-    title: "Enable mood detection",
+    title: "Enable mood assistance",
     description:
-      "Mood detection uses on-device camera access to infer a coarse mood signal. Biometric templates are not uploaded as raw media.",
-    consentLabel: "I consent to mood detection",
+      "Mood assistance uses lightweight non-camera inference from time and activity patterns to suggest a coarse mood hint.",
+    consentLabel: "I consent to non-camera mood assistance",
   },
   fitness: {
     title: "Enable fitness context",
@@ -125,7 +125,7 @@ export function getPermissionDeniedReason(
     case "callLogs":
       return "Call-log permissions were denied.";
     case "moodDetection":
-      return "Camera permission is required for mood detection signals.";
+      return "Mood assistance permission requirement was not satisfied.";
     case "calendarNotifications":
       return "Notification permission is required to enable calendar and notification context.";
     case "fitness":

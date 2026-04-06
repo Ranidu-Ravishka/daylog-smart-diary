@@ -23,9 +23,9 @@ const runtimeEnvKeys = [
   "SUMMARY_LOW_QUALITY_THRESHOLD",
   "ENABLE_BACKGROUND_LOCATION_TRACKING",
   "BACKGROUND_LOCATION_BATCH_MAX_POINTS",
-  "BACKGROUND_LOCATION_MAX_UPDATES_PER_HOUR",
-  "BACKGROUND_LOCATION_BATCH_FLUSH_INTERVAL_MINUTES",
-  "BACKGROUND_LOCATION_MAX_BATTERY_DRAIN_PERCENT_PER_HOUR",
+  "BG_LOC_MAX_UPDATES_PER_HOUR",
+  "BG_LOC_BATCH_FLUSH_INTERVAL_MIN",
+  "BG_LOC_MAX_BATTERY_DRAIN_PCT_PER_HR",
 ] as const;
 
 const baselineEnv = Object.fromEntries(
@@ -101,22 +101,22 @@ describe("runtime config behavior", () => {
     process.env.BACKGROUND_LOCATION_BATCH_MAX_POINTS = "64";
     expect(getBackgroundLocationBatchMaxPoints()).toBe(64);
 
-    process.env.BACKGROUND_LOCATION_MAX_UPDATES_PER_HOUR = "10";
+    process.env.BG_LOC_MAX_UPDATES_PER_HOUR = "10";
     expect(getBackgroundLocationMaxUpdatesPerHour()).toBe(120);
 
-    process.env.BACKGROUND_LOCATION_MAX_UPDATES_PER_HOUR = "360";
+    process.env.BG_LOC_MAX_UPDATES_PER_HOUR = "360";
     expect(getBackgroundLocationMaxUpdatesPerHour()).toBe(360);
 
-    process.env.BACKGROUND_LOCATION_BATCH_FLUSH_INTERVAL_MINUTES = "1";
+    process.env.BG_LOC_BATCH_FLUSH_INTERVAL_MIN = "1";
     expect(getBackgroundLocationBatchFlushIntervalMinutes()).toBe(15);
 
-    process.env.BACKGROUND_LOCATION_BATCH_FLUSH_INTERVAL_MINUTES = "30";
+    process.env.BG_LOC_BATCH_FLUSH_INTERVAL_MIN = "30";
     expect(getBackgroundLocationBatchFlushIntervalMinutes()).toBe(30);
 
-    process.env.BACKGROUND_LOCATION_MAX_BATTERY_DRAIN_PERCENT_PER_HOUR = "100";
+    process.env.BG_LOC_MAX_BATTERY_DRAIN_PCT_PER_HR = "100";
     expect(getBackgroundLocationMaxBatteryDrainPercentPerHour()).toBe(12);
 
-    process.env.BACKGROUND_LOCATION_MAX_BATTERY_DRAIN_PERCENT_PER_HOUR = "8";
+    process.env.BG_LOC_MAX_BATTERY_DRAIN_PCT_PER_HR = "8";
     expect(getBackgroundLocationMaxBatteryDrainPercentPerHour()).toBe(8);
   });
 });

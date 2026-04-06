@@ -241,6 +241,7 @@ Scope:
 - Raw sensitive payloads must be normalized on-device or at ingestion edge before persistence.
 - Every sensitive data path must have a kill switch (feature flag or user toggle) that can disable new writes without redeploying mobile clients.
 - No implementation may rely on restricted or prohibited platform data sources (for example raw call logs on iOS).
+- No biometric/face-recognition processing may ship by default; it requires explicit product/legal approval, separate user consent, and a dedicated threat-model review.
 - Any background collection mode must include a documented battery budget and user-facing justification.
 
 ### 13.2 Privacy-first checklist (required in PR description)
@@ -248,6 +249,7 @@ Scope:
 - Data inventory updated: what fields are collected, transformed, stored, and exported.
 - Legal/privacy surface reviewed for the feature scope.
 - User-facing disclosure text added/updated where the feature is enabled.
+- Consent copy and UX evidence attached (screenshots/video of enable + disable path).
 - Disable path implemented and verified (toggle off stops writes immediately).
 - Data retention behavior documented for any new fields/tables.
 - Export and delete-account flows verified for newly collected data.
@@ -265,6 +267,11 @@ PRs that miss any checklist item are not merge-ready.
   - iOS: no raw call log ingestion path.
   - iOS HealthKit: must run only in native/dev client builds where supported.
   - Android background/location usage: request only if corresponding feature mode is enabled.
+- Permission matrix must be documented in PR when changed:
+  - `location`: foreground first, background only with separate opt-in.
+  - `fitness`: HealthKit/Google Fit only after provider consent.
+  - `calendarNotifications`: notification/calendar scopes only when feature enabled.
+  - `callLogs`: Android only, aggregate counts/duration only, no contact identifiers.
 - Preference state in backend must mirror effective permission state (`granted`, `denied`, `unknown`) for operational visibility.
 
 ### 13.4 Testing requirements for mobile sensors
@@ -279,11 +286,13 @@ PRs that miss any checklist item are not merge-ready.
   - throttling interval enforcement
   - no tight polling loops
   - bounded in-memory buffering
+  - auto-disable paths when runtime safety thresholds are exceeded
 - Backend behavior tests must validate:
   - dayKey validation at all entry points
   - idempotent upsert by `userId + provider + dayKey`
   - aggregate query correctness for mixed provider data
 - Summary generation tests must cover context-aware inputs and no-data fallbacks.
+- Tests must prove no raw sensitive payload fields are persisted (only normalized aggregates/context).
 
 ### 13.5 Release checklist additions for tracking features
 
@@ -299,5 +308,11 @@ Before production rollout of any sensitive tracking feature:
    - permission denial spikes
    - battery/performance regressions
    - error-rate increase in sync flows
+
+### 13.6 Enforcement gates (merge blocking)
+
+- PRs touching sensitive context must include a completed Section 13 checklist in the PR body.
+- Missing consent UX, permission handling evidence, or sensor test evidence is a hard block.
+- Any exception request (for urgent hotfixes) must be approved by feature owner + reviewer and documented with follow-up action items.
 
 No sensitive tracking feature may be marked complete without satisfying Section 13.

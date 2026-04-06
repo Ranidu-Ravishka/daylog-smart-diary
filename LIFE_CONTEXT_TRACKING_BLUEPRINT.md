@@ -380,3 +380,109 @@ Daily contextual providers now include:
   - permission denied/limited flows
   - foreground tracking start/stop transitions
   - battery throttle behavior (no excessive uploads)
+
+## 9) Code Examples (Mobile + Backend)
+
+### Mobile: controlled location + contextual upload
+
+```ts
+const stopTracker = await startForegroundLocationTracker({
+  onUpload: async (payload) => {
+    await upsertMyIntegrationDailyData({
+      provider: "location",
+      dayKey: payload.dayKey,
+      summary: payload.summary,
+      signals: payload.signals,
+      context: payload.context,
+    });
+  },
+});
+
+// stopTracker() when tab/session stops
+```
+
+### Mobile: privacy-safe activity summary context
+
+```ts
+const activityContext = buildActivitySummaryContext({
+  steps: 6200,
+  activeMinutes: 42,
+  callsCount: 3,
+  callDurationMinutes: 25,
+  moodAssistanceEnabled: true,
+});
+
+await upsertMyContextualDailyData({
+  type: "activity_summary",
+  dayKey,
+  summary: activityContext.summary,
+  signals: activityContext.signals,
+  context: activityContext.context,
+});
+```
+
+### Backend: contextual upsert mutation
+
+```ts
+export const upsertMyContextualDailyData = mutation({
+  args: {
+    type: contextualDailyDataTypeValidator,
+    dayKey: v.string(),
+    summary: v.optional(v.string()),
+    signals: v.optional(v.array(v.string())),
+    metrics: v.optional(integrationDailyMetricsValidator),
+    context: integrationDailyContextValidator,
+  },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    validateDayKey(args.dayKey);
+
+    return await upsertIntegrationDailyDataDoc(ctx.db, {
+      userId: user._id,
+      provider: assertDailyDataProvider(args.type),
+      dayKey: args.dayKey,
+      summary: args.summary,
+      signals: args.signals,
+      metrics: args.metrics,
+      context: args.context,
+    });
+  },
+});
+```
+
+### Backend: dayKey aggregation query
+
+```ts
+const rows = await ctx.db
+  .query("integrationDailyData")
+  .withIndex("by_user_day", (q) =>
+    q.eq("userId", user._id).eq("dayKey", args.dayKey),
+  )
+  .collect();
+
+// Merge metrics and context into one daily snapshot.
+return {
+  metrics,
+  location,
+  fitness,
+  calendar,
+  activitySummary,
+  signals,
+};
+```
+
+## 10) UX/Consent Flow (Production)
+
+1. User opens Profile -> "Integration Preferences".
+2. User taps a sensitive feature toggle.
+3. App shows feature-specific consent disclosure with plain-language purpose and data scope.
+4. App requests OS/provider permission only after consent and only for that feature.
+5. On denial: feature remains off, app shows remediation path.
+6. On approval: feature toggles on and data collection starts in bounded mode.
+
+## 11) Known Safe Limitations
+
+- iOS call-log ingestion is not supported.
+- Background location can be force-disabled by runtime policy and battery safeguards.
+- Mood assistance defaults to non-camera, low-confidence pattern inference.
+- Calendar context stores aggregate meeting/reminder/busy-time metadata only.

@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import Constants from "expo-constants";
+import { getDayWindow, getResolvedTimeZone } from "@repo/ui/lib/day-window";
 
 declare const require: (name: string) => unknown;
 
@@ -49,21 +50,22 @@ type HealthKitBridge = {
   ) => void;
 };
 
-function parseDayRange(dayKey: string): { startIso: string; endIso: string } {
-  const start = new Date(`${dayKey}T00:00:00.000Z`);
-  const end = new Date(`${dayKey}T23:59:59.999Z`);
+function parseDayRange(
+  dayKey: string,
+  timeZone: string,
+): { startIso: string; endIso: string } {
+  const window = getDayWindow(dayKey, timeZone);
 
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-    throw new Error("Invalid day key. Expected YYYY-MM-DD.");
-  }
-
-  return { startIso: start.toISOString(), endIso: end.toISOString() };
+  return {
+    startIso: new Date(window.startMs).toISOString(),
+    endIso: new Date(window.endMs).toISOString(),
+  };
 }
 
 function getHealthKitBridge(): HealthKitBridge {
   if (Constants.appOwnership === "expo") {
     throw new Error(
-      "Apple Health is unavailable in Expo Go. Run `pnpm --filter mobile ios:dev-client` (simulator) or `pnpm --filter mobile ios:dev-client-device` (physical iPhone), then retry.",
+      "Apple Health is unavailable in Expo Go. Build and run an iOS development client, then retry.",
     );
   }
 
@@ -87,7 +89,7 @@ export function getAppleHealthSetupIssue(): string | null {
   }
 
   if (Constants.appOwnership === "expo") {
-    return "Apple Health is unavailable in Expo Go. Run `pnpm --filter mobile ios:dev-client` (simulator) or `pnpm --filter mobile ios:dev-client-device` (physical iPhone), then retry.";
+    return "Apple Health is unavailable in Expo Go. Build and run an iOS development client, then retry.";
   }
 
   try {
@@ -199,13 +201,14 @@ function readSleepMinutes(
 
 export async function collectAppleHealthDailyDataForDay(
   dayKey: string,
+  timeZone = getResolvedTimeZone(),
 ): Promise<AppleHealthSyncPayload> {
   const setupIssue = getAppleHealthSetupIssue();
   if (setupIssue) {
     throw new Error(setupIssue);
   }
 
-  const { startIso, endIso } = parseDayRange(dayKey);
+  const { startIso, endIso } = parseDayRange(dayKey, timeZone);
   const healthKit = getHealthKitBridge();
 
   await initHealthKit(healthKit);

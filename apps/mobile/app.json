@@ -13,8 +13,9 @@
       "infoPlist": {
         "NSHealthShareUsageDescription": "DayLog reads your Health data to sync steps and sleep insights.",
         "NSHealthUpdateUsageDescription": "DayLog may write wellness summaries to Health when enabled.",
-        "NSLocationWhenInUseUsageDescription": "DayLog uses your location while you use the app to derive coarse daily movement context.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "DayLog can optionally collect coarse background movement context when you explicitly enable background tracking."
+        "UIBackgroundModes": [
+          "location"
+        ]
       },
       "entitlements": {
         "com.apple.developer.healthkit": true
@@ -29,28 +30,36 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "permissions": [
-        "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION"
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "READ_CALL_LOG",
+        "READ_PHONE_STATE",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
       ],
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.anonymous.mobile"
     },
     "web": {
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      "expo-dev-client",
       "expo-router",
       "expo-notifications",
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "DayLog uses your location while the app is open to generate coarse context signals.",
-          "locationAlwaysAndWhenInUsePermission": "DayLog can optionally use coarse background location to improve context summaries when you explicitly enable it.",
+          "locationWhenInUsePermission": "Allow DayLog to access your location while you use the app.",
+          "locationAlwaysAndWhenInUsePermission": "Allow DayLog to access your location in the background to generate daily context summaries.",
           "isIosBackgroundLocationEnabled": true,
-          "isAndroidBackgroundLocationEnabled": true
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       [
@@ -64,7 +73,10 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker",
+      "expo-font",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

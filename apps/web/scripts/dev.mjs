@@ -4,6 +4,8 @@ import { createServer } from "node:net";
 import { spawn } from "node:child_process";
 import process from "node:process";
 
+const RESERVED_DEV_PORTS = new Set([3001, 3002]);
+
 function canUsePort(port) {
   return new Promise((resolve) => {
     const server = createServer();
@@ -21,9 +23,15 @@ function canUsePort(port) {
 }
 
 async function pickPort(preferredPort) {
-  if (await canUsePort(preferredPort)) return preferredPort;
+  if (!RESERVED_DEV_PORTS.has(preferredPort) && (await canUsePort(preferredPort))) {
+    return preferredPort;
+  }
 
   for (let port = preferredPort + 1; port <= preferredPort + 20; port += 1) {
+    if (RESERVED_DEV_PORTS.has(port)) {
+      continue;
+    }
+
     if (await canUsePort(port)) return port;
   }
 

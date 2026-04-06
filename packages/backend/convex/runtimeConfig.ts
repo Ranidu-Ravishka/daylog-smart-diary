@@ -12,12 +12,10 @@ const ENABLE_BACKGROUND_LOCATION_TRACKING_ENV =
   "ENABLE_BACKGROUND_LOCATION_TRACKING";
 const BACKGROUND_LOCATION_BATCH_MAX_POINTS_ENV =
   "BACKGROUND_LOCATION_BATCH_MAX_POINTS";
-const BACKGROUND_LOCATION_MAX_UPDATES_PER_HOUR_ENV =
-  "BACKGROUND_LOCATION_MAX_UPDATES_PER_HOUR";
-const BACKGROUND_LOCATION_BATCH_FLUSH_INTERVAL_MINUTES_ENV =
-  "BACKGROUND_LOCATION_BATCH_FLUSH_INTERVAL_MINUTES";
-const BACKGROUND_LOCATION_MAX_BATTERY_DRAIN_PERCENT_PER_HOUR_ENV =
-  "BACKGROUND_LOCATION_MAX_BATTERY_DRAIN_PERCENT_PER_HOUR";
+const BG_LOC_MAX_UPDATES_PER_HOUR_ENV = "BG_LOC_MAX_UPDATES_PER_HOUR";
+const BG_LOC_BATCH_FLUSH_INTERVAL_MIN_ENV = "BG_LOC_BATCH_FLUSH_INTERVAL_MIN";
+const BG_LOC_MAX_BATTERY_DRAIN_PCT_PER_HR_ENV =
+  "BG_LOC_MAX_BATTERY_DRAIN_PCT_PER_HR";
 
 type NumericConfig = {
   envName: string;
@@ -205,7 +203,7 @@ export function getBackgroundLocationBatchMaxPoints(): number {
 
 export function getBackgroundLocationMaxUpdatesPerHour(): number {
   return parseBoundedInt({
-    envName: BACKGROUND_LOCATION_MAX_UPDATES_PER_HOUR_ENV,
+    envName: BG_LOC_MAX_UPDATES_PER_HOUR_ENV,
     fallback: 120,
     min: 20,
     max: 2000,
@@ -214,7 +212,7 @@ export function getBackgroundLocationMaxUpdatesPerHour(): number {
 
 export function getBackgroundLocationBatchFlushIntervalMinutes(): number {
   return parseBoundedInt({
-    envName: BACKGROUND_LOCATION_BATCH_FLUSH_INTERVAL_MINUTES_ENV,
+    envName: BG_LOC_BATCH_FLUSH_INTERVAL_MIN_ENV,
     fallback: 15,
     min: 5,
     max: 240,
@@ -223,7 +221,7 @@ export function getBackgroundLocationBatchFlushIntervalMinutes(): number {
 
 export function getBackgroundLocationMaxBatteryDrainPercentPerHour(): number {
   return parseBoundedInt({
-    envName: BACKGROUND_LOCATION_MAX_BATTERY_DRAIN_PERCENT_PER_HOUR_ENV,
+    envName: BG_LOC_MAX_BATTERY_DRAIN_PCT_PER_HR_ENV,
     fallback: 12,
     min: 1,
     max: 60,

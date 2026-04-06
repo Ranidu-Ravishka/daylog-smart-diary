@@ -11,10 +11,9 @@ import {
   Platform,
   TouchableWithoutFeedback,
   Linking,
-  PermissionsAndroid,
+  AppState,
 } from "react-native";
 import * as ExpoLinking from "expo-linking";
-import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import * as WebBrowser from "expo-web-browser";
 import DateTimePicker, {
@@ -31,6 +30,10 @@ import {
   MEMORY_MOOD_OPTIONS,
   SETTINGS_DEFAULTS,
 } from "@repo/ui/lib/constants";
+import {
+  getDayKeyForTimestamp,
+  getResolvedTimeZone,
+} from "@repo/ui/lib/day-window";
 import type { GenericId } from "convex/values";
 import {
   ensureReminderPermissions,
@@ -39,19 +42,21 @@ import {
   type ReminderRuntimeState,
 } from "@/lib/reminder-notifications";
 import {
-  deriveLifeContextFeatureState,
-  LIFE_CONTEXT_DISCLOSURE,
-  type FeatureState,
-  type LifeContextFeatureKey,
-} from "@/lib/life-context-toggle-policy";
-import {
-  evaluateLifeContextFeaturePermission,
-  handleLifeContextTogglePressFlow,
-} from "@/lib/life-context-toggle-handler";
+  getAndroidCallActivityRuntimeDiagnostics,
+  type AndroidCallActivityRuntimeDiagnostics,
+  isAndroidCallActivityCollectionSupported,
+  requestAndroidCallActivityPermission,
+} from "@/lib/android-call-activity-sync";
 import {
   collectAppleHealthDailyDataForDay,
   getAppleHealthSetupIssue,
 } from "../../lib/apple-health-sync";
+import { getBackgroundLocationEnablementStatus } from "../../lib/background-location-tracker";
+import { evaluateLifeContextFeaturePermission } from "../../lib/life-context-toggle-handler";
+import {
+  LIFE_CONTEXT_DISCLOSURE,
+  type LifeContextFeatureKey,
+} from "../../lib/life-context-toggle-policy";
 import { collectAndroidScreenTimeDailyDataForDay } from "../../lib/android-screen-time-sync";
 import { collectIosScreenTimeDailyDataForDay } from "../../lib/ios-screen-time-sync";
 import {
@@ -85,8 +90,8 @@ type IntegrationSyncRunDoc = {
 };
 
 function getTodayDayKey(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const timeZone = getResolvedTimeZone();
+  return getDayKeyForTimestamp(Date.now(), timeZone);
 }
 
 function isOAuthProvider(provider: string): boolean {
@@ -187,12 +192,12 @@ const SettingsScreen = () => {
     api.integrations.listMyIntegrationSyncRunsForDay,
     isAuthenticated ? { dayKey: todayDayKey } : "skip",
   ) as IntegrationSyncRunDoc[] | undefined;
-  const locationTrackingRuntimeConfig = useQuery(
-    api.integrations.getMyLocationTrackingRuntimeConfig,
-    isAuthenticated ? {} : "skip",
-  );
   const preferences = useQuery(
     api.userPreferences.getMyUserPreferences,
+    isAuthenticated ? {} : "skip",
+  );
+  const locationTrackingRuntimeConfig = useQuery(
+    api.integrations.getMyLocationTrackingRuntimeConfig,
     isAuthenticated ? {} : "skip",
   );
   const connectIntegration = useMutation(api.integrations.connectIntegration);
@@ -241,28 +246,19 @@ const SettingsScreen = () => {
     useState<boolean>(SETTINGS_DEFAULTS.locationTrackingEnabled);
   const [callLogsTrackingEnabled, setCallLogsTrackingEnabled] =
     useState<boolean>(SETTINGS_DEFAULTS.callLogsTrackingEnabled);
-  const [
-    moodDetectionFaceRecognitionEnabled,
-    setMoodDetectionFaceRecognitionEnabled,
-  ] = useState<boolean>(SETTINGS_DEFAULTS.moodDetectionFaceRecognitionEnabled);
+  const [moodAssistanceEnabled, setMoodAssistanceEnabled] = useState<boolean>(
+    SETTINGS_DEFAULTS.moodDetectionFaceRecognitionEnabled,
+  );
   const [fitnessTrackingEnabled, setFitnessTrackingEnabled] = useState<boolean>(
     SETTINGS_DEFAULTS.fitnessTrackingEnabled,
   );
-  const [
-    calendarNotificationsTrackingEnabled,
-    setCalendarNotificationsTrackingEnabled,
-  ] = useState<boolean>(SETTINGS_DEFAULTS.calendarNotificationsTrackingEnabled);
+  const [calendarContextEnabled, setCalendarContextEnabled] = useState<boolean>(
+    SETTINGS_DEFAULTS.calendarNotificationsTrackingEnabled,
+  );
   const [
     backgroundLocationTrackingEnabled,
     setBackgroundLocationTrackingEnabled,
   ] = useState<boolean>(SETTINGS_DEFAULTS.backgroundLocationTrackingEnabled);
-  const [lifeContextErrors, setLifeContextErrors] = useState<
-    Partial<Record<LifeContextFeatureKey, string>>
-  >({});
-  const [disclosureFeature, setDisclosureFeature] =
-    useState<LifeContextFeatureKey | null>(null);
-  const [isApplyingLifeContextToggle, setIsApplyingLifeContextToggle] =
-    useState(false);
   const [isUpdatingReminderPreference, setIsUpdatingReminderPreference] =
     useState(false);
   const [providerPendingAction, setProviderPendingAction] = useState<
@@ -275,6 +271,22 @@ const SettingsScreen = () => {
   const [reminderRuntime, setReminderRuntime] = useState<
     ReminderRuntimeState | undefined
   >();
+  const [backgroundLocationRuntimeStatus, setBackgroundLocationRuntimeStatus] =
+    useState<{
+      fullyEnabled: boolean;
+      reason?: string;
+    } | null>(null);
+  const [callActivityDiagnostics, setCallActivityDiagnostics] =
+    useState<AndroidCallActivityRuntimeDiagnostics | null>(null);
+  const callActivityCollectionSupported = React.useMemo(
+    () =>
+      Platform.OS === "android" && isAndroidCallActivityCollectionSupported(),
+    [],
+  );
+
+  const refreshCallActivityDiagnostics = useCallback(async () => {
+    return await getAndroidCallActivityRuntimeDiagnostics();
+  }, []);
 
   const syncReminderRuntimeFromPreferences = useCallback(
     async (
@@ -298,6 +310,125 @@ const SettingsScreen = () => {
     [],
   );
 
+  const showLifeContextConsentPrompt = useCallback(
+    (feature: LifeContextFeatureKey): Promise<boolean> => {
+      const disclosure = LIFE_CONTEXT_DISCLOSURE[feature];
+
+      return new Promise((resolve) => {
+        let settled = false;
+
+        const complete = (value: boolean) => {
+          if (settled) return;
+          settled = true;
+          resolve(value);
+        };
+
+        Alert.alert(
+          disclosure.title,
+          `${disclosure.description}\n\n${disclosure.consentLabel}`,
+          [
+            {
+              text: "Cancel",
+              style: "cancel",
+              onPress: () => complete(false),
+            },
+            {
+              text: "Enable",
+              onPress: () => complete(true),
+            },
+          ],
+          {
+            cancelable: true,
+            onDismiss: () => complete(false),
+          },
+        );
+      });
+    },
+    [],
+  );
+
+  const evaluateFeaturePermission = useCallback(
+    async (feature: LifeContextFeatureKey) => {
+      const currentPlatform: "ios" | "android" | "web" =
+        Platform.OS === "ios"
+          ? "ios"
+          : Platform.OS === "android"
+            ? "android"
+            : "web";
+
+      return await evaluateLifeContextFeaturePermission({
+        feature,
+        platform: currentPlatform,
+        locationTrackingEnabled,
+        backgroundTrackingRuntimeEnabled:
+          locationTrackingRuntimeConfig?.enableBackgroundLocationTracking ??
+          false,
+        ensureForegroundLocationPermission: async () => {
+          const permission = await Location.getForegroundPermissionsAsync();
+          if (permission.status === "granted") return true;
+
+          const requested = await Location.requestForegroundPermissionsAsync();
+          return requested.status === "granted";
+        },
+        ensureBackgroundLocationPermission: async () => {
+          const permission = await Location.getBackgroundPermissionsAsync();
+          if (permission.status === "granted") return true;
+
+          const requested = await Location.requestBackgroundPermissionsAsync();
+          return requested.status === "granted";
+        },
+        ensureCallLogsPermission: async () => {
+          if (!isAndroidCallActivityCollectionSupported()) {
+            return false;
+          }
+
+          return await requestAndroidCallActivityPermission();
+        },
+        ensureMoodDetectionPermission: async () => true,
+        ensureCalendarNotificationPermission: async () => {
+          const status = await ensureReminderPermissions();
+          return status === "granted";
+        },
+        ensureFitnessPermission: async () => {
+          if (Platform.OS === "ios") {
+            const setupIssue = getAppleHealthSetupIssue();
+            if (setupIssue) {
+              return {
+                ok: false,
+                reason: setupIssue,
+              };
+            }
+
+            return { ok: true };
+          }
+
+          if (Platform.OS === "android") {
+            const hasGoogleFitIntegration = (integrations ?? []).some(
+              (integration) =>
+                integration.provider === "google_fit" &&
+                integration.status === "connected",
+            );
+
+            if (!hasGoogleFitIntegration) {
+              return {
+                ok: false,
+                reason:
+                  "Connect Google Fit first to enable fitness context on Android.",
+              };
+            }
+          }
+
+          return { ok: true };
+        },
+      });
+    },
+    [
+      integrations,
+      locationTrackingEnabled,
+      locationTrackingRuntimeConfig?.enableBackgroundLocationTracking,
+    ],
+  );
+
   const savePreferencePatch = useCallback(
     async (
       patch: Partial<{
@@ -311,12 +442,6 @@ const SettingsScreen = () => {
         quietHoursEnd: string;
         autoSyncIntegrations: boolean;
         defaultMemoryMood: string;
-        locationTrackingEnabled: boolean;
-        callLogsTrackingEnabled: boolean;
-        moodDetectionFaceRecognitionEnabled: boolean;
-        fitnessTrackingEnabled: boolean;
-        calendarNotificationsTrackingEnabled: boolean;
-        backgroundLocationTrackingEnabled: boolean;
       }>,
     ) => {
       if (!preferences) {
@@ -351,21 +476,6 @@ const SettingsScreen = () => {
           patch.autoSyncIntegrations ?? preferences.autoSyncIntegrations,
         defaultMemoryMood:
           patch.defaultMemoryMood ?? preferences.defaultMemoryMood,
-        locationTrackingEnabled:
-          patch.locationTrackingEnabled ?? locationTrackingEnabled,
-        callLogsTrackingEnabled:
-          patch.callLogsTrackingEnabled ?? callLogsTrackingEnabled,
-        moodDetectionFaceRecognitionEnabled:
-          patch.moodDetectionFaceRecognitionEnabled ??
-          moodDetectionFaceRecognitionEnabled,
-        fitnessTrackingEnabled:
-          patch.fitnessTrackingEnabled ?? fitnessTrackingEnabled,
-        calendarNotificationsTrackingEnabled:
-          patch.calendarNotificationsTrackingEnabled ??
-          calendarNotificationsTrackingEnabled,
-        backgroundLocationTrackingEnabled:
-          patch.backgroundLocationTrackingEnabled ??
-          backgroundLocationTrackingEnabled,
       });
 
       await syncReminderRuntimeFromPreferences({
@@ -390,12 +500,6 @@ const SettingsScreen = () => {
     [
       preferences,
       router,
-      backgroundLocationTrackingEnabled,
-      callLogsTrackingEnabled,
-      calendarNotificationsTrackingEnabled,
-      fitnessTrackingEnabled,
-      locationTrackingEnabled,
-      moodDetectionFaceRecognitionEnabled,
       syncReminderRuntimeFromPreferences,
       syncUserPreferences,
     ],
@@ -414,17 +518,16 @@ const SettingsScreen = () => {
       setDefaultMemoryMood(SETTINGS_DEFAULTS.defaultMemoryMood);
       setLocationTrackingEnabled(SETTINGS_DEFAULTS.locationTrackingEnabled);
       setCallLogsTrackingEnabled(SETTINGS_DEFAULTS.callLogsTrackingEnabled);
-      setMoodDetectionFaceRecognitionEnabled(
+      setMoodAssistanceEnabled(
         SETTINGS_DEFAULTS.moodDetectionFaceRecognitionEnabled,
       );
       setFitnessTrackingEnabled(SETTINGS_DEFAULTS.fitnessTrackingEnabled);
-      setCalendarNotificationsTrackingEnabled(
+      setCalendarContextEnabled(
         SETTINGS_DEFAULTS.calendarNotificationsTrackingEnabled,
       );
       setBackgroundLocationTrackingEnabled(
         SETTINGS_DEFAULTS.backgroundLocationTrackingEnabled,
       );
-      setLifeContextErrors({});
       return;
     }
 
@@ -454,7 +557,7 @@ const SettingsScreen = () => {
       preferences.callLogsTrackingEnabled ??
         SETTINGS_DEFAULTS.callLogsTrackingEnabled,
     );
-    setMoodDetectionFaceRecognitionEnabled(
+    setMoodAssistanceEnabled(
       preferences.moodDetectionFaceRecognitionEnabled ??
         SETTINGS_DEFAULTS.moodDetectionFaceRecognitionEnabled,
     );
@@ -462,7 +565,7 @@ const SettingsScreen = () => {
       preferences.fitnessTrackingEnabled ??
         SETTINGS_DEFAULTS.fitnessTrackingEnabled,
     );
-    setCalendarNotificationsTrackingEnabled(
+    setCalendarContextEnabled(
       preferences.calendarNotificationsTrackingEnabled ??
         SETTINGS_DEFAULTS.calendarNotificationsTrackingEnabled,
     );
@@ -512,6 +615,65 @@ const SettingsScreen = () => {
       setReminderRuntime(runtime);
     })();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!backgroundLocationTrackingEnabled) {
+      setBackgroundLocationRuntimeStatus(null);
+      return;
+    }
+
+    void (async () => {
+      const status = await getBackgroundLocationEnablementStatus();
+      if (cancelled) return;
+
+      const runtimeAllowed =
+        locationTrackingRuntimeConfig?.enableBackgroundLocationTracking ??
+        false;
+
+      setBackgroundLocationRuntimeStatus({
+        fullyEnabled: status.fullyEnabled && runtimeAllowed,
+        reason: status.reason,
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    backgroundLocationTrackingEnabled,
+    locationTrackingRuntimeConfig?.enableBackgroundLocationTracking,
+  ]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      const diagnostics = await refreshCallActivityDiagnostics();
+      if (cancelled) return;
+      setCallActivityDiagnostics(diagnostics);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [callLogsTrackingEnabled, refreshCallActivityDiagnostics]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState !== "active") return;
+
+      void (async () => {
+        const diagnostics = await refreshCallActivityDiagnostics();
+        setCallActivityDiagnostics(diagnostics);
+      })();
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [refreshCallActivityDiagnostics]);
 
   const updateReminderType = useCallback(
     async (nextReminderType: "daily" | "weekly") => {
@@ -732,337 +894,355 @@ const SettingsScreen = () => {
     [defaultMemoryMood, savePreferencePatch],
   );
 
-  const setLifeContextError = useCallback(
-    (feature: LifeContextFeatureKey, message?: string) => {
-      setLifeContextErrors((previous) => {
-        const next = { ...previous };
-        if (message) {
-          next[feature] = message;
-        } else {
-          delete next[feature];
+  const handleLocationTrackingToggle = useCallback(async () => {
+    if (!preferences) {
+      Alert.alert("Complete quick setup", "Set your preferences first.", [
+        {
+          text: "Open Setup",
+          onPress: () => router.push("/quick-setup"),
+        },
+        { text: "Cancel", style: "cancel" },
+      ]);
+      return;
+    }
+
+    const previous = locationTrackingEnabled;
+    const next = !locationTrackingEnabled;
+
+    if (next) {
+      const permission = await Location.getForegroundPermissionsAsync();
+      if (permission.status !== "granted") {
+        const requested = await Location.requestForegroundPermissionsAsync();
+        if (requested.status !== "granted") {
+          setLocationTrackingEnabled(false);
+          await updateMyLocationTrackingState({
+            locationTrackingEnabled: false,
+            locationPermissionStatus: "denied",
+          });
+
+          Alert.alert(
+            "Location permission needed",
+            "DayLog only stores coarse area signals while the app is open. Enable location permission in system settings to turn this on.",
+            [
+              {
+                text: "Open Settings",
+                onPress: () => {
+                  void Linking.openSettings();
+                },
+              },
+              { text: "Not now", style: "cancel" },
+            ],
+          );
+          return;
         }
-        return next;
+      }
+    }
+
+    setLocationTrackingEnabled(next);
+
+    if (!next) {
+      setBackgroundLocationTrackingEnabled(false);
+    }
+
+    try {
+      await updateMyLocationTrackingState({
+        locationTrackingEnabled: next,
+        backgroundLocationTrackingEnabled: next
+          ? backgroundLocationTrackingEnabled
+          : false,
+        locationPermissionStatus: next
+          ? (preferences.locationPermissionStatus ?? "unknown")
+          : "unknown",
       });
-    },
-    [],
-  );
 
-  const getFeatureEnabled = useCallback(
-    (feature: LifeContextFeatureKey): boolean => {
-      switch (feature) {
-        case "location":
-          return locationTrackingEnabled;
-        case "callLogs":
-          return callLogsTrackingEnabled;
-        case "moodDetection":
-          return moodDetectionFaceRecognitionEnabled;
-        case "fitness":
-          return fitnessTrackingEnabled;
-        case "calendarNotifications":
-          return calendarNotificationsTrackingEnabled;
-        case "backgroundLocation":
-          return backgroundLocationTrackingEnabled;
-        default:
-          return false;
-      }
-    },
-    [
-      backgroundLocationTrackingEnabled,
-      callLogsTrackingEnabled,
-      calendarNotificationsTrackingEnabled,
-      fitnessTrackingEnabled,
-      locationTrackingEnabled,
-      moodDetectionFaceRecognitionEnabled,
-    ],
-  );
+      setIntegrationFeedback({
+        type: "success",
+        message: next
+          ? "Foreground location tracking enabled. DayLog only collects coarse area signals while the app is open."
+          : "Foreground location tracking disabled.",
+      });
+    } catch {
+      setLocationTrackingEnabled(previous);
+      Alert.alert(
+        "Update failed",
+        "Location tracking preference could not be saved.",
+      );
+    }
+  }, [
+    backgroundLocationTrackingEnabled,
+    locationTrackingEnabled,
+    preferences,
+    router,
+    updateMyLocationTrackingState,
+  ]);
 
-  const setFeatureEnabled = useCallback(
-    (feature: LifeContextFeatureKey, nextValue: boolean) => {
-      switch (feature) {
-        case "location":
-          setLocationTrackingEnabled(nextValue);
-          return;
-        case "callLogs":
-          setCallLogsTrackingEnabled(nextValue);
-          return;
-        case "moodDetection":
-          setMoodDetectionFaceRecognitionEnabled(nextValue);
-          return;
-        case "fitness":
-          setFitnessTrackingEnabled(nextValue);
-          return;
-        case "calendarNotifications":
-          setCalendarNotificationsTrackingEnabled(nextValue);
-          return;
-        case "backgroundLocation":
-          setBackgroundLocationTrackingEnabled(nextValue);
-          return;
-      }
-    },
-    [],
-  );
+  const ensurePreferencesReady = useCallback(() => {
+    if (preferences) return true;
 
-  const requestPermissionsForFeature = useCallback(
+    Alert.alert("Complete quick setup", "Set your preferences first.", [
+      {
+        text: "Open Setup",
+        onPress: () => router.push("/quick-setup"),
+      },
+      { text: "Cancel", style: "cancel" },
+    ]);
+
+    return false;
+  }, [preferences, router]);
+
+  const applyLifeContextPreferencePatch = useCallback(
     async (
-      feature: LifeContextFeatureKey,
-    ): Promise<{ ok: true } | { ok: false; reason: string }> => {
-      type AndroidPermission = Parameters<
-        typeof PermissionsAndroid.requestMultiple
-      >[0][number];
-
-      return await evaluateLifeContextFeaturePermission({
-        feature,
-        platform:
-          Platform.OS === "android"
-            ? "android"
-            : Platform.OS === "ios"
-              ? "ios"
-              : "web",
-        locationTrackingEnabled,
-        backgroundTrackingRuntimeEnabled:
-          locationTrackingRuntimeConfig?.enableBackgroundLocationTracking ??
-          false,
-        ensureForegroundLocationPermission: async () => {
-          const existingPermission =
-            await Location.getForegroundPermissionsAsync();
-          if (existingPermission.status === "granted") {
-            return true;
-          }
-
-          const requestedPermission =
-            await Location.requestForegroundPermissionsAsync();
-          return requestedPermission.status === "granted";
-        },
-        ensureBackgroundLocationPermission: async () => {
-          const backgroundPermission =
-            await Location.getBackgroundPermissionsAsync();
-          if (backgroundPermission.status === "granted") {
-            return true;
-          }
-
-          const requestedBackground =
-            await Location.requestBackgroundPermissionsAsync();
-          return requestedBackground.status === "granted";
-        },
-        ensureCallLogsPermission: async () => {
-          if (Platform.OS !== "android") return false;
-
-          const permissionMap = PermissionsAndroid.PERMISSIONS as Record<
-            string,
-            string | undefined
-          >;
-
-          const requestedPermissions = [
-            permissionMap.READ_CALL_LOG,
-            permissionMap.READ_PHONE_STATE,
-          ].filter(
-            (value): value is AndroidPermission => typeof value === "string",
-          );
-
-          if (requestedPermissions.length === 0) {
-            return false;
-          }
-
-          const results =
-            await PermissionsAndroid.requestMultiple(requestedPermissions);
-          const hasDeniedPermission = requestedPermissions.some(
-            (permission) =>
-              results[permission] !== PermissionsAndroid.RESULTS.GRANTED,
-          );
-
-          return !hasDeniedPermission;
-        },
-        ensureMoodDetectionPermission: async () => {
-          const cameraPermission =
-            await ImagePicker.requestCameraPermissionsAsync();
-          return cameraPermission.status === "granted";
-        },
-        ensureCalendarNotificationPermission: async () => {
-          const permission = await ensureReminderPermissions();
-          return permission === "granted";
-        },
-        ensureFitnessPermission: async () => {
-          if (Platform.OS !== "ios") {
-            return { ok: true };
-          }
-
-          const setupIssue = getAppleHealthSetupIssue();
-          if (setupIssue) {
-            return {
-              ok: false,
-              reason: setupIssue,
-            };
-          }
-
-          return { ok: true };
-        },
-      });
+      patch: Partial<{
+        callLogsTrackingEnabled: boolean;
+        moodDetectionFaceRecognitionEnabled: boolean;
+        fitnessTrackingEnabled: boolean;
+        calendarNotificationsTrackingEnabled: boolean;
+        backgroundLocationTrackingEnabled: boolean;
+      }>,
+    ) => {
+      await updateMyLocationTrackingState(patch);
     },
-    [locationTrackingEnabled, locationTrackingRuntimeConfig],
+    [updateMyLocationTrackingState],
   );
 
-  const applyLifeContextToggle = useCallback(
-    async (feature: LifeContextFeatureKey, nextValue: boolean) => {
-      if (!preferences) {
-        Alert.alert("Complete quick setup", "Set your preferences first.", [
-          {
-            text: "Open Setup",
-            onPress: () => router.push("/quick-setup"),
-          },
-          { text: "Cancel", style: "cancel" },
-        ]);
+  const handleCalendarContextToggle = useCallback(async () => {
+    if (!ensurePreferencesReady()) return;
+
+    const previous = calendarContextEnabled;
+    const next = !calendarContextEnabled;
+
+    if (next) {
+      const consented = await showLifeContextConsentPrompt(
+        "calendarNotifications",
+      );
+      if (!consented) return;
+
+      const permission = await evaluateFeaturePermission(
+        "calendarNotifications",
+      );
+      if (!permission.ok) {
+        Alert.alert("Permission required", permission.reason);
         return;
       }
+    }
 
-      if (isApplyingLifeContextToggle) {
+    setCalendarContextEnabled(next);
+
+    try {
+      await applyLifeContextPreferencePatch({
+        calendarNotificationsTrackingEnabled: next,
+      });
+
+      setIntegrationFeedback({
+        type: "success",
+        message: next
+          ? "Calendar and reminder context enabled."
+          : "Calendar and reminder context disabled.",
+      });
+    } catch {
+      setCalendarContextEnabled(previous);
+      Alert.alert(
+        "Update failed",
+        "Calendar context preference could not be saved.",
+      );
+    }
+  }, [
+    applyLifeContextPreferencePatch,
+    calendarContextEnabled,
+    ensurePreferencesReady,
+    evaluateFeaturePermission,
+    showLifeContextConsentPrompt,
+  ]);
+
+  const handleFitnessTrackingToggle = useCallback(async () => {
+    if (!ensurePreferencesReady()) return;
+
+    const previous = fitnessTrackingEnabled;
+    const next = !fitnessTrackingEnabled;
+
+    if (next) {
+      const consented = await showLifeContextConsentPrompt("fitness");
+      if (!consented) return;
+
+      const permission = await evaluateFeaturePermission("fitness");
+      if (!permission.ok) {
+        Alert.alert("Fitness setup required", permission.reason);
         return;
       }
+    }
 
-      const previousValue = getFeatureEnabled(feature);
-      setFeatureEnabled(feature, nextValue);
-      setLifeContextError(feature, undefined);
-      setIsApplyingLifeContextToggle(true);
+    setFitnessTrackingEnabled(next);
 
-      try {
-        if (nextValue) {
-          const permissionResult = await requestPermissionsForFeature(feature);
-          if (!permissionResult.ok) {
-            throw new Error(permissionResult.reason);
-          }
-        }
+    try {
+      await applyLifeContextPreferencePatch({
+        fitnessTrackingEnabled: next,
+      });
 
-        if (feature === "location") {
-          if (nextValue) {
-            await updateMyLocationTrackingState({
-              locationTrackingEnabled: true,
-              locationPermissionStatus: "granted",
-            });
-          } else {
-            await updateMyLocationTrackingState({
-              locationTrackingEnabled: false,
-              backgroundLocationTrackingEnabled: false,
-              locationPermissionStatus: "unknown",
-            });
-            setBackgroundLocationTrackingEnabled(false);
-          }
-        }
+      setIntegrationFeedback({
+        type: "success",
+        message: next
+          ? "Fitness context enabled."
+          : "Fitness context disabled.",
+      });
+    } catch {
+      setFitnessTrackingEnabled(previous);
+      Alert.alert(
+        "Update failed",
+        "Fitness context preference could not be saved.",
+      );
+    }
+  }, [
+    applyLifeContextPreferencePatch,
+    ensurePreferencesReady,
+    evaluateFeaturePermission,
+    fitnessTrackingEnabled,
+    showLifeContextConsentPrompt,
+  ]);
 
-        if (feature === "backgroundLocation") {
-          if (nextValue) {
-            await updateMyLocationTrackingState({
-              backgroundLocationTrackingEnabled: true,
-              locationPermissionStatus: "granted",
-              backgroundLocationAutoDisabledAt: 0,
-              backgroundLocationAutoDisableReason: "",
-            });
-          } else {
-            await updateMyLocationTrackingState({
-              backgroundLocationTrackingEnabled: false,
-            });
-          }
-        }
+  const handleCallSummaryToggle = useCallback(async () => {
+    if (!ensurePreferencesReady()) return;
 
-        if (feature === "callLogs") {
-          await savePreferencePatch({ callLogsTrackingEnabled: nextValue });
-        }
+    const previous = callLogsTrackingEnabled;
+    const next = !callLogsTrackingEnabled;
 
-        if (feature === "moodDetection") {
-          await savePreferencePatch({
-            moodDetectionFaceRecognitionEnabled: nextValue,
-          });
-        }
+    if (next && Platform.OS === "android" && !callActivityCollectionSupported) {
+      Alert.alert(
+        "Communication summary unavailable",
+        "This Android build does not include the native call activity module. Install and build with call activity support, then try again.",
+      );
+      return;
+    }
 
-        if (feature === "fitness") {
-          await savePreferencePatch({ fitnessTrackingEnabled: nextValue });
-        }
+    if (next) {
+      const consented = await showLifeContextConsentPrompt("callLogs");
+      if (!consented) return;
 
-        if (feature === "calendarNotifications") {
-          await savePreferencePatch({
-            calendarNotificationsTrackingEnabled: nextValue,
-          });
-        }
-
-        setIntegrationFeedback({
-          type: "success",
-          message: `${LIFE_CONTEXT_DISCLOSURE[feature].title} ${nextValue ? "enabled" : "disabled"}.`,
-        });
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Could not update life context preference.";
-
-        setFeatureEnabled(feature, previousValue);
-        setLifeContextError(feature, message);
-
-        Alert.alert("Preference update failed", message, [
-          {
-            text: "Open Settings",
-            onPress: () => {
-              void Linking.openSettings();
-            },
-          },
-          { text: "Not now", style: "cancel" },
-        ]);
-      } finally {
-        setIsApplyingLifeContextToggle(false);
+      const permission = await evaluateFeaturePermission("callLogs");
+      if (!permission.ok) {
+        Alert.alert("Call summary unavailable", permission.reason);
+        return;
       }
-    },
-    [
-      getFeatureEnabled,
-      isApplyingLifeContextToggle,
-      preferences,
-      requestPermissionsForFeature,
-      router,
-      savePreferencePatch,
-      setFeatureEnabled,
-      setLifeContextError,
-      updateMyLocationTrackingState,
-    ],
-  );
+    }
 
-  const handleLifeContextTogglePress = useCallback(
-    (feature: LifeContextFeatureKey) => {
-      handleLifeContextTogglePressFlow(feature, {
-        hasPreferences: Boolean(preferences),
-        isCurrentlyEnabled: getFeatureEnabled(feature),
-        promptSetup: () => {
-          Alert.alert("Complete quick setup", "Set your preferences first.", [
-            {
-              text: "Open Setup",
-              onPress: () => router.push("/quick-setup"),
-            },
-            { text: "Cancel", style: "cancel" },
-          ]);
-        },
-        openDisclosure: (nextFeature) => {
-          setDisclosureFeature(nextFeature);
-        },
-        applyDisable: async (nextFeature) => {
-          await applyLifeContextToggle(nextFeature, false);
-        },
+    setCallLogsTrackingEnabled(next);
+
+    try {
+      await applyLifeContextPreferencePatch({
+        callLogsTrackingEnabled: next,
       });
-    },
-    [applyLifeContextToggle, getFeatureEnabled, preferences, router],
-  );
 
-  const confirmLifeContextDisclosure = useCallback(() => {
-    if (!disclosureFeature) return;
-
-    const feature = disclosureFeature;
-    setDisclosureFeature(null);
-    void applyLifeContextToggle(feature, true);
-  }, [applyLifeContextToggle, disclosureFeature]);
-
-  const featureState = useCallback(
-    (feature: LifeContextFeatureKey, enabled: boolean): FeatureState => {
-      return deriveLifeContextFeatureState({
-        enabled,
-        errorMessage: lifeContextErrors[feature],
+      setIntegrationFeedback({
+        type: "success",
+        message: next
+          ? "Communication call summary enabled."
+          : "Communication call summary disabled.",
       });
-    },
-    [lifeContextErrors],
-  );
+    } catch {
+      setCallLogsTrackingEnabled(previous);
+      Alert.alert(
+        "Update failed",
+        "Communication summary preference could not be saved.",
+      );
+    }
+  }, [
+    applyLifeContextPreferencePatch,
+    callActivityCollectionSupported,
+    callLogsTrackingEnabled,
+    ensurePreferencesReady,
+    evaluateFeaturePermission,
+    showLifeContextConsentPrompt,
+  ]);
+
+  const handleMoodAssistanceToggle = useCallback(async () => {
+    if (!ensurePreferencesReady()) return;
+
+    const previous = moodAssistanceEnabled;
+    const next = !moodAssistanceEnabled;
+
+    if (next) {
+      const consented = await showLifeContextConsentPrompt("moodDetection");
+      if (!consented) return;
+
+      const permission = await evaluateFeaturePermission("moodDetection");
+      if (!permission.ok) {
+        Alert.alert("Mood assistance unavailable", permission.reason);
+        return;
+      }
+    }
+
+    setMoodAssistanceEnabled(next);
+
+    try {
+      await applyLifeContextPreferencePatch({
+        moodDetectionFaceRecognitionEnabled: next,
+      });
+
+      setIntegrationFeedback({
+        type: "success",
+        message: next
+          ? "Mood assistance enabled."
+          : "Mood assistance disabled.",
+      });
+    } catch {
+      setMoodAssistanceEnabled(previous);
+      Alert.alert(
+        "Update failed",
+        "Mood assistance preference could not be saved.",
+      );
+    }
+  }, [
+    applyLifeContextPreferencePatch,
+    ensurePreferencesReady,
+    evaluateFeaturePermission,
+    moodAssistanceEnabled,
+    showLifeContextConsentPrompt,
+  ]);
+
+  const handleBackgroundLocationTrackingToggle = useCallback(async () => {
+    if (!ensurePreferencesReady()) return;
+
+    const previous = backgroundLocationTrackingEnabled;
+    const next = !backgroundLocationTrackingEnabled;
+
+    if (next) {
+      const consented =
+        await showLifeContextConsentPrompt("backgroundLocation");
+      if (!consented) return;
+
+      const permission = await evaluateFeaturePermission("backgroundLocation");
+      if (!permission.ok) {
+        Alert.alert("Background location unavailable", permission.reason);
+        return;
+      }
+    }
+
+    setBackgroundLocationTrackingEnabled(next);
+
+    try {
+      await applyLifeContextPreferencePatch({
+        backgroundLocationTrackingEnabled: next,
+      });
+
+      setIntegrationFeedback({
+        type: "success",
+        message: next
+          ? "Controlled background location enabled."
+          : "Controlled background location disabled.",
+      });
+    } catch {
+      setBackgroundLocationTrackingEnabled(previous);
+      Alert.alert(
+        "Update failed",
+        "Background location preference could not be saved.",
+      );
+    }
+  }, [
+    applyLifeContextPreferencePatch,
+    backgroundLocationTrackingEnabled,
+    ensurePreferencesReady,
+    evaluateFeaturePermission,
+    showLifeContextConsentPrompt,
+  ]);
 
   /* ── Callbacks ────────────────────────── */
   const handleSignOut = useCallback(() => {
@@ -1272,6 +1452,7 @@ const SettingsScreen = () => {
     async (provider: string) => {
       setProviderAction(provider, "sync");
       setIntegrationFeedback(null);
+      const userTimeZone = getResolvedTimeZone();
 
       try {
         if (provider === "apple_health") {
@@ -1285,8 +1466,10 @@ const SettingsScreen = () => {
             return;
           }
 
-          const appleHealthData =
-            await collectAppleHealthDailyDataForDay(todayDayKey);
+          const appleHealthData = await collectAppleHealthDailyDataForDay(
+            todayDayKey,
+            userTimeZone,
+          );
 
           await syncAppleHealthDailyData({
             dayKey: todayDayKey,
@@ -1306,13 +1489,17 @@ const SettingsScreen = () => {
         const result = await syncMyIntegrationForDay({
           provider,
           dayKey: todayDayKey,
+          timeZone: userTimeZone,
         });
 
         let screenTimeMessage = "";
         if (provider === "google_fit" && Platform.OS === "android") {
           try {
             const screenTimeData =
-              await collectAndroidScreenTimeDailyDataForDay(todayDayKey);
+              await collectAndroidScreenTimeDailyDataForDay(
+                todayDayKey,
+                userTimeZone,
+              );
 
             await upsertMyIntegrationDailyData({
               provider: "google_fit",
@@ -1409,23 +1596,6 @@ const SettingsScreen = () => {
     );
   }, []);
 
-  const handleShowAppleHealthBuildInstructions = useCallback(() => {
-    Alert.alert(
-      "Apple Health build instructions",
-      [
-        "Run these commands from the repo root:",
-        "",
-        "iOS simulator:",
-        "pnpm --filter mobile ios:dev-client",
-        "",
-        "Physical iPhone:",
-        "pnpm --filter mobile ios:dev-client-device",
-        "",
-        "Then open the DayLog dev client app and tap Sync now.",
-      ].join("\n"),
-    );
-  }, []);
-
   const isLoading =
     isAuthLoading ||
     (isAuthenticated &&
@@ -1467,8 +1637,19 @@ const SettingsScreen = () => {
     supportedProviders && supportedProviders.length > 0
       ? supportedProviders
       : Object.keys(INTEGRATION_PROVIDER_META);
-  const isBackgroundTrackingRuntimeEnabled =
-    locationTrackingRuntimeConfig?.enableBackgroundLocationTracking ?? false;
+  const backgroundLocationStatusLabel = backgroundLocationTrackingEnabled
+    ? backgroundLocationRuntimeStatus?.fullyEnabled
+      ? "enabled"
+      : "Not fully enabled"
+    : "disabled";
+  const callActivityModuleStatusLabel =
+    callActivityDiagnostics?.moduleStatus === "not_supported"
+      ? "not supported"
+      : (callActivityDiagnostics?.moduleStatus ?? "checking");
+  const callActivityPermissionStatusLabel =
+    callActivityDiagnostics?.permissionStatus === "not_supported"
+      ? "not supported"
+      : (callActivityDiagnostics?.permissionStatus ?? "checking");
 
   /* ── Toggle row helper ───────────────── */
   const ToggleRow = ({
@@ -1716,14 +1897,6 @@ const SettingsScreen = () => {
                               How to enable
                             </Text>
                           </TouchableOpacity>
-                          <TouchableOpacity
-                            onPress={handleShowAppleHealthBuildInstructions}
-                            activeOpacity={0.75}
-                          >
-                            <Text style={styles.appleHealthHintAction}>
-                              Build instructions
-                            </Text>
-                          </TouchableOpacity>
                         </View>
                       )}
 
@@ -1956,93 +2129,26 @@ const SettingsScreen = () => {
               }}
               disabled={preferences === null}
             />
-            <Text style={styles.integrationSubMuted}>
-              Life-context collection controls are managed below.
-            </Text>
-          </AppCard>
-        </View>
-
-        <View style={styles.pad}>
-          <SectionHeader title="Life Context Tracking" />
-          <AppCard>
-            <Text style={styles.integrationSubMuted}>
-              Enable only what you want DayLog to use for context. Each toggle
-              requires explicit consent before activation.
-            </Text>
             <View style={styles.divider} />
             <ToggleRow
-              label="Location"
-              subtitle={`State: ${featureState("location", locationTrackingEnabled)}. ${lifeContextErrors.location ?? (preferences?.locationPermissionStatus === "denied" ? "Permission denied. Enable location permission in system settings." : "Coarse location context while app is open.")}`}
+              label="Foreground Location Tracking"
+              subtitle={
+                preferences?.locationPermissionStatus === "denied"
+                  ? "Permission denied. Enable location in system settings and turn this back on."
+                  : "Collect coarse location only while the app is open."
+              }
               value={locationTrackingEnabled}
               onToggle={() => {
-                handleLifeContextTogglePress("location");
+                void handleLocationTrackingToggle();
               }}
-              disabled={preferences === null || isApplyingLifeContextToggle}
+              disabled={preferences === null}
               testID="location-tracking-switch"
             />
-            <View style={styles.divider} />
-            <ToggleRow
-              label="Call Logs"
-              subtitle={`State: ${featureState("callLogs", callLogsTrackingEnabled)}. ${lifeContextErrors.callLogs ?? "Uses call count and duration metadata only."}`}
-              value={callLogsTrackingEnabled}
-              onToggle={() => {
-                handleLifeContextTogglePress("callLogs");
-              }}
-              disabled={preferences === null || isApplyingLifeContextToggle}
-            />
-            <View style={styles.divider} />
-            <ToggleRow
-              label="Mood Detection (Face Recognition)"
-              subtitle={`State: ${featureState("moodDetection", moodDetectionFaceRecognitionEnabled)}. ${lifeContextErrors.moodDetection ?? "Requires camera permission for on-device mood signal collection."}`}
-              value={moodDetectionFaceRecognitionEnabled}
-              onToggle={() => {
-                handleLifeContextTogglePress("moodDetection");
-              }}
-              disabled={preferences === null || isApplyingLifeContextToggle}
-            />
-            <View style={styles.divider} />
-            <ToggleRow
-              label="Fitness"
-              subtitle={`State: ${featureState("fitness", fitnessTrackingEnabled)}. ${lifeContextErrors.fitness ?? "Uses health/activity summaries from connected providers."}`}
-              value={fitnessTrackingEnabled}
-              onToggle={() => {
-                handleLifeContextTogglePress("fitness");
-              }}
-              disabled={preferences === null || isApplyingLifeContextToggle}
-            />
-            <View style={styles.divider} />
-            <ToggleRow
-              label="Calendar and Notifications"
-              subtitle={`State: ${featureState("calendarNotifications", calendarNotificationsTrackingEnabled)}. ${lifeContextErrors.calendarNotifications ?? "Requires notification permission to capture reminder delivery context."}`}
-              value={calendarNotificationsTrackingEnabled}
-              onToggle={() => {
-                handleLifeContextTogglePress("calendarNotifications");
-              }}
-              disabled={preferences === null || isApplyingLifeContextToggle}
-            />
-            <View style={styles.divider} />
-            <ToggleRow
-              label="Background Location (Controlled)"
-              subtitle={`State: ${featureState("backgroundLocation", backgroundLocationTrackingEnabled)}. ${lifeContextErrors.backgroundLocation ?? (isBackgroundTrackingRuntimeEnabled ? "Runs in batches with battery telemetry and auto-disable safeguards." : "Disabled by runtime feature flag.")}`}
-              value={backgroundLocationTrackingEnabled}
-              onToggle={() => {
-                handleLifeContextTogglePress("backgroundLocation");
-              }}
-              disabled={
-                preferences === null ||
-                isApplyingLifeContextToggle ||
-                !locationTrackingEnabled ||
-                !isBackgroundTrackingRuntimeEnabled
-              }
-            />
-            {(preferences?.backgroundLocationAutoDisabledAt ?? 0) > 0 &&
-            preferences?.backgroundLocationAutoDisableReason ? (
-              <Text style={styles.integrationErrorText}>
-                Auto-disabled: {preferences.backgroundLocationAutoDisableReason}
-              </Text>
-            ) : null}
             <Text style={styles.integrationSubMuted}>
-              Last location update:{" "}
+              Permission: {preferences?.locationPermissionStatus ?? "unknown"}
+            </Text>
+            <Text style={styles.integrationSubMuted}>
+              Last update:{" "}
               {preferences?.locationLastUpdatedAt
                 ? new Date(preferences.locationLastUpdatedAt).toLocaleString()
                 : "Never"}
@@ -2050,6 +2156,94 @@ const SettingsScreen = () => {
             <Text style={styles.integrationSubMuted}>
               Last area: {preferences?.locationLastArea ?? "Not available"}
             </Text>
+            <View style={styles.divider} />
+            <ToggleRow
+              label="Background Location (Controlled)"
+              subtitle={
+                locationTrackingRuntimeConfig?.enableBackgroundLocationTracking
+                  ? locationTrackingEnabled
+                    ? backgroundLocationTrackingEnabled &&
+                      backgroundLocationRuntimeStatus?.fullyEnabled === false
+                      ? "Not fully enabled on this device. Verify OS background location setup."
+                      : "Collect coarse batches while app is closed with battery safeguards."
+                    : "Enable foreground location first before background mode."
+                  : "Background location is disabled by server runtime policy."
+              }
+              value={backgroundLocationTrackingEnabled}
+              onToggle={() => {
+                void handleBackgroundLocationTrackingToggle();
+              }}
+              disabled={
+                preferences === null ||
+                !locationTrackingEnabled ||
+                !locationTrackingRuntimeConfig?.enableBackgroundLocationTracking
+              }
+            />
+            <View style={styles.divider} />
+            <ToggleRow
+              label="Fitness Context"
+              subtitle={
+                Platform.OS === "ios"
+                  ? "Uses Apple Health signals on-device when available."
+                  : "Requires connected Google Fit integration on Android."
+              }
+              value={fitnessTrackingEnabled}
+              onToggle={() => {
+                void handleFitnessTrackingToggle();
+              }}
+              disabled={preferences === null}
+            />
+            <View style={styles.divider} />
+            <ToggleRow
+              label="Calendar & Reminder Context"
+              subtitle="Uses reminder/calendar density signals, not message content."
+              value={calendarContextEnabled}
+              onToggle={() => {
+                void handleCalendarContextToggle();
+              }}
+              disabled={preferences === null}
+            />
+            <View style={styles.divider} />
+            <ToggleRow
+              label="Communication Summary"
+              subtitle={
+                Platform.OS === "android"
+                  ? callActivityCollectionSupported
+                    ? "Android only: aggregate call count and total minutes."
+                    : callLogsTrackingEnabled
+                      ? "Native call activity module unavailable on this build. You can disable this toggle."
+                      : "Requires native call activity module in an Android development build."
+                  : "Unavailable on iOS due platform restrictions."
+              }
+              value={callLogsTrackingEnabled}
+              onToggle={() => {
+                void handleCallSummaryToggle();
+              }}
+              disabled={
+                preferences === null ||
+                Platform.OS !== "android" ||
+                (!callActivityCollectionSupported && !callLogsTrackingEnabled)
+              }
+            />
+            <Text style={styles.integrationSubMuted}>
+              Call activity diagnostics: module {callActivityModuleStatusLabel},
+              permission {callActivityPermissionStatusLabel}
+            </Text>
+            {callActivityDiagnostics?.detail ? (
+              <Text style={styles.integrationSubMuted}>
+                {callActivityDiagnostics.detail}
+              </Text>
+            ) : null}
+            <View style={styles.divider} />
+            <ToggleRow
+              label="Mood Assistance (Pattern-based)"
+              subtitle="Lightweight non-camera inference from time/activity patterns."
+              value={moodAssistanceEnabled}
+              onToggle={() => {
+                void handleMoodAssistanceToggle();
+              }}
+              disabled={preferences === null}
+            />
           </AppCard>
         </View>
 
@@ -2078,40 +2272,42 @@ const SettingsScreen = () => {
                 {locationTrackingEnabled ? "enabled" : "disabled"}
               </Text>
               <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Call logs: {callLogsTrackingEnabled ? "enabled" : "disabled"}
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Mood detection:{" "}
-                {moodDetectionFaceRecognitionEnabled ? "enabled" : "disabled"}
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Fitness context:{" "}
-                {fitnessTrackingEnabled ? "enabled" : "disabled"}
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Calendar/notifications:{" "}
-                {calendarNotificationsTrackingEnabled ? "enabled" : "disabled"}
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Background location:{" "}
-                {backgroundLocationTrackingEnabled ? "enabled" : "disabled"}
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
                 Location permission:{" "}
                 {preferences.locationPermissionStatus ?? "unknown"}
               </Text>
-              {typeof preferences.backgroundLocationBatteryImpactScore ===
-              "number" ? (
-                <Text style={[styles.syncText, { marginTop: 4 }]}>
-                  Battery impact estimate:{" "}
-                  {preferences.backgroundLocationBatteryImpactScore}%/hour
-                </Text>
-              ) : null}
               <Text style={[styles.syncText, { marginTop: 4 }]}>
                 Location last update:{" "}
                 {preferences.locationLastUpdatedAt
                   ? new Date(preferences.locationLastUpdatedAt).toLocaleString()
                   : "Never"}
+              </Text>
+              <Text style={[styles.syncText, { marginTop: 4 }]}>
+                Background location: {backgroundLocationStatusLabel}
+              </Text>
+              {backgroundLocationStatusLabel === "Not fully enabled" &&
+              backgroundLocationRuntimeStatus?.reason ? (
+                <Text
+                  style={[styles.syncText, { marginTop: 4, color: c.error }]}
+                >
+                  Background location detail:{" "}
+                  {backgroundLocationRuntimeStatus.reason}
+                </Text>
+              ) : null}
+              <Text style={[styles.syncText, { marginTop: 4 }]}>
+                Fitness context:{" "}
+                {fitnessTrackingEnabled ? "enabled" : "disabled"}
+              </Text>
+              <Text style={[styles.syncText, { marginTop: 4 }]}>
+                Calendar context:{" "}
+                {calendarContextEnabled ? "enabled" : "disabled"}
+              </Text>
+              <Text style={[styles.syncText, { marginTop: 4 }]}>
+                Communication summary:{" "}
+                {callLogsTrackingEnabled ? "enabled" : "disabled"}
+              </Text>
+              <Text style={[styles.syncText, { marginTop: 4 }]}>
+                Mood assistance:{" "}
+                {moodAssistanceEnabled ? "enabled" : "disabled"}
               </Text>
               <Text style={[styles.syncText, { marginTop: 4 }]}>
                 Notification permission:{" "}
@@ -2199,63 +2395,6 @@ const SettingsScreen = () => {
 
         <View style={{ height: 100 }} />
       </ScrollView>
-
-      <Modal
-        transparent
-        animationType="fade"
-        visible={disclosureFeature !== null}
-        onRequestClose={() => setDisclosureFeature(null)}
-      >
-        <TouchableWithoutFeedback onPress={() => setDisclosureFeature(null)}>
-          <View style={styles.disclosureOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={styles.disclosureCard}>
-                <Text style={styles.disclosureTitle}>
-                  {disclosureFeature
-                    ? LIFE_CONTEXT_DISCLOSURE[disclosureFeature].title
-                    : "Life Context Disclosure"}
-                </Text>
-                <Text style={styles.disclosureBody}>
-                  {disclosureFeature
-                    ? LIFE_CONTEXT_DISCLOSURE[disclosureFeature].description
-                    : "Enable this feature only if you explicitly consent."}
-                </Text>
-                <Text style={styles.disclosureConsentLabel}>
-                  {disclosureFeature
-                    ? LIFE_CONTEXT_DISCLOSURE[disclosureFeature].consentLabel
-                    : ""}
-                </Text>
-
-                <View style={styles.disclosureActionsRow}>
-                  <TouchableOpacity
-                    style={styles.disclosureSecondaryButton}
-                    onPress={() => setDisclosureFeature(null)}
-                    disabled={isApplyingLifeContextToggle}
-                    activeOpacity={0.75}
-                  >
-                    <Text style={styles.disclosureSecondaryButtonText}>
-                      Cancel
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.disclosurePrimaryButton}
-                    onPress={confirmLifeContextDisclosure}
-                    disabled={isApplyingLifeContextToggle}
-                    activeOpacity={0.75}
-                  >
-                    <Text style={styles.disclosurePrimaryButtonText}>
-                      {isApplyingLifeContextToggle
-                        ? "Applying..."
-                        : "I Consent"}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
 
       {showQuietHoursPicker && Platform.OS === "ios" && (
         <Modal transparent animationType="slide" visible={showQuietHoursPicker}>
@@ -2403,61 +2542,6 @@ const styles = StyleSheet.create({
   quietHoursChipText: {
     ...Typography.caption1,
     color: c.text,
-    fontWeight: "600",
-  },
-  disclosureOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    paddingHorizontal: Spacing.xl,
-  },
-  disclosureCard: {
-    backgroundColor: c.surface,
-    borderRadius: Radius.lg,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.lg,
-    gap: Spacing.sm,
-  },
-  disclosureTitle: {
-    ...Typography.bodyMedium,
-    color: c.text,
-  },
-  disclosureBody: {
-    ...Typography.callout,
-    color: c.textSecondary,
-  },
-  disclosureConsentLabel: {
-    ...Typography.caption1,
-    color: c.textTertiary,
-  },
-  disclosureActionsRow: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: Spacing.sm,
-    marginTop: Spacing.sm,
-  },
-  disclosureSecondaryButton: {
-    borderWidth: 1,
-    borderColor: c.divider,
-    backgroundColor: c.background,
-    borderRadius: Radius.sm,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
-  disclosureSecondaryButtonText: {
-    ...Typography.caption1,
-    color: c.text,
-    fontWeight: "600",
-  },
-  disclosurePrimaryButton: {
-    borderRadius: Radius.sm,
-    backgroundColor: c.tint,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
-  disclosurePrimaryButtonText: {
-    ...Typography.caption1,
-    color: "#FFF",
     fontWeight: "600",
   },
   modalOverlay: {

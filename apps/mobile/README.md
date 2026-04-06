@@ -39,6 +39,26 @@ Background tracking is runtime-gated and opt-in only.
 - Uses batched coarse points with stay-point/duration context (not route-level traces).
 - Tracks battery impact telemetry and auto-disables when policy thresholds are exceeded.
 
+## Android communication summary setup
+
+Communication summary uses Android-only aggregate call activity and is unavailable on iOS.
+
+- Add native dependency in `apps/mobile`:
+
+```bash
+pnpm --filter mobile add react-native-call-log
+```
+
+- Build and run an Android development build (not Expo Go).
+- In app: Profile -> Life Context Tracking -> Communication Summary.
+- Grant call activity/read-call-log permission when prompted.
+
+Behavior and privacy limits:
+
+- Only day-level aggregate counts/duration are used.
+- No phone numbers, contact names, or call transcripts are stored.
+- If the native module is unavailable in the current build, the toggle remains unavailable.
+
 ## Apple Health real-device sync setup (iOS)
 
 Apple Health sync requires a native iOS build (not Expo Go) because HealthKit access is a native capability.

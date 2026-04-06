@@ -2,6 +2,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Battery from "expo-battery";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
+import {
+  getDayKeyForTimestamp,
+  getDayWindow,
+  getResolvedTimeZone,
+} from "@repo/ui/lib/day-window";
 import { Platform } from "react-native";
 import {
   buildLocationContextFromPoints,
@@ -60,6 +65,14 @@ type StartTrackerResult = {
   reason?: string;
 };
 
+export type BackgroundLocationEnablementStatus = {
+  fullyEnabled: boolean;
+  isRunning: boolean;
+  backgroundModeAvailable: boolean;
+  backgroundPermissionStatus: "granted" | "denied" | "undetermined";
+  reason?: string;
+};
+
 const TASK_NAME = "daylog.background_location.context.batch";
 const STORAGE_POINTS_KEY = "daylog.background_location.points";
 const STORAGE_TELEMETRY_KEY = "daylog.background_location.telemetry";
@@ -78,9 +91,8 @@ let autoDisabledListener:
   | ((telemetry: BackgroundLocationTelemetry) => Promise<void> | void)
   | undefined;
 
-function getLocalDayKey(timestampMs: number): string {
-  const date = new Date(timestampMs);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+function getCurrentUserTimeZone(): string {
+  return getResolvedTimeZone();
 }
 
 function toAreaLabel(latitude: number, longitude: number): string {
@@ -390,6 +402,16 @@ export async function startBackgroundLocationTracker(
     };
   }
 
+  const backgroundModeAvailable =
+    await Location.isBackgroundLocationAvailableAsync().catch(() => false);
+  if (!backgroundModeAvailable) {
+    return {
+      started: false,
+      reason:
+        "Background location is not fully enabled at OS level. Verify native location background configuration.",
+    };
+  }
+
   defineBackgroundTaskOnce();
 
   const foregroundPermission = await Location.getForegroundPermissionsAsync();
@@ -425,27 +447,41 @@ export async function startBackgroundLocationTracker(
 
   await clearAutoDisableMarkers();
 
-  await Location.startLocationUpdatesAsync(TASK_NAME, {
-    accuracy: Location.Accuracy.Balanced,
-    distanceInterval: 200,
-    timeInterval: Math.max(
-      60_000,
-      Math.floor((activeRuntimeConfig.batchFlushIntervalMinutes * 60_000) / 3),
-    ),
-    deferredUpdatesInterval:
-      activeRuntimeConfig.batchFlushIntervalMinutes * 60_000,
-    pausesUpdatesAutomatically: true,
-    activityType: Location.ActivityType.Other,
-    showsBackgroundLocationIndicator: false,
-    foregroundService:
-      Platform.OS === "android"
-        ? {
-            notificationTitle: "DayLog background tracking",
-            notificationBody:
-              "Collecting coarse movement trends to improve daily context summaries.",
-          }
-        : undefined,
-  });
+  try {
+    await Location.startLocationUpdatesAsync(TASK_NAME, {
+      accuracy: Location.Accuracy.Balanced,
+      distanceInterval: 200,
+      timeInterval: Math.max(
+        60_000,
+        Math.floor(
+          (activeRuntimeConfig.batchFlushIntervalMinutes * 60_000) / 3,
+        ),
+      ),
+      deferredUpdatesInterval:
+        activeRuntimeConfig.batchFlushIntervalMinutes * 60_000,
+      pausesUpdatesAutomatically: true,
+      activityType: Location.ActivityType.Other,
+      showsBackgroundLocationIndicator: false,
+      foregroundService:
+        Platform.OS === "android"
+          ? {
+              notificationTitle: "DayLog background tracking",
+              notificationBody:
+                "Collecting coarse movement trends to improve daily context summaries.",
+            }
+          : undefined,
+    });
+  } catch (error) {
+    const reason =
+      error instanceof Error && error.message.trim().length > 0
+        ? `Background location is not fully enabled: ${error.message}`
+        : "Background location is not fully enabled at OS level.";
+
+    return {
+      started: false,
+      reason,
+    };
+  }
 
   return { started: true };
 }
@@ -473,15 +509,74 @@ export async function isBackgroundLocationTrackerRunning(): Promise<boolean> {
   }
 }
 
+export async function getBackgroundLocationEnablementStatus(): Promise<BackgroundLocationEnablementStatus> {
+  if (Platform.OS === "web") {
+    return {
+      fullyEnabled: false,
+      isRunning: false,
+      backgroundModeAvailable: false,
+      backgroundPermissionStatus: "denied",
+      reason: "Background location is unavailable on web.",
+    };
+  }
+
+  const backgroundModeAvailable =
+    await Location.isBackgroundLocationAvailableAsync().catch(() => false);
+  if (!backgroundModeAvailable) {
+    return {
+      fullyEnabled: false,
+      isRunning: false,
+      backgroundModeAvailable,
+      backgroundPermissionStatus: "undetermined",
+      reason:
+        "Background location is not fully enabled at OS level. Verify native location background configuration.",
+    };
+  }
+
+  const permission = await Location.getBackgroundPermissionsAsync().catch(
+    () => null,
+  );
+  const permissionStatus = permission?.status ?? "undetermined";
+  if (permissionStatus !== "granted") {
+    return {
+      fullyEnabled: false,
+      isRunning: false,
+      backgroundModeAvailable,
+      backgroundPermissionStatus: permissionStatus,
+      reason: "Background location permission is not granted.",
+    };
+  }
+
+  const isRunning = await isBackgroundLocationTrackerRunning();
+  if (!isRunning) {
+    return {
+      fullyEnabled: false,
+      isRunning,
+      backgroundModeAvailable,
+      backgroundPermissionStatus: permissionStatus,
+      reason: "Background tracker is not actively running.",
+    };
+  }
+
+  return {
+    fullyEnabled: true,
+    isRunning,
+    backgroundModeAvailable,
+    backgroundPermissionStatus: permissionStatus,
+  };
+}
+
 export async function flushBackgroundLocationBatches(): Promise<
   BackgroundLocationUploadPayload[]
 > {
   const queuedPoints = await loadQueuedPoints();
   if (queuedPoints.length === 0) return [];
 
+  const userTimeZone = getCurrentUserTimeZone();
+
   const groupedByDay = new Map<string, LocationTrackPoint[]>();
   for (const point of queuedPoints) {
-    const dayKey = getLocalDayKey(point.timestampMs);
+    const dayKey = getDayKeyForTimestamp(point.timestampMs, userTimeZone);
     const existing = groupedByDay.get(dayKey);
     if (existing) {
       existing.push(point);
@@ -500,7 +595,14 @@ export async function flushBackgroundLocationBatches(): Promise<
 
   const payloads: BackgroundLocationUploadPayload[] = [];
   for (const [dayKey, points] of groupedByDay) {
-    const sortedPoints = [...points].sort(
+    const dayWindow = getDayWindow(dayKey, userTimeZone);
+    const pointsInDayWindow = points.filter(
+      (point) =>
+        point.timestampMs >= dayWindow.startMs &&
+        point.timestampMs <= dayWindow.endMs,
+    );
+
+    const sortedPoints = [...pointsInDayWindow].sort(
       (a, b) => a.timestampMs - b.timestampMs,
     );
     const cappedPoints = sortedPoints.slice(
