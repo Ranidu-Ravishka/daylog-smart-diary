@@ -8,12 +8,27 @@ const RETENTION_LOCATION_SIGNALS_DAYS_ENV = "RETENTION_LOCATION_SIGNALS_DAYS";
 const RETENTION_SUMMARY_EVENTS_DAYS_ENV = "RETENTION_SUMMARY_EVENTS_DAYS";
 const RETENTION_DELETE_BATCH_SIZE_ENV = "RETENTION_DELETE_BATCH_SIZE";
 const SUMMARY_LOW_QUALITY_THRESHOLD_ENV = "SUMMARY_LOW_QUALITY_THRESHOLD";
+const ENABLE_BACKGROUND_LOCATION_TRACKING_ENV =
+  "ENABLE_BACKGROUND_LOCATION_TRACKING";
+const BACKGROUND_LOCATION_BATCH_MAX_POINTS_ENV =
+  "BACKGROUND_LOCATION_BATCH_MAX_POINTS";
+const BACKGROUND_LOCATION_MAX_UPDATES_PER_HOUR_ENV =
+  "BACKGROUND_LOCATION_MAX_UPDATES_PER_HOUR";
+const BACKGROUND_LOCATION_BATCH_FLUSH_INTERVAL_MINUTES_ENV =
+  "BACKGROUND_LOCATION_BATCH_FLUSH_INTERVAL_MINUTES";
+const BACKGROUND_LOCATION_MAX_BATTERY_DRAIN_PERCENT_PER_HOUR_ENV =
+  "BACKGROUND_LOCATION_MAX_BATTERY_DRAIN_PERCENT_PER_HOUR";
 
 type NumericConfig = {
   envName: string;
   fallback: number;
   min: number;
   max: number;
+};
+
+type BooleanConfig = {
+  envName: string;
+  fallback: boolean;
 };
 
 function parseBoundedInt(config: NumericConfig): number {
@@ -44,6 +59,24 @@ function parseBoundedNumber(config: NumericConfig): number {
   }
 
   return parsed;
+}
+
+function parseBoolean(config: BooleanConfig): boolean {
+  const raw = process.env[config.envName]?.trim().toLowerCase();
+  if (!raw) return config.fallback;
+
+  if (raw === "1" || raw === "true" || raw === "yes" || raw === "on") {
+    return true;
+  }
+
+  if (raw === "0" || raw === "false" || raw === "no" || raw === "off") {
+    return false;
+  }
+
+  console.warn(
+    `[config] Invalid ${config.envName}='${raw}'. Falling back to ${String(config.fallback)}.`,
+  );
+  return config.fallback;
 }
 
 export function getSummaryDailyGenerationLimit(): number {
@@ -151,5 +184,48 @@ export function getSummaryLowQualityThreshold(): number {
     fallback: 0.55,
     min: 0,
     max: 1,
+  });
+}
+
+export function getEnableBackgroundLocationTracking(): boolean {
+  return parseBoolean({
+    envName: ENABLE_BACKGROUND_LOCATION_TRACKING_ENV,
+    fallback: false,
+  });
+}
+
+export function getBackgroundLocationBatchMaxPoints(): number {
+  return parseBoundedInt({
+    envName: BACKGROUND_LOCATION_BATCH_MAX_POINTS_ENV,
+    fallback: 32,
+    min: 8,
+    max: 500,
+  });
+}
+
+export function getBackgroundLocationMaxUpdatesPerHour(): number {
+  return parseBoundedInt({
+    envName: BACKGROUND_LOCATION_MAX_UPDATES_PER_HOUR_ENV,
+    fallback: 120,
+    min: 20,
+    max: 2000,
+  });
+}
+
+export function getBackgroundLocationBatchFlushIntervalMinutes(): number {
+  return parseBoundedInt({
+    envName: BACKGROUND_LOCATION_BATCH_FLUSH_INTERVAL_MINUTES_ENV,
+    fallback: 15,
+    min: 5,
+    max: 240,
+  });
+}
+
+export function getBackgroundLocationMaxBatteryDrainPercentPerHour(): number {
+  return parseBoundedInt({
+    envName: BACKGROUND_LOCATION_MAX_BATTERY_DRAIN_PERCENT_PER_HOUR_ENV,
+    fallback: 12,
+    min: 1,
+    max: 60,
   });
 }

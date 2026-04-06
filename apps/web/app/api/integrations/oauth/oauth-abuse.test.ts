@@ -61,6 +61,12 @@ function readStateFromCookie(cookiePair: string): string {
   return payload.state;
 }
 
+function readRedirect(response: Response): URL {
+  const location = response.headers.get("location");
+  expect(location).toBeTruthy();
+  return new URL(location!);
+}
+
 async function loadRoutes() {
   const startModule = await import("./[provider]/start/route");
   const callbackModule = await import("./[provider]/callback/route");
@@ -113,10 +119,14 @@ describe("oauth abuse protection", () => {
       params: Promise.resolve({ provider: "spotify" }),
     });
 
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: "OAuth callback rejected.",
-    });
+    expect(response.status).toBe(307);
+    const redirect = readRedirect(response);
+    expect(redirect.pathname).toBe("/dashboard/settings");
+    expect(redirect.searchParams.get("integrationProvider")).toBe("spotify");
+    expect(redirect.searchParams.get("integrationStatus")).toBe("error");
+    expect(redirect.searchParams.get("integrationMessage")).toBe(
+      "OAuth callback rejected.",
+    );
 
     expect(authMock).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
@@ -152,10 +162,14 @@ describe("oauth abuse protection", () => {
       params: Promise.resolve({ provider: "spotify" }),
     });
 
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toEqual({
-      error: "OAuth callback rejected.",
-    });
+    expect(response.status).toBe(307);
+    const redirect = readRedirect(response);
+    expect(redirect.pathname).toBe("/dashboard/settings");
+    expect(redirect.searchParams.get("integrationProvider")).toBe("spotify");
+    expect(redirect.searchParams.get("integrationStatus")).toBe("error");
+    expect(redirect.searchParams.get("integrationMessage")).toBe(
+      "OAuth callback rejected.",
+    );
 
     expect(authMock).toHaveBeenCalledTimes(1);
     expect(getTokenMock).not.toHaveBeenCalled();
@@ -227,10 +241,16 @@ describe("oauth abuse protection", () => {
       params: Promise.resolve({ provider: "spotify" }),
     });
 
-    expect(replayResponse.status).toBe(400);
-    await expect(replayResponse.json()).resolves.toEqual({
-      error: "OAuth callback rejected.",
-    });
+    expect(replayResponse.status).toBe(307);
+    const replayRedirect = readRedirect(replayResponse);
+    expect(replayRedirect.pathname).toBe("/dashboard/settings");
+    expect(replayRedirect.searchParams.get("integrationProvider")).toBe(
+      "spotify",
+    );
+    expect(replayRedirect.searchParams.get("integrationStatus")).toBe("error");
+    expect(replayRedirect.searchParams.get("integrationMessage")).toBe(
+      "OAuth callback rejected.",
+    );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(convexClientCtorMock).toHaveBeenCalledTimes(1);
@@ -284,15 +304,58 @@ describe("oauth abuse protection", () => {
       params: Promise.resolve({ provider: "spotify" }),
     });
 
-    expect(malformedResponse.status).toBe(400);
-    expect(missingCodeResponse.status).toBe(400);
-    expect(missingStateResponse.status).toBe(400);
+    expect(malformedResponse.status).toBe(307);
+    expect(missingCodeResponse.status).toBe(307);
+    expect(missingStateResponse.status).toBe(307);
+
+    const malformedRedirect = readRedirect(malformedResponse);
+    const missingCodeRedirect = readRedirect(missingCodeResponse);
+    const missingStateRedirect = readRedirect(missingStateResponse);
+
+    expect(malformedRedirect.pathname).toBe("/dashboard/settings");
+    expect(missingCodeRedirect.pathname).toBe("/dashboard/settings");
+    expect(missingStateRedirect.pathname).toBe("/dashboard/settings");
+    expect(malformedRedirect.searchParams.get("integrationStatus")).toBe(
+      "error",
+    );
+    expect(missingCodeRedirect.searchParams.get("integrationStatus")).toBe(
+      "error",
+    );
+    expect(missingStateRedirect.searchParams.get("integrationStatus")).toBe(
+      "error",
+    );
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(convexClientCtorMock).not.toHaveBeenCalled();
     expect(convexSetAuthMock).not.toHaveBeenCalled();
     expect(convexMutationMock).not.toHaveBeenCalled();
     expect(getTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("redirects to mobile completion path when OAuth credentials are missing", async () => {
+    const { startGet } = await loadRoutes();
+
+    authMock.mockResolvedValue({ userId: "user_1", getToken: vi.fn() });
+    process.env.SPOTIFY_CLIENT_ID = "";
+    process.env.SPOTIFY_CLIENT_SECRET = "";
+
+    const startRequest = makeRequest(
+      "https://app.daylog.test/api/integrations/oauth/spotify/start?returnTo=/integrations/oauth/complete%3Fmode%3Dmobile",
+    );
+
+    const startResponse = await startGet(startRequest, {
+      params: Promise.resolve({ provider: "spotify" }),
+    });
+
+    expect(startResponse.status).toBe(307);
+    const redirect = readRedirect(startResponse);
+    expect(redirect.pathname).toBe("/integrations/oauth/complete");
+    expect(redirect.searchParams.get("mode")).toBe("mobile");
+    expect(redirect.searchParams.get("integrationProvider")).toBe("spotify");
+    expect(redirect.searchParams.get("integrationStatus")).toBe("error");
+    expect(redirect.searchParams.get("integrationMessage")).toBe(
+      "OAuth is not configured for this provider.",
+    );
   });
 
   it("rejects unsupported providers at both OAuth entry points", async () => {
@@ -314,15 +377,29 @@ describe("oauth abuse protection", () => {
       params: Promise.resolve({ provider: "evil_provider" }),
     });
 
-    expect(startResponse.status).toBe(400);
-    expect(callbackResponse.status).toBe(400);
+    expect(startResponse.status).toBe(307);
+    expect(callbackResponse.status).toBe(307);
 
-    await expect(startResponse.json()).resolves.toEqual({
-      error: "Unsupported OAuth provider",
-    });
-    await expect(callbackResponse.json()).resolves.toEqual({
-      error: "Unsupported OAuth provider",
-    });
+    const startRedirect = readRedirect(startResponse);
+    const callbackRedirect = readRedirect(callbackResponse);
+    expect(startRedirect.pathname).toBe("/dashboard/settings");
+    expect(callbackRedirect.pathname).toBe("/dashboard/settings");
+    expect(startRedirect.searchParams.get("integrationStatus")).toBe("error");
+    expect(callbackRedirect.searchParams.get("integrationStatus")).toBe(
+      "error",
+    );
+    expect(startRedirect.searchParams.get("integrationProvider")).toBe(
+      "evil_provider",
+    );
+    expect(callbackRedirect.searchParams.get("integrationProvider")).toBe(
+      "evil_provider",
+    );
+    expect(startRedirect.searchParams.get("integrationMessage")).toBe(
+      "Unsupported OAuth provider.",
+    );
+    expect(callbackRedirect.searchParams.get("integrationMessage")).toBe(
+      "Unsupported OAuth provider.",
+    );
 
     expect(convexClientCtorMock).not.toHaveBeenCalled();
     expect(convexMutationMock).not.toHaveBeenCalled();

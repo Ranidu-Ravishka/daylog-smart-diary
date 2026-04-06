@@ -94,6 +94,40 @@ type IntegrationDailyData = {
   };
   summary?: string;
   signals?: string[];
+  context?: {
+    schemaVersion?: number;
+    location?: {
+      mode: "foreground" | "background_controlled";
+      totalTrackedMinutes?: number;
+      totalDistanceMeters?: number;
+      stayPoints?: Array<{
+        label: string;
+        startedAt: number;
+        endedAt: number;
+        durationMinutes: number;
+      }>;
+    };
+    fitness?: {
+      steps?: number;
+      distanceMeters?: number;
+      activeMinutes?: number;
+      idleMinutes?: number;
+      source?: string;
+    };
+    calendar?: {
+      meetingsCount?: number;
+      busyMinutes?: number;
+      remindersCount?: number;
+      eventTitles?: string[];
+    };
+    activitySummary?: {
+      callsCount?: number;
+      callDurationMinutes?: number;
+      mood?: string;
+      moodConfidence?: number;
+      activityLevel?: "active" | "mixed" | "idle";
+    };
+  };
   syncedAt: number;
 };
 
@@ -104,6 +138,9 @@ function toSourceLabel(provider: string): string {
     spotify: "Spotify",
     apple_health: "Apple Health",
     location: "Location (foreground)",
+    fitness: "Fitness",
+    calendar: "Calendar",
+    activity_summary: "Activity Summary",
   };
 
   return labels[provider] ?? provider;
@@ -127,7 +164,54 @@ function buildIntegrationContextForModel(entries: IntegrationDailyData[]) {
     .flatMap((entry) => entry.signals ?? [])
     .map((signal) => signal.trim())
     .filter(Boolean);
-  const uniqueSignals = Array.from(new Set(flattenedSignals)).slice(0, 16);
+
+  const contextSignals = entries
+    .flatMap((entry) => {
+      const next: string[] = [];
+      const context = entry.context;
+      if (!context) return next;
+
+      const topStays = (context.location?.stayPoints ?? [])
+        .sort((a, b) => b.durationMinutes - a.durationMinutes)
+        .slice(0, 2)
+        .map((stay) => `${stay.durationMinutes}m at ${stay.label}`);
+
+      if (topStays.length > 0) {
+        next.push(`Location stays: ${topStays.join(", ")}`);
+      }
+
+      if (context.fitness?.distanceMeters) {
+        next.push(
+          `${Math.round(context.fitness.distanceMeters)} meters walked`,
+        );
+      }
+
+      if (context.fitness?.activeMinutes) {
+        next.push(`${context.fitness.activeMinutes} active minutes`);
+      }
+
+      if (context.calendar?.meetingsCount) {
+        next.push(`${context.calendar.meetingsCount} meetings attended`);
+      }
+
+      if (context.activitySummary?.callsCount) {
+        next.push(
+          `${context.activitySummary.callsCount} calls, ${context.activitySummary.callDurationMinutes ?? 0} call minutes`,
+        );
+      }
+
+      if (context.activitySummary?.mood) {
+        next.push(`Mood signal: ${context.activitySummary.mood}`);
+      }
+
+      return next;
+    })
+    .map((signal) => signal.trim())
+    .filter(Boolean);
+
+  const uniqueSignals = Array.from(
+    new Set([...flattenedSignals, ...contextSignals]),
+  ).slice(0, 16);
 
   const mergedMetrics = {
     steps: stepsValues.length > 0 ? Math.max(...stepsValues) : undefined,
@@ -159,7 +243,51 @@ function buildIntegrationContextForModel(entries: IntegrationDailyData[]) {
     keySignals: uniqueSignals,
     mergedMetrics: hasMergedMetrics ? mergedMetrics : undefined,
     sources: entries.map((entry) => toSourceLabel(entry.provider)),
+    contextSnapshots: entries
+      .map((entry) => ({
+        provider: entry.provider,
+        context: entry.context,
+      }))
+      .filter((entry) => Boolean(entry.context))
+      .slice(0, 8),
   };
+}
+
+type SummaryGenerationResult =
+  | {
+      success: true;
+      summaryId?: string;
+      generatedAt?: number;
+    }
+  | {
+      success: false;
+      errorCode: "no_input_data" | "model_generation_failed";
+      message: string;
+    };
+
+function toUserFacingSummaryGenerationErrorMessage(error: unknown): string {
+  const fallback =
+    "Summary generation is temporarily unavailable. Please try again later.";
+
+  if (!(error instanceof Error) || !error.message.trim()) {
+    return fallback;
+  }
+
+  const message = error.message.trim();
+
+  if (/OpenAI authentication failed \((401|403)\)/i.test(message)) {
+    return fallback;
+  }
+
+  if (/OpenAI rate limit reached \(429\)/i.test(message)) {
+    return "Summary generation is busy right now. Please try again shortly.";
+  }
+
+  if (/OpenAI service is temporarily unavailable \(\d+\)/i.test(message)) {
+    return "Summary generation is temporarily unavailable. Please try again shortly.";
+  }
+
+  return message;
 }
 
 export async function generateSummaryWithOpenAi(
@@ -203,14 +331,7 @@ export const generateSummaryForDay = action({
   args: {
     dayKey: v.string(),
   },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{
-    success: boolean;
-    summaryId?: string;
-    generatedAt?: number;
-  }> => {
+  handler: async (ctx, args): Promise<SummaryGenerationResult> => {
     const startedAt = Date.now();
     validateDayKey(args.dayKey);
 
@@ -242,9 +363,12 @@ export const generateSummaryForDay = action({
       !hasDayMetadata &&
       !hasIntegrationData
     ) {
-      throw new Error(
-        "No memories, day metadata, or integration sync data found for this date. Add data before generating a summary.",
-      );
+      return {
+        success: false,
+        errorCode: "no_input_data",
+        message:
+          "Add at least one memory, day note/rating/tag, or synced integration data before generating a summary.",
+      };
     }
 
     const integrationContext = buildIntegrationContextForModel(
@@ -290,6 +414,7 @@ export const generateSummaryForDay = action({
         keySignals: integrationContext.keySignals,
         providerSummaries: integrationContext.providerSummaries,
         metrics: integrationContext.mergedMetrics,
+        contextSnapshots: integrationContext.contextSnapshots,
       },
     });
 
@@ -343,7 +468,11 @@ export const generateSummaryForDay = action({
         });
       }
 
-      throw error;
+      return {
+        success: false,
+        errorCode: "model_generation_failed",
+        message: toUserFacingSummaryGenerationErrorMessage(error),
+      };
     }
 
     const mergedMetrics = {

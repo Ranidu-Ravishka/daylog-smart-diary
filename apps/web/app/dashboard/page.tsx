@@ -99,6 +99,71 @@ function formatDateTime(timestamp: number) {
   });
 }
 
+function redactPotentialSecrets(value: string): string {
+  return value
+    .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/g, "sk-[redacted]")
+    .replace(/(api key provided\s*:?\s*)[A-Za-z0-9_*.-]+/gi, "$1[redacted]");
+}
+
+function getSummaryGenerationErrorMessage(error: unknown): string {
+  const fallback = "Failed to generate summary. Please try again.";
+  if (!(error instanceof Error) || !error.message) return fallback;
+
+  const rawMessage = error.message;
+  const noDataSignature =
+    "No memories, day metadata, or integration sync data found for this date";
+
+  if (rawMessage.includes(noDataSignature)) {
+    return "Add at least one memory, day note/rating/tag, or synced integration data before generating a summary.";
+  }
+
+  const lines = rawMessage
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const candidate = lines.find(
+    (line) =>
+      !line.startsWith("[CONVEX ") &&
+      !line.startsWith("[Request ID:") &&
+      !line.startsWith("Called by client") &&
+      !line.startsWith("at handler"),
+  );
+
+  if (!candidate) return fallback;
+
+  const cleaned = candidate
+    .replace(/^Uncaught Error:\s*/i, "")
+    .replace(/^Error:\s*/i, "")
+    .trim();
+  const redacted = redactPotentialSecrets(cleaned);
+
+  if (/OpenAI authentication failed \((401|403)\)/i.test(redacted)) {
+    return "Summary generation is temporarily unavailable. Please try again later.";
+  }
+
+  return redacted || fallback;
+}
+
+function getSummaryGenerationFailureResultMessage(
+  result: unknown,
+): string | null {
+  if (typeof result !== "object" || result === null) return null;
+
+  const candidate = result as {
+    success?: unknown;
+    message?: unknown;
+  };
+
+  if (candidate.success !== false) return null;
+
+  if (typeof candidate.message === "string" && candidate.message.trim()) {
+    return candidate.message.trim();
+  }
+
+  return "Failed to generate summary. Please try again.";
+}
+
 export default function DashboardPage() {
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
   const [selectedDate, setSelectedDate] = useState(() => new Date());
@@ -177,13 +242,18 @@ export default function DashboardPage() {
     setIsGeneratingSummary(true);
 
     try {
-      await generateSummaryForDay({ dayKey });
+      const result = await generateSummaryForDay({ dayKey });
+      const failureMessage = getSummaryGenerationFailureResultMessage(result);
+
+      if (failureMessage) {
+        setSummaryGenerationError(failureMessage);
+        toastError(failureMessage);
+        return;
+      }
+
       toastSuccess("Summary generated successfully");
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Failed to generate summary. Please try again.";
+      const message = getSummaryGenerationErrorMessage(error);
       setSummaryGenerationError(message);
       toastError(message);
     } finally {

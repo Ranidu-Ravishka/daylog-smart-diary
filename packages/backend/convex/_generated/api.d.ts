@@ -22,6 +22,7 @@ import type * as integrationProviders from "../integrationProviders.js";
 import type * as integrationSecretsCrypto from "../integrationSecretsCrypto.js";
 import type * as integrations from "../integrations.js";
 import type * as memories from "../memories.js";
+import type * as observability from "../observability.js";
 import type * as providerAdapters from "../providerAdapters.js";
 import type * as retention from "../retention.js";
 import type * as runtimeConfig from "../runtimeConfig.js";
@@ -54,6 +55,7 @@ declare const fullApi: ApiFromModules<{
   integrationSecretsCrypto: typeof integrationSecretsCrypto;
   integrations: typeof integrations;
   memories: typeof memories;
+  observability: typeof observability;
   providerAdapters: typeof providerAdapters;
   retention: typeof retention;
   runtimeConfig: typeof runtimeConfig;

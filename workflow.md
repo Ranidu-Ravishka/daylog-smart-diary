@@ -1,6 +1,6 @@
 # DayLog Engineering Workflow
 
-Last updated: 2026-04-04
+Last updated: 2026-04-06
 
 ## 1) Purpose
 
@@ -226,3 +226,78 @@ Use this process for production-impacting defects:
 - Release driver is responsible for checklist completion and go/no-go decision.
 
 If uncertainty remains on security, data migration, or rollback safety, do not ship.
+
+## 13) Sensitive Context Tracking Standard (Mandatory)
+
+Scope:
+
+- Applies to any feature that touches location, health/fitness, calendar, communication metadata, notification context, or inferred mood/activity signals.
+
+### 13.1 Feature development rules
+
+- Explicit opt-in is required before collecting sensitive context data.
+- Collection must be feature-scoped; enabling one signal must not silently enable others.
+- Data collection must default to minimum viable granularity (coarse location, day-level aggregates, bounded signal lists).
+- Raw sensitive payloads must be normalized on-device or at ingestion edge before persistence.
+- Every sensitive data path must have a kill switch (feature flag or user toggle) that can disable new writes without redeploying mobile clients.
+- No implementation may rely on restricted or prohibited platform data sources (for example raw call logs on iOS).
+- Any background collection mode must include a documented battery budget and user-facing justification.
+
+### 13.2 Privacy-first checklist (required in PR description)
+
+- Data inventory updated: what fields are collected, transformed, stored, and exported.
+- Legal/privacy surface reviewed for the feature scope.
+- User-facing disclosure text added/updated where the feature is enabled.
+- Disable path implemented and verified (toggle off stops writes immediately).
+- Data retention behavior documented for any new fields/tables.
+- Export and delete-account flows verified for newly collected data.
+- Logs and telemetry checked to confirm no secrets or raw sensitive payload leakage.
+
+PRs that miss any checklist item are not merge-ready.
+
+### 13.3 Permission handling standards
+
+- Use just-in-time permission prompts tied to user action, never on silent app startup.
+- If permission is denied, the feature must fail closed and remain disabled.
+- Permission denial UX must include clear remediation path (system settings deep link where available).
+- Do not repeatedly prompt after denial in the same session; require explicit user re-attempt.
+- Platform constraints must be respected and coded explicitly:
+  - iOS: no raw call log ingestion path.
+  - iOS HealthKit: must run only in native/dev client builds where supported.
+  - Android background/location usage: request only if corresponding feature mode is enabled.
+- Preference state in backend must mirror effective permission state (`granted`, `denied`, `unknown`) for operational visibility.
+
+### 13.4 Testing requirements for mobile sensors
+
+- Unit tests are required for normalization/sanitization logic and edge cases.
+- Sensor pipelines must include test coverage for permission states:
+  - granted
+  - denied
+  - unavailable/unsupported device
+  - revoked after being granted
+- Battery-aware behavior must be validated:
+  - throttling interval enforcement
+  - no tight polling loops
+  - bounded in-memory buffering
+- Backend behavior tests must validate:
+  - dayKey validation at all entry points
+  - idempotent upsert by `userId + provider + dayKey`
+  - aggregate query correctness for mixed provider data
+- Summary generation tests must cover context-aware inputs and no-data fallbacks.
+
+### 13.5 Release checklist additions for tracking features
+
+Before production rollout of any sensitive tracking feature:
+
+1. Confirm consent text, settings copy, and privacy policy updates are deployed together.
+2. Verify iOS/Android permission strings and manifest entries are accurate and minimal.
+3. Run full mobile + backend validation suite, including sensor/permission scenarios.
+4. Validate retention/export paths for new context fields in staging.
+5. Confirm on-call rollback plan can disable collection quickly (kill switch verified).
+6. Perform staged rollout with monitoring on:
+   - write volume anomalies
+   - permission denial spikes
+   - battery/performance regressions
+   - error-rate increase in sync flows
+
+No sensitive tracking feature may be marked complete without satisfying Section 13.

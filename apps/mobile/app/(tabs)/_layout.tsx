@@ -10,6 +10,12 @@ import { IconSymbol } from "@/components/ui/icon-symbol";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import {
+  flushBackgroundLocationBatches,
+  getBackgroundLocationTelemetry,
+  startBackgroundLocationTracker,
+  stopBackgroundLocationTracker,
+} from "@/lib/background-location-tracker";
 import { startForegroundLocationTracker } from "@/lib/foreground-location-tracker";
 import { syncReminderNotifications } from "@/lib/reminder-notifications";
 
@@ -21,6 +27,10 @@ export default function TabLayout() {
     api.userPreferences.getMyUserPreferences,
     isAuthenticated ? {} : "skip",
   );
+  const locationTrackingRuntimeConfig = useQuery(
+    api.integrations.getMyLocationTrackingRuntimeConfig,
+    isAuthenticated ? {} : "skip",
+  );
   const upsertMyIntegrationDailyData = useMutation(
     api.integrations.upsertMyIntegrationDailyData,
   );
@@ -28,9 +38,13 @@ export default function TabLayout() {
     api.userPreferences.updateMyLocationTrackingState,
   );
   const isPreferencesLoading =
-    isAuthenticated && launchPreferences === undefined;
+    isAuthenticated &&
+    (launchPreferences === undefined ||
+      locationTrackingRuntimeConfig === undefined);
   const locationTrackingEnabled =
     launchPreferences?.locationTrackingEnabled ?? false;
+  const backgroundLocationTrackingEnabled =
+    launchPreferences?.backgroundLocationTrackingEnabled ?? false;
 
   const theme = Colors[colorScheme ?? "light"];
 
@@ -58,6 +72,7 @@ export default function TabLayout() {
             dayKey: payload.dayKey,
             summary: payload.summary,
             signals: payload.signals,
+            context: payload.context,
           });
 
           await updateMyLocationTrackingState({
@@ -97,6 +112,179 @@ export default function TabLayout() {
     isAuthenticated,
     launchPreferences,
     locationTrackingEnabled,
+    updateMyLocationTrackingState,
+    upsertMyIntegrationDailyData,
+  ]);
+
+  React.useEffect(() => {
+    if (
+      !isAuthenticated ||
+      launchPreferences === undefined ||
+      locationTrackingRuntimeConfig === undefined
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      const runtimeEnabled =
+        locationTrackingRuntimeConfig.enableBackgroundLocationTracking;
+      const explicitOptIn =
+        locationTrackingEnabled && backgroundLocationTrackingEnabled;
+
+      if (!runtimeEnabled || !explicitOptIn) {
+        await stopBackgroundLocationTracker();
+        return;
+      }
+
+      const started = await startBackgroundLocationTracker({
+        runtimeConfig: {
+          enabled: runtimeEnabled,
+          batchMaxPoints: locationTrackingRuntimeConfig.batchMaxPoints,
+          maxUpdatesPerHour: locationTrackingRuntimeConfig.maxUpdatesPerHour,
+          batchFlushIntervalMinutes:
+            locationTrackingRuntimeConfig.batchFlushIntervalMinutes,
+          maxBatteryDrainPercentPerHour:
+            locationTrackingRuntimeConfig.maxBatteryDrainPercentPerHour,
+        },
+        explicitOptIn: true,
+        onAutoDisabled: async (telemetry) => {
+          if (cancelled) return;
+
+          const payload: {
+            backgroundLocationTrackingEnabled: boolean;
+            backgroundLocationAutoDisabledAt?: number;
+            backgroundLocationAutoDisableReason?: string;
+            backgroundLocationBatteryImpactScore?: number;
+          } = {
+            backgroundLocationTrackingEnabled: false,
+          };
+
+          if (typeof telemetry.autoDisabledAt === "number") {
+            payload.backgroundLocationAutoDisabledAt = telemetry.autoDisabledAt;
+          }
+          if (telemetry.autoDisableReason) {
+            payload.backgroundLocationAutoDisableReason =
+              telemetry.autoDisableReason;
+          }
+          if (typeof telemetry.batteryDrainPercentPerHour === "number") {
+            payload.backgroundLocationBatteryImpactScore =
+              telemetry.batteryDrainPercentPerHour;
+          }
+
+          await updateMyLocationTrackingState(payload);
+        },
+      });
+
+      if (cancelled) return;
+
+      if (!started.started) {
+        await updateMyLocationTrackingState({
+          backgroundLocationTrackingEnabled: false,
+          backgroundLocationAutoDisabledAt: Date.now(),
+          backgroundLocationAutoDisableReason: started.reason,
+        });
+        return;
+      }
+
+      await updateMyLocationTrackingState({
+        locationPermissionStatus: "granted",
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    backgroundLocationTrackingEnabled,
+    isAuthenticated,
+    launchPreferences,
+    locationTrackingEnabled,
+    locationTrackingRuntimeConfig,
+    updateMyLocationTrackingState,
+  ]);
+
+  React.useEffect(() => {
+    if (
+      !isAuthenticated ||
+      launchPreferences === undefined ||
+      locationTrackingRuntimeConfig === undefined
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const flushBatches = async () => {
+      const batches = await flushBackgroundLocationBatches();
+
+      for (const batch of batches) {
+        if (cancelled) return;
+
+        await upsertMyIntegrationDailyData({
+          provider: "location",
+          dayKey: batch.dayKey,
+          summary: batch.summary,
+          signals: batch.signals,
+          context: batch.context,
+        });
+
+        await updateMyLocationTrackingState({
+          locationLastUpdatedAt: batch.observedAt,
+          locationLastArea: batch.areaLabel,
+        });
+      }
+
+      const telemetry = await getBackgroundLocationTelemetry();
+      if (cancelled) return;
+
+      if (typeof telemetry.batteryDrainPercentPerHour === "number") {
+        await updateMyLocationTrackingState({
+          backgroundLocationBatteryImpactScore:
+            telemetry.batteryDrainPercentPerHour,
+        });
+      }
+
+      if (telemetry.autoDisabled) {
+        const payload: {
+          backgroundLocationTrackingEnabled: boolean;
+          backgroundLocationAutoDisabledAt?: number;
+          backgroundLocationAutoDisableReason?: string;
+        } = {
+          backgroundLocationTrackingEnabled: false,
+        };
+
+        if (typeof telemetry.autoDisabledAt === "number") {
+          payload.backgroundLocationAutoDisabledAt = telemetry.autoDisabledAt;
+        }
+        if (telemetry.autoDisableReason) {
+          payload.backgroundLocationAutoDisableReason =
+            telemetry.autoDisableReason;
+        }
+
+        await updateMyLocationTrackingState(payload);
+      }
+    };
+
+    void flushBatches();
+
+    const intervalMs = Math.max(
+      5,
+      locationTrackingRuntimeConfig.batchFlushIntervalMinutes,
+    );
+    const interval = setInterval(() => {
+      void flushBatches();
+    }, intervalMs * 60_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [
+    isAuthenticated,
+    launchPreferences,
+    locationTrackingRuntimeConfig,
     updateMyLocationTrackingState,
     upsertMyIntegrationDailyData,
   ]);

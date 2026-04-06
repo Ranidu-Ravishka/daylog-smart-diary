@@ -66,9 +66,59 @@ function normalizeBase64Url(value: string): string {
   return value.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
+function toBinaryString(bytes: Uint8Array): string {
+  let output = "";
+  const chunkSize = 0x8000;
+
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const chunk = bytes.subarray(offset, offset + chunkSize);
+    output += String.fromCharCode(...chunk);
+  }
+
+  return output;
+}
+
+function fromBinaryString(binary: string): Uint8Array {
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function encodeBase64(bytes: Uint8Array): string {
+  if (typeof btoa === "function") {
+    return btoa(toBinaryString(bytes));
+  }
+
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(bytes).toString("base64");
+  }
+
+  throw new IntegrationSecretCryptoError(
+    "CONFIG_ERROR",
+    "No base64 encoder is available in the current runtime.",
+  );
+}
+
+function decodeBase64(value: string): Uint8Array {
+  if (typeof atob === "function") {
+    return fromBinaryString(atob(value));
+  }
+
+  if (typeof Buffer !== "undefined") {
+    return new Uint8Array(Buffer.from(value, "base64"));
+  }
+
+  throw new IntegrationSecretCryptoError(
+    "CONFIG_ERROR",
+    "No base64 decoder is available in the current runtime.",
+  );
+}
+
 function encodeBase64Url(value: ArrayBuffer | Uint8Array): string {
   const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
-  return normalizeBase64Url(Buffer.from(bytes).toString("base64"));
+  return normalizeBase64Url(encodeBase64(bytes));
 }
 
 function decodeBase64Flexible(value: string): Uint8Array {
@@ -83,16 +133,28 @@ function decodeBase64Flexible(value: string): Uint8Array {
   const normalized = trimmed.replace(/-/g, "+").replace(/_/g, "/");
   const padLength = (4 - (normalized.length % 4)) % 4;
   const padded = normalized + "=".repeat(padLength);
-  const buffer = Buffer.from(padded, "base64");
 
-  if (buffer.length === 0) {
+  try {
+    const decoded = decodeBase64(padded);
+
+    if (decoded.byteLength === 0) {
+      throw new IntegrationSecretCryptoError(
+        "CONFIG_ERROR",
+        "Encryption key material is invalid base64.",
+      );
+    }
+
+    return decoded;
+  } catch (error) {
+    if (error instanceof IntegrationSecretCryptoError) {
+      throw error;
+    }
+
     throw new IntegrationSecretCryptoError(
       "CONFIG_ERROR",
       "Encryption key material is invalid base64.",
     );
   }
-
-  return new Uint8Array(buffer);
 }
 
 function constantTimeStringEqualsInternal(

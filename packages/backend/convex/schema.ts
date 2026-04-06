@@ -46,6 +46,63 @@ const summaryQualityScoresValidator = v.object({
   failure: v.number(),
 });
 
+const activityLevelValidator = v.union(
+  v.literal("active"),
+  v.literal("mixed"),
+  v.literal("idle"),
+);
+
+const locationStayPointValidator = v.object({
+  label: v.string(),
+  startedAt: v.number(),
+  endedAt: v.number(),
+  durationMinutes: v.number(),
+  latitude: v.optional(v.number()),
+  longitude: v.optional(v.number()),
+  radiusMeters: v.optional(v.number()),
+});
+
+const integrationDailyContextValidator = v.object({
+  schemaVersion: v.optional(v.number()),
+  location: v.optional(
+    v.object({
+      mode: v.union(
+        v.literal("foreground"),
+        v.literal("background_controlled"),
+      ),
+      totalTrackedMinutes: v.optional(v.number()),
+      totalDistanceMeters: v.optional(v.number()),
+      stayPoints: v.optional(v.array(locationStayPointValidator)),
+    }),
+  ),
+  fitness: v.optional(
+    v.object({
+      steps: v.optional(v.number()),
+      distanceMeters: v.optional(v.number()),
+      activeMinutes: v.optional(v.number()),
+      idleMinutes: v.optional(v.number()),
+      source: v.optional(v.string()),
+    }),
+  ),
+  calendar: v.optional(
+    v.object({
+      meetingsCount: v.optional(v.number()),
+      busyMinutes: v.optional(v.number()),
+      remindersCount: v.optional(v.number()),
+      eventTitles: v.optional(v.array(v.string())),
+    }),
+  ),
+  activitySummary: v.optional(
+    v.object({
+      callsCount: v.optional(v.number()),
+      callDurationMinutes: v.optional(v.number()),
+      mood: v.optional(v.string()),
+      moodConfidence: v.optional(v.number()),
+      activityLevel: v.optional(activityLevelValidator),
+    }),
+  ),
+});
+
 export default defineSchema(
   {
     // ── CMS content (used by admin) ──────────────────────────
@@ -87,6 +144,11 @@ export default defineSchema(
       autoSyncIntegrations: v.optional(v.boolean()),
       defaultMemoryMood: v.optional(v.string()),
       locationTrackingEnabled: v.optional(v.boolean()),
+      callLogsTrackingEnabled: v.optional(v.boolean()),
+      moodDetectionFaceRecognitionEnabled: v.optional(v.boolean()),
+      fitnessTrackingEnabled: v.optional(v.boolean()),
+      calendarNotificationsTrackingEnabled: v.optional(v.boolean()),
+      backgroundLocationTrackingEnabled: v.optional(v.boolean()),
       locationPermissionStatus: v.optional(
         v.union(
           v.literal("unknown"),
@@ -96,6 +158,9 @@ export default defineSchema(
       ),
       locationLastUpdatedAt: v.optional(v.number()),
       locationLastArea: v.optional(v.string()),
+      backgroundLocationAutoDisabledAt: v.optional(v.number()),
+      backgroundLocationAutoDisableReason: v.optional(v.string()),
+      backgroundLocationBatteryImpactScore: v.optional(v.number()),
       createdAt: v.number(),
       updatedAt: v.number(),
     })
@@ -253,6 +318,7 @@ export default defineSchema(
       ),
       summary: v.optional(v.string()),
       signals: v.optional(v.array(v.string())),
+      context: v.optional(integrationDailyContextValidator),
     })
       .index("by_user_day", ["userId", "dayKey"])
       .index("by_user_provider_day", ["userId", "provider", "dayKey"])

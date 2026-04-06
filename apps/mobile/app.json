@@ -9,7 +9,17 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSHealthShareUsageDescription": "DayLog reads your Health data to sync steps and sleep insights.",
+        "NSHealthUpdateUsageDescription": "DayLog may write wellness summaries to Health when enabled.",
+        "NSLocationWhenInUseUsageDescription": "DayLog uses your location while you use the app to derive coarse daily movement context.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "DayLog can optionally collect coarse background movement context when you explicitly enable background tracking."
+      },
+      "entitlements": {
+        "com.apple.developer.healthkit": true
+      },
+      "bundleIdentifier": "com.anonymous.mobile"
     },
     "android": {
       "adaptiveIcon": {
@@ -18,6 +28,11 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
+      ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
@@ -26,8 +41,18 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "expo-dev-client",
       "expo-router",
       "expo-notifications",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "DayLog uses your location while the app is open to generate coarse context signals.",
+          "locationAlwaysAndWhenInUsePermission": "DayLog can optionally use coarse background location to improve context summaries when you explicitly enable it.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true
+        }
+      ],
       [
         "expo-splash-screen",
         {

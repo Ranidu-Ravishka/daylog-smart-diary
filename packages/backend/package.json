@@ -22,7 +22,6 @@
     "test:coverage:backend": "vitest run --coverage"
   },
   "dependencies": {
-    "@sentry/node": "^10.47.0",
     "convex": "^1.29.3",
     "svix": "^1.58.0"
   },

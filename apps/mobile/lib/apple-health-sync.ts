@@ -1,4 +1,5 @@
 import { Platform } from "react-native";
+import Constants from "expo-constants";
 
 declare const require: (name: string) => unknown;
 
@@ -60,6 +61,12 @@ function parseDayRange(dayKey: string): { startIso: string; endIso: string } {
 }
 
 function getHealthKitBridge(): HealthKitBridge {
+  if (Constants.appOwnership === "expo") {
+    throw new Error(
+      "Apple Health is unavailable in Expo Go. Run `pnpm --filter mobile ios:dev-client` (simulator) or `pnpm --filter mobile ios:dev-client-device` (physical iPhone), then retry.",
+    );
+  }
+
   let bridge: unknown;
 
   try {
@@ -72,6 +79,29 @@ function getHealthKitBridge(): HealthKitBridge {
 
   const resolved = (bridge as { default?: unknown }).default ?? bridge;
   return resolved as HealthKitBridge;
+}
+
+export function getAppleHealthSetupIssue(): string | null {
+  if (Platform.OS !== "ios") {
+    return "Apple Health sync is available only on iOS devices.";
+  }
+
+  if (Constants.appOwnership === "expo") {
+    return "Apple Health is unavailable in Expo Go. Run `pnpm --filter mobile ios:dev-client` (simulator) or `pnpm --filter mobile ios:dev-client-device` (physical iPhone), then retry.";
+  }
+
+  try {
+    const healthKit = getHealthKitBridge();
+    if (!healthKit.initHealthKit) {
+      return "Apple Health bridge is not configured. Check react-native-health installation and iOS native build setup.";
+    }
+
+    return null;
+  } catch (error) {
+    return error instanceof Error
+      ? error.message
+      : "Apple Health setup is incomplete.";
+  }
 }
 
 function initHealthKit(healthKit: HealthKitBridge): Promise<void> {
@@ -170,8 +200,9 @@ function readSleepMinutes(
 export async function collectAppleHealthDailyDataForDay(
   dayKey: string,
 ): Promise<AppleHealthSyncPayload> {
-  if (Platform.OS !== "ios") {
-    throw new Error("Apple Health sync is available only on iOS devices.");
+  const setupIssue = getAppleHealthSetupIssue();
+  if (setupIssue) {
+    throw new Error(setupIssue);
   }
 
   const { startIso, endIso } = parseDayRange(dayKey);

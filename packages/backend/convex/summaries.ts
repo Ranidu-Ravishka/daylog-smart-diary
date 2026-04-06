@@ -379,6 +379,7 @@ export const exportMyDiaryData = query({
         summary: item.summary,
         metrics: item.metrics,
         signals: item.signals ?? [],
+        context: item.context,
       }));
 
     return {

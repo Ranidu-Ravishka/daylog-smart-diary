@@ -1,10 +1,4 @@
-import * as Sentry from "@sentry/node";
-
 type StructuredContext = Record<string, unknown>;
-
-const DEFAULT_TRACES_SAMPLE_RATE = 0.1;
-
-let sentryInitialized = false;
 
 function toSerializableError(error: unknown) {
   if (error instanceof Error) {
@@ -20,28 +14,6 @@ function toSerializableError(error: unknown) {
     message: String(error),
     stack: undefined,
   };
-}
-
-function initializeSentryIfConfigured() {
-  if (sentryInitialized) return;
-
-  const dsn = process.env.SENTRY_DSN?.trim();
-  if (!dsn) return;
-
-  const tracesSampleRateRaw = process.env.SENTRY_TRACES_SAMPLE_RATE?.trim();
-  const tracesSampleRate = tracesSampleRateRaw
-    ? Number(tracesSampleRateRaw)
-    : DEFAULT_TRACES_SAMPLE_RATE;
-
-  Sentry.init({
-    dsn,
-    environment: process.env.NODE_ENV ?? "production",
-    tracesSampleRate: Number.isFinite(tracesSampleRate)
-      ? tracesSampleRate
-      : DEFAULT_TRACES_SAMPLE_RATE,
-  });
-
-  sentryInitialized = true;
 }
 
 function writeStructured(
@@ -95,22 +67,7 @@ export function captureException(
     error: {
       name: serialized.name,
       message: serialized.message,
+      stack: serialized.stack,
     },
-  });
-
-  initializeSentryIfConfigured();
-
-  if (!sentryInitialized) {
-    return;
-  }
-
-  const sentryError =
-    error instanceof Error ? error : new Error(serialized.message);
-
-  Sentry.captureException(sentryError, {
-    tags: {
-      event,
-    },
-    extra: context,
   });
 }
