@@ -25,6 +25,11 @@
     "typescript": "5.9.2"
   },
   "pnpm": {
+    "overrides": {
+      "@fastify/otel>@opentelemetry/instrumentation": "0.214.0",
+      "@prisma/instrumentation>@opentelemetry/instrumentation": "0.214.0",
+      "import-in-the-middle": "^3.0.0"
+    },
     "onlyBuiltDependencies": [
       "esbuild",
       "@tailwindcss/oxide"
