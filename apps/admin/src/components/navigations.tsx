@@ -12,6 +12,7 @@ const navLinks = [
   { href: "/summaries/quality", label: "Summary Quality" },
   { href: "/integrations", label: "Integrations" },
   { href: "/integrations/health", label: "Integration Health" },
+  { href: "/observability/info-events", label: "Info Transport" },
   { href: "/retention", label: "Retention" },
   { href: "/preferences", label: "Preferences" },
   { href: "/audit-logs", label: "Audit Logs" },

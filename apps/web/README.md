@@ -22,6 +22,10 @@ Required:
 - `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (Google Calendar/Fit OAuth)
 - `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` (Spotify OAuth)
 
+Optional for durable info-event analytics transport:
+
+- `NEXT_PUBLIC_INFO_EVENT_SAMPLE_RATE` (default `0.1`)
+
 ## Local development
 
 From repo root:

@@ -35,6 +35,7 @@ import {
   ensureReminderPermissions,
   syncReminderNotifications,
 } from "@/lib/reminder-notifications";
+import { captureException } from "@/lib/observability";
 
 const TOTAL_STEPS = 3;
 
@@ -197,7 +198,10 @@ export default function QuickSetupScreen() {
       await syncReminderNotifications(updatedPreferences);
       router.replace("/(tabs)");
     } catch (error) {
-      console.error("Failed to complete quick setup", error);
+      captureException("mobile_quick_setup_complete_failed", error, {
+        selectedFocusCount: selectedFocus.length,
+        reminderType,
+      });
       Alert.alert(
         "Setup failed",
         "We couldn’t save your preferences. Please try again.",

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "@repo/backend/convex";
 import { Star } from "lucide-react";
+import { captureException } from "@/lib/observability";
 import { toastError, toastSuccess } from "@/lib/toast";
 
 interface DayRatingProps {
@@ -34,7 +35,10 @@ export function DayRating({
       toastSuccess("Day rating updated");
     } catch (error) {
       toastError("Failed to update rating");
-      console.error("Rating update error:", error);
+      captureException("web_day_rating_update_failed", error, {
+        dayKey,
+        rating,
+      });
     } finally {
       setIsLoading(false);
     }

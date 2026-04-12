@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { captureException } from "@/lib/observability";
 import { toastError, toastSuccess } from "@/lib/toast";
 
 const ACCEPTED_IMAGE_TYPES = new Set([
@@ -253,7 +254,10 @@ export function MemoryForm({
 
       return true;
     } catch (error) {
-      console.error("Image upload failed", error);
+      captureException("web_memory_image_upload_failed", error, {
+        memoryId,
+        fileName: file.name,
+      });
       return false;
     }
   };
@@ -383,7 +387,10 @@ export function MemoryForm({
       toastError(
         memoryId ? "Failed to update memory" : "Failed to create memory",
       );
-      console.error("Memory operation error:", error);
+      captureException("web_memory_submit_failed", error, {
+        mode: memoryId ? "edit" : "create",
+        dayKey,
+      });
     } finally {
       setIsLoading(false);
     }

@@ -36,6 +36,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { captureException } from "@/lib/observability";
 import { cn } from "@/lib/utils";
 import { toastError, toastInfo, toastSuccess } from "@/lib/toast";
 
@@ -291,7 +292,10 @@ export default function SettingsPage() {
       toastSuccess("Preferences saved");
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
-      console.error("Failed to save preferences:", err);
+      captureException("web_settings_save_failed", err, {
+        reminderType,
+        weeklyDay,
+      });
       toastError("Failed to save preferences");
     } finally {
       setIsSaving(false);

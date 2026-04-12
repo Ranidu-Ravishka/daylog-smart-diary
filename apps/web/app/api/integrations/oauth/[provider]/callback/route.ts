@@ -2,13 +2,13 @@ import { ConvexHttpClient } from "convex/browser";
 import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import { api } from "@repo/backend/convex";
-import * as Sentry from "@sentry/nextjs";
 import {
   getAppBaseUrl,
   getOAuthProviderConfig,
   isOAuthProvider,
   safeReturnPath,
 } from "@/lib/integrations-oauth";
+import { captureException, logInfo, logWarn } from "@/lib/observability";
 
 const OAUTH_COOKIE_PREFIX = "daylog_oauth_state_";
 
@@ -22,27 +22,21 @@ type OAuthStateCookiePayload = {
 export const runtime = "nodejs";
 
 function logOAuthCallback(
-  level: "info" | "warn" | "error",
+  level: "info" | "warn",
   event: string,
   context: Record<string, unknown>,
 ) {
   const payload = {
     area: "oauth_callback",
-    event,
     ...context,
   };
 
-  if (level === "error") {
-    console.error(payload);
-    return;
-  }
-
   if (level === "warn") {
-    console.warn(payload);
+    logWarn(event, payload);
     return;
   }
 
-  console.info(payload);
+  logInfo(event, payload);
 }
 
 function rejectOAuthCallback(
@@ -66,7 +60,7 @@ function rejectOAuthCallback(
   );
   const response = NextResponse.redirect(redirectUrl);
 
-  logOAuthCallback("warn", "callback_rejected", {
+  logOAuthCallback("warn", "oauth_callback_rejected", {
     provider,
     code,
     message,
@@ -268,7 +262,7 @@ export async function GET(
   const providerErrorDescription =
     request.nextUrl.searchParams.get("error_description");
 
-  logOAuthCallback("info", "request_received", {
+  logOAuthCallback("info", "oauth_callback_request_received", {
     provider,
     stateProvided: Boolean(stateFromQuery),
     statePrefix: stateFromQuery?.slice(0, 8) ?? null,
@@ -278,7 +272,7 @@ export async function GET(
   });
 
   if (!isOAuthProvider(provider)) {
-    logOAuthCallback("warn", "unsupported_provider", {
+    logOAuthCallback("warn", "oauth_callback_unsupported_provider", {
       provider,
     });
     return NextResponse.redirect(
@@ -326,7 +320,7 @@ export async function GET(
     statePayload.state !== nextState ||
     !code
   ) {
-    logOAuthCallback("warn", "state_validation_failed", {
+    logOAuthCallback("warn", "oauth_callback_state_validation_failed", {
       provider,
       statePrefix: nextState?.slice(0, 8) ?? null,
       hasStateCookie: Boolean(statePayload),
@@ -345,7 +339,7 @@ export async function GET(
     );
   }
 
-  logOAuthCallback("info", "state_validated", {
+  logOAuthCallback("info", "oauth_callback_state_validated", {
     provider,
     statePrefix: nextState.slice(0, 8),
     returnPath: statePayload.returnPath,
@@ -364,7 +358,7 @@ export async function GET(
 
   const config = getOAuthProviderConfig(provider);
   if (!config.clientId || !config.clientSecret) {
-    logOAuthCallback("warn", "missing_provider_credentials", {
+    logOAuthCallback("warn", "oauth_callback_missing_provider_credentials", {
       provider,
       userId,
       returnPath: statePayload.returnPath,
@@ -385,7 +379,7 @@ export async function GET(
   try {
     const appBaseUrl = getAppBaseUrl(request.nextUrl.origin);
     const callbackUrl = `${appBaseUrl}/api/integrations/oauth/${provider}/callback`;
-    logOAuthCallback("info", "token_exchange_started", {
+    logOAuthCallback("info", "oauth_callback_token_exchange_started", {
       provider,
       userId,
       callbackUrl,
@@ -416,7 +410,7 @@ export async function GET(
       accessTokenExpiresAt,
     });
 
-    logOAuthCallback("info", "connect_mutation_succeeded", {
+    logOAuthCallback("info", "oauth_callback_connect_mutation_succeeded", {
       provider,
       userId,
       returnPath: statePayload.returnPath,
@@ -435,7 +429,7 @@ export async function GET(
     const response = NextResponse.redirect(successRedirect);
     response.cookies.delete(oauthCookieName);
 
-    logOAuthCallback("info", "callback_succeeded", {
+    logOAuthCallback("info", "oauth_callback_succeeded", {
       provider,
       userId,
       redirectTo: successRedirect.pathname,
@@ -446,18 +440,12 @@ export async function GET(
   } catch (error) {
     const failureMessage = formatCallbackFailureMessage(error);
 
-    logOAuthCallback("error", "callback_failed", {
+    captureException("oauth_callback_failed", error, {
+      area: "oauth_callback",
       provider,
       returnPath: statePayload.returnPath,
-      error: error instanceof Error ? error.message : "unknown",
+      errorMessage: error instanceof Error ? error.message : "unknown",
       surfacedMessage: failureMessage,
-    });
-
-    Sentry.captureException(error, {
-      tags: {
-        route: "oauth_callback",
-        provider,
-      },
     });
 
     return rejectOAuthCallback(

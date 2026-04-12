@@ -21,6 +21,14 @@ type QualityEval = {
   lowQuality: boolean;
 };
 
+type TransportHealthSummary = {
+  overall: {
+    ingestedCount: number;
+    estimatedDropRate: number;
+    lastReceivedAt: number | null;
+  };
+};
+
 export default function AdminDashboardPage() {
   const retentionRunsRef = makeFunctionReference<"query">(
     "retention:listRetentionRunsPaginated",
@@ -30,6 +38,9 @@ export default function AdminDashboardPage() {
   );
   const healthSummaryRef = makeFunctionReference<"query">(
     "integrationHealth:getIntegrationHealthSummary",
+  );
+  const transportHealthRef = makeFunctionReference<"query">(
+    "observabilityIngestion:getObservabilityInfoTransportHealth",
   );
 
   const { isAuthenticated } = useConvexAuth();
@@ -45,6 +56,14 @@ export default function AdminDashboardPage() {
   const healthSummary = useQuery(healthSummaryRef, isAdmin ? {} : "skip") as
     | HealthSummary
     | undefined;
+  const transportHealth = useQuery(
+    transportHealthRef,
+    isAdmin
+      ? {
+          windowHours: 24,
+        }
+      : "skip",
+  ) as TransportHealthSummary | undefined;
 
   const { results: retentionRuns } = usePaginatedQuery(
     retentionRunsRef,
@@ -70,6 +89,9 @@ export default function AdminDashboardPage() {
   const lowQualityOpen = (lowQualityQueue as QualityEval[]).filter(
     (row) => row.lowQuality,
   ).length;
+
+  const lastInfoEventAt = transportHealth?.overall.lastReceivedAt;
+  const infoTransportDropRate = transportHealth?.overall.estimatedDropRate ?? 0;
 
   return (
     <AdminGuard>
@@ -126,7 +148,7 @@ export default function AdminDashboardPage() {
               Operational surfaces for observability, governance, and quality.
             </p>
 
-            <div className="mt-4 grid gap-4 md:grid-cols-3">
+            <div className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <MaturityCard
                 title="Integration Health"
                 subtitle={`${connectedCount} connected • ${degradedCount} degraded • ${failedCount} failed`}
@@ -145,6 +167,15 @@ export default function AdminDashboardPage() {
                 title="Summary Quality Queue"
                 subtitle={`Low-quality queue (first page): ${lowQualityOpen}`}
                 href="/summaries/quality"
+              />
+              <MaturityCard
+                title="Info Transport Health"
+                subtitle={
+                  lastInfoEventAt
+                    ? `${transportHealth?.overall.ingestedCount ?? 0} ingested / 24h • ${(infoTransportDropRate * 100).toFixed(1)}% est. drop • last ${new Date(lastInfoEventAt).toLocaleString()}`
+                    : "No recent info transport events"
+                }
+                href="/observability/info-events"
               />
             </div>
           </div>

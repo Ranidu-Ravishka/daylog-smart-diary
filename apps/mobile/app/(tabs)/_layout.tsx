@@ -47,6 +47,7 @@ import {
   type CreateMemoryOutboxPayload,
   type UploadMemoryMediaOutboxPayload,
 } from "@/lib/offline-outbox";
+import { logInfo } from "@/lib/observability";
 
 function dedupeSignals(signals: string[]): string[] {
   return Array.from(
@@ -198,7 +199,7 @@ export default function TabLayout() {
         result.dropped > 0 ||
         result.pending > 0
       ) {
-        console.info("[offline-outbox]", result);
+        logInfo("mobile_offline_outbox_flush_result", result);
       }
     };
 
@@ -209,7 +210,7 @@ export default function TabLayout() {
           return;
         }
 
-        console.info("[offline-outbox-task]", {
+        logInfo("mobile_offline_outbox_task_execution", {
           taskId: event.taskId,
           status: event.status,
           attempt: event.attempt,
@@ -541,7 +542,7 @@ export default function TabLayout() {
     const runner = createBackgroundTaskRunner({
       tickIntervalMs: 1_000,
       onExecution: (event: BackgroundTaskExecutionEvent) => {
-        console.info("[background-pipeline]", {
+        logInfo("mobile_background_pipeline_task_execution", {
           taskId: event.taskId,
           status: event.status,
           attempt: event.attempt,

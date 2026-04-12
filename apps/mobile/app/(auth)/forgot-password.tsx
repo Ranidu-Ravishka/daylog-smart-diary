@@ -14,6 +14,7 @@ import {
 import { useRouter } from "expo-router";
 import { useSignIn } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
+import { captureException } from "@/lib/observability";
 
 type ClerkErrorLike = {
   errors?: {
@@ -84,7 +85,9 @@ export default function ForgotPasswordScreen() {
         }
       }
     } catch (err: unknown) {
-      console.error("Reset password error:", err);
+      captureException("mobile_forgot_password_send_email_failed", err, {
+        emailProvided: email.trim().length > 0,
+      });
       const clerkError = getClerkError(err);
       const errorCode = clerkError.errors?.[0]?.code;
       const errorMessage = clerkError.errors?.[0]?.message;
@@ -133,7 +136,9 @@ export default function ForgotPasswordScreen() {
         setError("Invalid or expired code. Please try again.");
       }
     } catch (err: unknown) {
-      console.error("Verify code error:", err);
+      captureException("mobile_forgot_password_verify_code_failed", err, {
+        emailProvided: email.trim().length > 0,
+      });
       const clerkError = getClerkError(err);
       const errorCode = clerkError.errors?.[0]?.code;
       const errorMessage = clerkError.errors?.[0]?.message;
@@ -195,7 +200,9 @@ export default function ForgotPasswordScreen() {
         setError("Failed to reset password. Please try again.");
       }
     } catch (err: unknown) {
-      console.error("Reset password error:", err);
+      captureException("mobile_forgot_password_reset_failed", err, {
+        emailProvided: email.trim().length > 0,
+      });
       const clerkError = getClerkError(err);
       const errorMessage = clerkError.errors?.[0]?.message;
 
@@ -228,7 +235,9 @@ export default function ForgotPasswordScreen() {
 
       setSuccess("New verification code sent to your email");
     } catch (err: unknown) {
-      console.error("Resend code error:", err);
+      captureException("mobile_forgot_password_resend_code_failed", err, {
+        emailProvided: email.trim().length > 0,
+      });
       const clerkError = getClerkError(err);
       setError(
         clerkError.errors?.[0]?.message ||

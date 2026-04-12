@@ -7,6 +7,7 @@ import {
   isOAuthProvider,
   safeReturnPath,
 } from "@/lib/integrations-oauth";
+import { logInfo, logWarn } from "@/lib/observability";
 
 const OAUTH_COOKIE_PREFIX = "daylog_oauth_state_";
 
@@ -18,25 +19,6 @@ type OAuthStateCookiePayload = {
 };
 
 export const runtime = "nodejs";
-
-function logOAuthStart(
-  level: "info" | "warn",
-  event: string,
-  context: Record<string, unknown>,
-) {
-  const payload = {
-    area: "oauth_start",
-    event,
-    ...context,
-  };
-
-  if (level === "warn") {
-    console.warn(payload);
-    return;
-  }
-
-  console.info(payload);
-}
 
 function buildResultRedirect(
   request: NextRequest,
@@ -65,7 +47,8 @@ export async function GET(
 
   const { userId } = await auth();
   if (!userId) {
-    logOAuthStart("warn", "unauthenticated_redirect", {
+    logWarn("oauth_start_unauthenticated_redirect", {
+      area: "oauth_start",
       provider,
       returnPath,
     });
@@ -81,7 +64,8 @@ export async function GET(
       returnPath,
     );
 
-    logOAuthStart("warn", "unsupported_provider", {
+    logWarn("oauth_start_unsupported_provider", {
+      area: "oauth_start",
       provider,
       returnPath,
       userId,
@@ -100,7 +84,8 @@ export async function GET(
       returnPath,
     );
 
-    logOAuthStart("warn", "missing_provider_credentials", {
+    logWarn("oauth_start_missing_provider_credentials", {
+      area: "oauth_start",
       provider,
       returnPath,
       userId,
@@ -115,7 +100,8 @@ export async function GET(
   const callbackUrl = `${appBaseUrl}/api/integrations/oauth/${provider}/callback`;
   const state = randomUUID();
 
-  logOAuthStart("info", "request_received", {
+  logInfo("oauth_start_request_received", {
+    area: "oauth_start",
     provider,
     userId,
     returnPath,
@@ -149,7 +135,8 @@ export async function GET(
     returnPath,
   };
 
-  logOAuthStart("info", "provider_redirect_issued", {
+  logInfo("oauth_start_provider_redirect_issued", {
+    area: "oauth_start",
     provider,
     userId,
     returnPath,

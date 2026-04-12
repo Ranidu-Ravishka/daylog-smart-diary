@@ -16,6 +16,11 @@ import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { ClerkProvider, useAuth, useUser } from "@clerk/clerk-expo";
 import { api } from "@repo/backend/convex";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import {
+  captureException,
+  initCrashReporting,
+  logWarn,
+} from "@/lib/observability";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -25,6 +30,8 @@ Notifications.setNotificationHandler({
     shouldSetBadge: false,
   }),
 });
+
+initCrashReporting();
 
 const DEV_FALLBACK_CONVEX_URL = "http://localhost:4334";
 const CONVEX_URL_ENV_VAR = "EXPO_PUBLIC_CONVEX_URL";
@@ -61,9 +68,10 @@ function bootstrapConvexClient(): ConvexBootstrap {
     const resolved = resolveConvexUrlOrThrow();
 
     if (resolved.usingDevFallback) {
-      console.warn(
-        `[startup] ${CONVEX_URL_ENV_VAR} is not set. Using local development fallback at ${DEV_FALLBACK_CONVEX_URL}.`,
-      );
+      logWarn("mobile_startup_missing_convex_url_using_dev_fallback", {
+        envName: CONVEX_URL_ENV_VAR,
+        fallbackUrl: DEV_FALLBACK_CONVEX_URL,
+      });
     }
 
     return {
@@ -76,7 +84,9 @@ function bootstrapConvexClient(): ConvexBootstrap {
         ? error
         : new Error("Unexpected startup misconfiguration.");
 
-    console.error(`[startup] ${startupError.message}`);
+    captureException("mobile_startup_convex_bootstrap_failed", startupError, {
+      envName: CONVEX_URL_ENV_VAR,
+    });
 
     return {
       client: null,
@@ -123,7 +133,9 @@ function SyncClerkUserToConvex() {
       lastName: user.lastName ?? undefined,
       imageUrl: user.imageUrl ?? undefined,
     }).catch((error) => {
-      console.error("Failed to sync user to Convex", error);
+      captureException("mobile_sync_user_to_convex_failed", error, {
+        clerkUserId: user.id,
+      });
     });
 
     lastSyncedUserId.current = user.id;

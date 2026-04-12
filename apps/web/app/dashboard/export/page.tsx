@@ -12,6 +12,7 @@ import { Download, Check, FileText, BookOpen, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { captureException } from "@/lib/observability";
 import { toastError, toastSuccess } from "@/lib/toast";
 
 type ExportFormat = "json" | "txt";
@@ -171,7 +172,10 @@ export default function ExportPage() {
       toastSuccess("Data export downloaded.");
       setTimeout(() => setExported(false), 3000);
     } catch (error) {
-      console.error("Export failed", error);
+      captureException("web_export_prepare_failed", error, {
+        format,
+        includeLocationSignals,
+      });
       toastError("Failed to export data. Please try again.");
     } finally {
       setIsExporting(false);
@@ -188,7 +192,9 @@ export default function ExportPage() {
       triggerBrowserDownload(payload.downloadUrl, payload.fileName);
       toastSuccess("Export downloaded.");
     } catch (error) {
-      console.error("Failed to download historical export", error);
+      captureException("web_export_download_historical_failed", error, {
+        jobId,
+      });
       toastError("Unable to download this export right now.");
     } finally {
       setDownloadingJobId(null);
