@@ -25,7 +25,11 @@ import { applyDashboardMetricsDelta } from "./dashboardMetrics";
 
 const DEFAULT_USER_DELETION_BATCH_SIZE = 128;
 
-type UserDeletionJobStatus = "queued" | "running" | "completed";
+type UserDeletionJobStatus =
+  | "requested"
+  | "processing"
+  | "completed"
+  | "failed";
 
 type UserDeletionProgress = Doc<"userDeletionJobs">["progress"];
 
@@ -87,23 +91,23 @@ async function findLatestUserDeletionJobByUserId(
   ctx: Pick<MutationCtx, "db">,
   userId: Id<"user">,
 ): Promise<Doc<"userDeletionJobs"> | null> {
-  const running = await ctx.db
+  const processing = await ctx.db
     .query("userDeletionJobs")
     .withIndex("by_user_status", (q) =>
-      q.eq("userId", userId).eq("status", "running"),
+      q.eq("userId", userId).eq("status", "processing"),
     )
     .order("desc")
     .take(1);
-  if (running[0]) return running[0];
+  if (processing[0]) return processing[0];
 
-  const queued = await ctx.db
+  const requested = await ctx.db
     .query("userDeletionJobs")
     .withIndex("by_user_status", (q) =>
-      q.eq("userId", userId).eq("status", "queued"),
+      q.eq("userId", userId).eq("status", "requested"),
     )
     .order("desc")
     .take(1);
-  if (queued[0]) return queued[0];
+  if (requested[0]) return requested[0];
 
   const completed = await ctx.db
     .query("userDeletionJobs")
@@ -113,40 +117,61 @@ async function findLatestUserDeletionJobByUserId(
     .order("desc")
     .take(1);
 
-  return completed[0] ?? null;
+  const failed = await ctx.db
+    .query("userDeletionJobs")
+    .withIndex("by_user_status", (q) =>
+      q.eq("userId", userId).eq("status", "failed"),
+    )
+    .order("desc")
+    .take(1);
+
+  const latestCompleted = completed[0] ?? null;
+  const latestFailed = failed[0] ?? null;
+
+  if (!latestCompleted) {
+    return latestFailed;
+  }
+
+  if (!latestFailed) {
+    return latestCompleted;
+  }
+
+  return latestCompleted.updatedAt >= latestFailed.updatedAt
+    ? latestCompleted
+    : latestFailed;
 }
 
 async function findActiveUserDeletionJobByClerkId(
   ctx: Pick<MutationCtx, "db">,
   clerkUserId: string,
 ): Promise<UserDeletionJobRef | null> {
-  const running = await ctx.db
+  const processing = await ctx.db
     .query("userDeletionJobs")
     .withIndex("by_clerk_status", (q) =>
-      q.eq("clerkUserId", clerkUserId).eq("status", "running"),
+      q.eq("clerkUserId", clerkUserId).eq("status", "processing"),
     )
     .order("desc")
     .take(1);
-  if (running[0]) {
+  if (processing[0]) {
     return {
-      jobId: running[0]._id,
-      status: running[0].status,
-      stage: running[0].stage,
+      jobId: processing[0]._id,
+      status: processing[0].status,
+      stage: processing[0].stage,
     };
   }
 
-  const queued = await ctx.db
+  const requested = await ctx.db
     .query("userDeletionJobs")
     .withIndex("by_clerk_status", (q) =>
-      q.eq("clerkUserId", clerkUserId).eq("status", "queued"),
+      q.eq("clerkUserId", clerkUserId).eq("status", "requested"),
     )
     .order("desc")
     .take(1);
-  if (queued[0]) {
+  if (requested[0]) {
     return {
-      jobId: queued[0]._id,
-      status: queued[0].status,
-      stage: queued[0].stage,
+      jobId: requested[0]._id,
+      status: requested[0].status,
+      stage: requested[0].stage,
     };
   }
 
@@ -176,7 +201,7 @@ async function enqueueUserDeletionJob(
 ): Promise<UserDeletionJobRef & { created: boolean }> {
   const existing = await findLatestUserDeletionJobByUserId(ctx, args.userId);
 
-  if (existing?.status === "running") {
+  if (existing?.status === "processing") {
     return {
       created: false,
       jobId: existing._id,
@@ -185,7 +210,7 @@ async function enqueueUserDeletionJob(
     };
   }
 
-  if (existing?.status === "queued") {
+  if (existing?.status === "requested") {
     return {
       created: false,
       jobId: existing._id,
@@ -204,7 +229,7 @@ async function enqueueUserDeletionJob(
     userId: args.userId,
     clerkUserId: args.clerkUserId,
     requestedByUserId: args.requestedByUserId,
-    status: "queued",
+    status: "requested",
     stage: initialStage,
     processedBatches: 0,
     checkpoints: 0,
@@ -218,7 +243,7 @@ async function enqueueUserDeletionJob(
   return {
     created: true,
     jobId,
-    status: "queued",
+    status: "requested",
     stage: initialStage,
   };
 }
@@ -262,114 +287,162 @@ export const runUserDeletionCascadeJobStepInternal = internalMutation({
       } as const;
     }
 
-    const batch = await runUserCascadeDeletionStageBatch(ctx, {
-      userId: job.userId,
-      clerkUserId: job.clerkUserId,
-      stage: job.stage,
-      cursor: job.cursor ?? null,
-      batchSize: resolveUserDeletionBatchSize(args.batchSize),
-    });
-
-    const now = Date.now();
-    const nextProgress = mergeUserDeletionProgress(job.progress, batch.deleted);
-    const nextProcessedBatches = job.processedBatches + 1;
-    const nextCheckpoints = job.checkpoints + 1;
-
-    if (!batch.isStageComplete) {
-      await ctx.db.patch(job._id, {
-        status: "running",
-        cursor: batch.nextCursor ?? undefined,
-        progress: nextProgress,
-        processedBatches: nextProcessedBatches,
-        checkpoints: nextCheckpoints,
-        lastCheckpointAt: now,
-        updatedAt: now,
-      });
-
-      await scheduleUserDeletionStep(ctx, job._id);
-
+    if (job.status === "failed") {
       return {
-        success: true,
-        done: false,
+        success: false,
+        done: true,
+        reason: "job_failed",
         jobId: job._id,
-        status: "running",
+        status: job.status,
         stage: job.stage,
-        cursor: batch.nextCursor,
-        checkpoints: nextCheckpoints,
-        processedBatches: nextProcessedBatches,
-        progress: nextProgress,
+        checkpoints: job.checkpoints,
+        processedBatches: job.processedBatches,
+        progress: job.progress,
       } as const;
     }
 
-    const nextStage = getNextUserCascadeDeletionStage(job.stage);
-    if (nextStage) {
+    try {
+      const batch = await runUserCascadeDeletionStageBatch(ctx, {
+        userId: job.userId,
+        clerkUserId: job.clerkUserId,
+        stage: job.stage,
+        cursor: job.cursor ?? null,
+        batchSize: resolveUserDeletionBatchSize(args.batchSize),
+      });
+
+      const now = Date.now();
+      const nextProgress = mergeUserDeletionProgress(
+        job.progress,
+        batch.deleted,
+      );
+      const nextProcessedBatches = job.processedBatches + 1;
+      const nextCheckpoints = job.checkpoints + 1;
+
+      if (!batch.isStageComplete) {
+        await ctx.db.patch(job._id, {
+          status: "processing",
+          cursor: batch.nextCursor ?? undefined,
+          progress: nextProgress,
+          processedBatches: nextProcessedBatches,
+          checkpoints: nextCheckpoints,
+          lastCheckpointAt: now,
+          updatedAt: now,
+        });
+
+        await scheduleUserDeletionStep(ctx, job._id);
+
+        return {
+          success: true,
+          done: false,
+          jobId: job._id,
+          status: "processing",
+          stage: job.stage,
+          cursor: batch.nextCursor,
+          checkpoints: nextCheckpoints,
+          processedBatches: nextProcessedBatches,
+          progress: nextProgress,
+        } as const;
+      }
+
+      const nextStage = getNextUserCascadeDeletionStage(job.stage);
+      if (nextStage) {
+        await ctx.db.patch(job._id, {
+          status: "processing",
+          stage: nextStage,
+          cursor: undefined,
+          progress: nextProgress,
+          processedBatches: nextProcessedBatches,
+          checkpoints: nextCheckpoints,
+          lastCheckpointAt: now,
+          updatedAt: now,
+        });
+
+        await scheduleUserDeletionStep(ctx, job._id);
+
+        return {
+          success: true,
+          done: false,
+          jobId: job._id,
+          status: "processing",
+          stage: nextStage,
+          checkpoints: nextCheckpoints,
+          processedBatches: nextProcessedBatches,
+          progress: nextProgress,
+        } as const;
+      }
+
+      const userAtFinalize = await ctx.db.get(job.userId);
+      const shouldApplyMetrics =
+        !job.metricsAppliedAt && userAtFinalize !== null;
+
+      if (shouldApplyMetrics) {
+        await applyDashboardMetricsDelta(ctx.db, {
+          totalUsers: -1,
+          totalMemories: -nextProgress.deletedMemories,
+          totalDays: -nextProgress.deletedDays,
+          totalSummaries: -nextProgress.deletedSummaries,
+          totalIntegrations: -nextProgress.deletedIntegrations,
+          totalPreferences: -nextProgress.deletedPreferences,
+          totalAuditLogs: -nextProgress.deletedAuditLogs,
+        });
+      }
+
+      if (!job.userDeletedAt && userAtFinalize) {
+        await ctx.db.delete(userAtFinalize._id);
+      }
+
       await ctx.db.patch(job._id, {
-        status: "running",
-        stage: nextStage,
+        status: "completed",
         cursor: undefined,
         progress: nextProgress,
         processedBatches: nextProcessedBatches,
         checkpoints: nextCheckpoints,
         lastCheckpointAt: now,
         updatedAt: now,
+        completedAt: now,
+        failedAt: undefined,
+        metricsAppliedAt: job.metricsAppliedAt ?? now,
+        userDeletedAt: job.userDeletedAt ?? now,
+        lastError: undefined,
       });
-
-      await scheduleUserDeletionStep(ctx, job._id);
 
       return {
         success: true,
-        done: false,
+        done: true,
         jobId: job._id,
-        status: "running",
-        stage: nextStage,
+        status: "completed",
+        stage: job.stage,
         checkpoints: nextCheckpoints,
         processedBatches: nextProcessedBatches,
         progress: nextProgress,
       } as const;
-    }
+    } catch (error) {
+      const now = Date.now();
+      const message =
+        error instanceof Error
+          ? error.message
+          : "User deletion job failed unexpectedly";
 
-    const userAtFinalize = await ctx.db.get(job.userId);
-    const shouldApplyMetrics = !job.metricsAppliedAt && userAtFinalize !== null;
-
-    if (shouldApplyMetrics) {
-      await applyDashboardMetricsDelta(ctx.db, {
-        totalUsers: -1,
-        totalMemories: -nextProgress.deletedMemories,
-        totalDays: -nextProgress.deletedDays,
-        totalSummaries: -nextProgress.deletedSummaries,
-        totalIntegrations: -nextProgress.deletedIntegrations,
-        totalPreferences: -nextProgress.deletedPreferences,
-        totalAuditLogs: -nextProgress.deletedAuditLogs,
+      await ctx.db.patch(job._id, {
+        status: "failed",
+        updatedAt: now,
+        failedAt: now,
+        lastError: message,
       });
+
+      return {
+        success: false,
+        done: true,
+        reason: "job_failed",
+        jobId: job._id,
+        status: "failed",
+        stage: job.stage,
+        checkpoints: job.checkpoints,
+        processedBatches: job.processedBatches,
+        progress: job.progress,
+        error: message,
+      } as const;
     }
-
-    if (!job.userDeletedAt && userAtFinalize) {
-      await ctx.db.delete(userAtFinalize._id);
-    }
-
-    await ctx.db.patch(job._id, {
-      status: "completed",
-      cursor: undefined,
-      progress: nextProgress,
-      processedBatches: nextProcessedBatches,
-      checkpoints: nextCheckpoints,
-      lastCheckpointAt: now,
-      updatedAt: now,
-      completedAt: now,
-      metricsAppliedAt: job.metricsAppliedAt ?? now,
-      userDeletedAt: job.userDeletedAt ?? now,
-    });
-
-    return {
-      success: true,
-      done: true,
-      jobId: job._id,
-      status: "completed",
-      stage: job.stage,
-      checkpoints: nextCheckpoints,
-      processedBatches: nextProcessedBatches,
-      progress: nextProgress,
-    } as const;
   },
 });
 

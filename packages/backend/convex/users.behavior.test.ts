@@ -349,10 +349,11 @@ describe("users behavior", () => {
     const beforeSteps = await getUserDeletionJobByIdInternal(ctx, {
       jobId,
     });
-    expect(beforeSteps?.status).toBe("queued");
+    expect(beforeSteps?.status).toBe("requested");
     expect(beforeSteps?.checkpoints).toBe(0);
 
     let completed = false;
+    let sawProcessing = false;
     let guard = 0;
     while (!completed) {
       guard += 1;
@@ -366,8 +367,13 @@ describe("users behavior", () => {
       });
 
       expect(step.success).toBe(true);
+      if (step.status === "processing") {
+        sawProcessing = true;
+      }
       completed = step.done;
     }
+
+    expect(sawProcessing).toBe(true);
 
     const afterSteps = await getUserDeletionJobByIdInternal(ctx, {
       jobId,
@@ -404,5 +410,94 @@ describe("users behavior", () => {
     });
 
     expect(second).toEqual({ success: true, deleted: false, queued: false });
+  });
+
+  it("marks deletion jobs as failed when a step throws", async () => {
+    const targetUserId = "user_fail_target_001" as Id<"user">;
+    const targetJobId = "deletion_job_fail_001" as Id<"userDeletionJobs">;
+
+    const db = createInMemoryDb({
+      ...baseSeed(),
+      user: [
+        ...baseSeed().user,
+        {
+          _id: targetUserId,
+          _creationTime: 100,
+          clerkUserId: "clerk_fail_target_001",
+          email: "fail-target@example.com",
+          isAdmin: false,
+        },
+      ],
+      userDeletionJobs: [
+        {
+          _id: targetJobId,
+          _creationTime: 101,
+          userId: targetUserId,
+          clerkUserId: "clerk_fail_target_001",
+          status: "requested",
+          stage: "unsupported_stage",
+          processedBatches: 0,
+          checkpoints: 0,
+          progress: {
+            deletedMemories: 0,
+            deletedSummaries: 0,
+            deletedDays: 0,
+            deletedIntegrations: 0,
+            deletedPreferences: 0,
+            deletedAuditLogs: 0,
+            deletedMemoryMedia: 0,
+            deletedIntegrationDailyData: 0,
+            deletedIntegrationSecrets: 0,
+            deletedIntegrationSyncRuns: 0,
+            deletedSummaryGenerationQuotas: 0,
+          },
+          startedAt: 1,
+          updatedAt: 1,
+        },
+      ],
+    });
+
+    const runUserDeletionCascadeJobStepInternal = handler<
+      { jobId: Id<"userDeletionJobs">; batchSize?: number },
+      {
+        success: boolean;
+        done: boolean;
+        status?: string;
+        reason?: string;
+        error?: string;
+      }
+    >(usersModule.runUserDeletionCascadeJobStepInternal);
+    const getUserDeletionJobByIdInternal = handler<
+      { jobId: Id<"userDeletionJobs"> },
+      { status: string; lastError?: string; failedAt?: number } | null
+    >(usersModule.getUserDeletionJobByIdInternal);
+
+    const ctx = createAuthCtx(db, "clerk_admin_001");
+
+    const firstStep = await runUserDeletionCascadeJobStepInternal(ctx, {
+      jobId: targetJobId,
+      batchSize: 1,
+    });
+
+    expect(firstStep.success).toBe(false);
+    expect(firstStep.done).toBe(true);
+    expect(firstStep.status).toBe("failed");
+    expect(firstStep.reason).toBe("job_failed");
+    expect(firstStep.error).toContain("Unsupported user deletion stage");
+
+    const failedJob = await getUserDeletionJobByIdInternal(ctx, {
+      jobId: targetJobId,
+    });
+    expect(failedJob?.status).toBe("failed");
+    expect(failedJob?.lastError).toContain("Unsupported user deletion stage");
+    expect(typeof failedJob?.failedAt).toBe("number");
+
+    const replay = await runUserDeletionCascadeJobStepInternal(ctx, {
+      jobId: targetJobId,
+      batchSize: 1,
+    });
+    expect(replay.success).toBe(false);
+    expect(replay.done).toBe(true);
+    expect(replay.status).toBe("failed");
   });
 });

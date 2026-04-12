@@ -595,4 +595,114 @@ describe("admin behavior", () => {
     const rebuilt = await adminRebuildDashboardMetrics(ctx, {});
     expect(rebuilt.totalUsers).toBeGreaterThanOrEqual(1);
   });
+
+  it("migrates legacy user deletion statuses safely and idempotently", async () => {
+    const db = seededDb();
+    const ctx = adminCtx(db);
+
+    const adminMigrateUserDeletionJobStatuses = handler<
+      {
+        dryRun?: boolean;
+        cursor?: string;
+        pageSize?: number;
+        maxPages?: number;
+      },
+      {
+        success: boolean;
+        dryRun: boolean;
+        pageSize: number;
+        maxPages: number;
+        pagesScanned: number;
+        scanned: number;
+        migratedRequested: number;
+        migratedProcessing: number;
+        totalMigrated: number;
+        hasMore: boolean;
+        nextCursor: string | null;
+      }
+    >(adminModule.adminMigrateUserDeletionJobStatuses);
+
+    const emptyProgress = {
+      deletedMemories: 0,
+      deletedSummaries: 0,
+      deletedDays: 0,
+      deletedIntegrations: 0,
+      deletedPreferences: 0,
+      deletedAuditLogs: 0,
+      deletedMemoryMedia: 0,
+      deletedIntegrationDailyData: 0,
+      deletedIntegrationSecrets: 0,
+      deletedIntegrationSyncRuns: 0,
+      deletedSummaryGenerationQuotas: 0,
+    };
+
+    const queuedJobId = (await db.insert("userDeletionJobs", {
+      userId: MEMBER_ID,
+      clerkUserId: "clerk_member_001",
+      requestedByUserId: ADMIN_ID,
+      status: "queued",
+      stage: "memoryMedia",
+      processedBatches: 0,
+      checkpoints: 0,
+      progress: emptyProgress,
+      startedAt: 10,
+      updatedAt: 10,
+    })) as Id<"userDeletionJobs">;
+
+    const runningJobId = (await db.insert("userDeletionJobs", {
+      userId: MEMBER_ID,
+      clerkUserId: "clerk_member_001",
+      requestedByUserId: ADMIN_ID,
+      status: "running",
+      stage: "memoryMedia",
+      processedBatches: 1,
+      checkpoints: 1,
+      progress: emptyProgress,
+      startedAt: 20,
+      updatedAt: 20,
+    })) as Id<"userDeletionJobs">;
+
+    const completedJobId = (await db.insert("userDeletionJobs", {
+      userId: MEMBER_ID,
+      clerkUserId: "clerk_member_001",
+      requestedByUserId: ADMIN_ID,
+      status: "completed",
+      stage: "summaryGenerationQuotas",
+      processedBatches: 2,
+      checkpoints: 2,
+      progress: emptyProgress,
+      startedAt: 30,
+      updatedAt: 30,
+      completedAt: 35,
+    })) as Id<"userDeletionJobs">;
+
+    const dryRun = await adminMigrateUserDeletionJobStatuses(ctx, {
+      dryRun: true,
+      pageSize: 10,
+      maxPages: 10,
+    });
+    expect(dryRun.success).toBe(true);
+    expect(dryRun.totalMigrated).toBe(2);
+    expect(dryRun.migratedRequested).toBe(1);
+    expect(dryRun.migratedProcessing).toBe(1);
+    expect((await db.get(queuedJobId))?.status).toBe("queued");
+    expect((await db.get(runningJobId))?.status).toBe("running");
+
+    const migrated = await adminMigrateUserDeletionJobStatuses(ctx, {
+      dryRun: false,
+      pageSize: 10,
+      maxPages: 10,
+    });
+    expect(migrated.totalMigrated).toBe(2);
+    expect((await db.get(queuedJobId))?.status).toBe("requested");
+    expect((await db.get(runningJobId))?.status).toBe("processing");
+    expect((await db.get(completedJobId))?.status).toBe("completed");
+
+    const secondPass = await adminMigrateUserDeletionJobStatuses(ctx, {
+      dryRun: false,
+      pageSize: 10,
+      maxPages: 10,
+    });
+    expect(secondPass.totalMigrated).toBe(0);
+  });
 });

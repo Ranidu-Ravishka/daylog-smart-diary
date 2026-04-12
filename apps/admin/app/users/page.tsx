@@ -12,7 +12,7 @@ import {
 } from "convex/react";
 import Link from "next/link";
 
-type DeletionJobStatus = "queued" | "running" | "completed";
+type DeletionJobStatus = "requested" | "processing" | "completed" | "failed";
 
 type DeletionJobProgress = {
   deletedMemories: number;
@@ -77,6 +77,8 @@ type TrackedDeletionJob = {
   checkpoints: number;
   updatedAt: number;
   completedAt?: number;
+  failedAt?: number;
+  lastError?: string;
   progress: DeletionJobProgress;
 };
 
@@ -86,6 +88,8 @@ type DeletionJobSnapshot = {
   checkpoints: number;
   updatedAt?: number;
   completedAt?: number;
+  failedAt?: number;
+  lastError?: string;
   progress?: DeletionJobProgress;
 };
 
@@ -104,11 +108,39 @@ function getDeletionStatusPillClasses(status: DeletionJobStatus): string {
     return "bg-emerald-100 text-emerald-800";
   }
 
-  if (status === "running") {
+  if (status === "failed") {
+    return "bg-red-100 text-red-800";
+  }
+
+  if (status === "processing") {
     return "bg-amber-100 text-amber-800";
   }
 
   return "bg-slate-100 text-slate-700";
+}
+
+function formatDeletionStatusLabel(status: DeletionJobStatus): string {
+  if (status === "processing") {
+    return "Processing";
+  }
+
+  if (status === "requested") {
+    return "Requested";
+  }
+
+  if (status === "completed") {
+    return "Completed";
+  }
+
+  return "Failed";
+}
+
+function isDeletionJobActive(status: DeletionJobStatus): boolean {
+  return status === "requested" || status === "processing";
+}
+
+function isDeletionJobTerminal(status: DeletionJobStatus): boolean {
+  return status === "completed" || status === "failed";
 }
 
 function normalizeDeletionJobProgress(
@@ -144,7 +176,12 @@ function normalizeDeletionJobSnapshot(
   const stage = candidate.stage;
   const checkpoints = candidate.checkpoints;
 
-  if (status !== "queued" && status !== "running" && status !== "completed") {
+  if (
+    status !== "requested" &&
+    status !== "processing" &&
+    status !== "completed" &&
+    status !== "failed"
+  ) {
     return null;
   }
 
@@ -162,6 +199,10 @@ function normalizeDeletionJobSnapshot(
       typeof candidate.completedAt === "number"
         ? candidate.completedAt
         : undefined,
+    failedAt:
+      typeof candidate.failedAt === "number" ? candidate.failedAt : undefined,
+    lastError:
+      typeof candidate.lastError === "string" ? candidate.lastError : undefined,
     progress: normalizeDeletionJobProgress(candidate.progress),
   };
 }
@@ -212,7 +253,7 @@ function DeletionJobStatusItem({
               job.status,
             )}`}
           >
-            {job.status === "completed" ? "Completed" : job.status}
+            {formatDeletionStatusLabel(job.status)}
           </span>
           <span className="inline-flex items-center rounded-md border border-gray-200 bg-white px-2 py-1 text-gray-700">
             Stage: {formatDeletionStageLabel(job.stage)}
@@ -230,7 +271,7 @@ function DeletionJobStatusItem({
           >
             {detailsExpanded ? "Hide details" : "View details"}
           </button>
-          {job.status === "completed" ? (
+          {isDeletionJobTerminal(job.status) ? (
             <button
               type="button"
               onClick={() => onDismiss(job.jobId)}
@@ -241,6 +282,10 @@ function DeletionJobStatusItem({
           ) : null}
         </div>
       </div>
+
+      {job.status === "failed" && job.lastError ? (
+        <p className="mt-2 text-xs text-red-700">Failed: {job.lastError}</p>
+      ) : null}
 
       {detailsExpanded ? (
         <div className="mt-3 rounded-lg border border-blue-100 bg-white p-3">
@@ -297,8 +342,8 @@ export default function UsersPage() {
     TrackedDeletionJob[]
   >([]);
 
-  const hasInFlightDeletionJobs = trackedDeletionJobs.some(
-    (job) => job.status === "queued" || job.status === "running",
+  const hasInFlightDeletionJobs = trackedDeletionJobs.some((job) =>
+    isDeletionJobActive(job.status),
   );
 
   React.useEffect(() => {
@@ -326,8 +371,8 @@ export default function UsersPage() {
       setTrackedDeletionJobs((current) =>
         current.filter(
           (job) =>
-            job.status !== "completed" ||
-            (job.completedAt ?? job.updatedAt) >= cutoff,
+            !isDeletionJobTerminal(job.status) ||
+            (job.completedAt ?? job.failedAt ?? job.updatedAt) >= cutoff,
         ),
       );
     }, 10_000);
@@ -340,11 +385,33 @@ export default function UsersPage() {
   const activeDeletionByUserId = React.useMemo(() => {
     const userIds = new Set<string>();
     for (const job of trackedDeletionJobs) {
-      if (job.status === "queued" || job.status === "running") {
+      if (isDeletionJobActive(job.status)) {
         userIds.add(job.userId);
       }
     }
     return userIds;
+  }, [trackedDeletionJobs]);
+
+  const activeDeletionStatusByUserId = React.useMemo(() => {
+    const latestJobByUserId = new Map<string, TrackedDeletionJob>();
+
+    const statuses = new Map<string, DeletionJobStatus>();
+    for (const job of trackedDeletionJobs) {
+      if (!isDeletionJobActive(job.status)) {
+        continue;
+      }
+
+      const previous = latestJobByUserId.get(job.userId);
+      if (!previous || job.updatedAt >= previous.updatedAt) {
+        latestJobByUserId.set(job.userId, job);
+      }
+    }
+
+    for (const [userId, job] of latestJobByUserId) {
+      statuses.set(userId, job.status);
+    }
+
+    return statuses;
   }, [trackedDeletionJobs]);
 
   const handleDeletionSnapshot = React.useCallback(
@@ -362,6 +429,8 @@ export default function UsersPage() {
             checkpoints: snapshot.checkpoints,
             updatedAt: snapshot.updatedAt ?? Date.now(),
             completedAt: snapshot.completedAt ?? job.completedAt,
+            failedAt: snapshot.failedAt ?? job.failedAt,
+            lastError: snapshot.lastError ?? job.lastError,
             progress: snapshot.progress ?? job.progress,
           };
         }),
@@ -411,14 +480,20 @@ export default function UsersPage() {
 
         const now = Date.now();
         setTrackedDeletionJobs((current) => {
+          const initialStatus: DeletionJobStatus =
+            result.status === "processing" ? "processing" : "requested";
+
           const nextJob: TrackedDeletionJob = {
             jobId,
             userId: rowId,
             userEmail: row.email,
-            status: result.status ?? "queued",
+            status: initialStatus,
             stage: result.stage ?? "memoryMedia",
             checkpoints: 0,
             updatedAt: now,
+            completedAt: undefined,
+            failedAt: undefined,
+            lastError: undefined,
             progress: EMPTY_DELETION_JOB_PROGRESS,
           };
 
@@ -479,13 +554,13 @@ export default function UsersPage() {
                     User Deletion Jobs
                   </h2>
                   <p className="text-xs text-blue-700 mt-0.5">
-                    Polling queued deletions every 3 seconds.
+                    Polling deletion status every 3 seconds.
                   </p>
                 </div>
                 <span className="text-xs font-medium text-blue-800">
                   {
-                    trackedDeletionJobs.filter(
-                      (job) => job.status !== "completed",
+                    trackedDeletionJobs.filter((job) =>
+                      isDeletionJobActive(job.status),
                     ).length
                   }{" "}
                   active
@@ -581,7 +656,11 @@ export default function UsersPage() {
                               className="inline-flex items-center rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 ml-2 disabled:opacity-60 disabled:cursor-not-allowed"
                             >
                               {activeDeletionByUserId.has(String(row._id))
-                                ? "Queued"
+                                ? activeDeletionStatusByUserId.get(
+                                    String(row._id),
+                                  ) === "requested"
+                                  ? "Requested"
+                                  : "Processing"
                                 : deletingByUserId[String(row._id)]
                                   ? "Queueing..."
                                   : "Delete"}
