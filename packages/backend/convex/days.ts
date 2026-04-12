@@ -5,6 +5,34 @@ import { validateDayKey, validateRating, clampLimit } from "./validators";
 import { deleteDayCascadeData } from "./cascadeCleanup";
 import { applyDashboardMetricsDelta } from "./dashboardMetrics";
 
+function normalizeStringArray(items: string[] | undefined): string[] {
+  if (!items || items.length === 0) {
+    return [];
+  }
+
+  return items.map((item) => item.trim()).filter(Boolean);
+}
+
+function mergeUnique(base: string[], additions: string[]): string[] {
+  if (additions.length === 0) {
+    return base;
+  }
+
+  const seen = new Set(base.map((item) => item.trim()));
+  const merged = [...base];
+
+  for (const item of additions) {
+    if (seen.has(item)) {
+      continue;
+    }
+
+    seen.add(item);
+    merged.push(item);
+  }
+
+  return merged;
+}
+
 // ── Get or create a day record ──────────────────────────────
 export const upsertDay = mutation({
   args: {
@@ -43,6 +71,76 @@ export const upsertDay = mutation({
       rating: args.rating,
       manualNotes: args.manualNotes,
       peopleTags: args.peopleTags,
+    });
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalDays: 1,
+    });
+
+    return await ctx.db.get(id);
+  },
+});
+
+// ── Append day log entries without destructive overwrites ───────────
+export const appendDayLogEntries = mutation({
+  args: {
+    dayKey: v.string(),
+    rating: v.optional(v.number()),
+    manualNotesToAdd: v.optional(v.array(v.string())),
+    peopleTagsToAdd: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+
+    validateDayKey(args.dayKey);
+    if (args.rating !== undefined) validateRating(args.rating);
+
+    const manualNotesToAdd = normalizeStringArray(args.manualNotesToAdd);
+    const peopleTagsToAdd = normalizeStringArray(args.peopleTagsToAdd);
+
+    const existing = await ctx.db
+      .query("days")
+      .withIndex("by_user_day", (q) =>
+        q.eq("userId", user._id).eq("dayKey", args.dayKey),
+      )
+      .unique();
+
+    if (existing) {
+      const nextManualNotes = mergeUnique(
+        existing.manualNotes ?? [],
+        manualNotesToAdd,
+      );
+      const nextPeopleTags = mergeUnique(
+        existing.peopleTags ?? [],
+        peopleTagsToAdd,
+      );
+
+      const updates: Record<string, unknown> = {};
+      if (args.rating !== undefined) {
+        updates.rating = args.rating;
+      }
+
+      if (manualNotesToAdd.length > 0) {
+        updates.manualNotes = nextManualNotes;
+      }
+
+      if (peopleTagsToAdd.length > 0) {
+        updates.peopleTags = nextPeopleTags;
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await ctx.db.patch(existing._id, updates);
+      }
+
+      return await ctx.db.get(existing._id);
+    }
+
+    const id = await ctx.db.insert("days", {
+      userId: user._id,
+      dayKey: args.dayKey,
+      rating: args.rating,
+      manualNotes: manualNotesToAdd.length > 0 ? manualNotesToAdd : undefined,
+      peopleTags: peopleTagsToAdd.length > 0 ? peopleTagsToAdd : undefined,
     });
 
     await applyDashboardMetricsDelta(ctx.db, {

@@ -123,6 +123,7 @@ describe("memories behavior", () => {
     const addMemoryMedia = handler<
       {
         memoryId: Id<"memories">;
+        clientMediaId?: string;
         storageId: string;
         type: "image" | "video";
         width?: number;
@@ -350,6 +351,7 @@ describe("memories behavior", () => {
     const addMemoryMedia = handler<
       {
         memoryId: Id<"memories">;
+        clientMediaId?: string;
         storageId: string;
         type: "image" | "video";
         width?: number;
@@ -420,5 +422,137 @@ describe("memories behavior", () => {
     ).rejects.toThrow("Plan limit reached: max file size is");
 
     expect(sizeCtx.storage.delete).toHaveBeenCalledWith("storage_img_large");
+  });
+
+  it("treats createMemory as idempotent with clientRequestId", async () => {
+    const db = seededDb();
+
+    const createMemory = handler<
+      {
+        clientRequestId?: string;
+        title: string;
+        description?: string;
+        mood?: string;
+        happenedAt: number;
+        dayKey: string;
+      },
+      { _id: Id<"memories">; title: string } | null
+    >(memoriesModule.createMemory);
+
+    const ctx = createMemoryCtx(db, "clerk_member_001");
+
+    const first = await createMemory(ctx, {
+      clientRequestId: "offline_req_001",
+      title: "Offline memory",
+      description: "queued",
+      mood: "calm",
+      happenedAt: 100,
+      dayKey: "2026-04-02",
+    });
+
+    const second = await createMemory(ctx, {
+      clientRequestId: "offline_req_001",
+      title: "Offline memory",
+      description: "queued",
+      mood: "calm",
+      happenedAt: 100,
+      dayKey: "2026-04-02",
+    });
+
+    expect(second?._id).toBe(first?._id);
+    expect(db.getTable("memories")).toHaveLength(1);
+
+    await expect(
+      createMemory(ctx, {
+        clientRequestId: "offline_req_001",
+        title: "Offline memory changed",
+        description: "queued",
+        mood: "calm",
+        happenedAt: 100,
+        dayKey: "2026-04-02",
+      }),
+    ).rejects.toThrow(
+      "Conflict: clientRequestId already used for a different memory payload.",
+    );
+  });
+
+  it("supports idempotent media attachment by memory clientRequestId", async () => {
+    const db = seededDb();
+
+    const createMemory = handler<
+      {
+        clientRequestId?: string;
+        title: string;
+        description?: string;
+        mood?: string;
+        happenedAt: number;
+        dayKey: string;
+      },
+      { _id: Id<"memories">; title: string } | null
+    >(memoriesModule.createMemory);
+    const addMemoryMediaByClientRequestId = handler<
+      {
+        memoryClientRequestId: string;
+        clientMediaId: string;
+        storageId: string;
+        type: "image" | "video";
+        width?: number;
+        height?: number;
+      },
+      { _id: Id<"memoryMedia">; type: string } | null
+    >(memoriesModule.addMemoryMediaByClientRequestId);
+
+    const ctx = createMemoryCtx(db, "clerk_member_001");
+
+    await createMemory(ctx, {
+      clientRequestId: "offline_req_media_001",
+      title: "Offline media memory",
+      description: "queued",
+      mood: "calm",
+      happenedAt: 100,
+      dayKey: "2026-04-02",
+    });
+
+    const first = await addMemoryMediaByClientRequestId(ctx, {
+      memoryClientRequestId: "offline_req_media_001",
+      clientMediaId: "media_req_001",
+      storageId: "storage_img_queued_001",
+      type: "image",
+      width: 1200,
+      height: 800,
+    });
+
+    const second = await addMemoryMediaByClientRequestId(ctx, {
+      memoryClientRequestId: "offline_req_media_001",
+      clientMediaId: "media_req_001",
+      storageId: "storage_img_queued_retry_001",
+      type: "image",
+      width: 1200,
+      height: 800,
+    });
+
+    expect(second?._id).toBe(first?._id);
+    expect(db.getTable("memoryMedia")).toHaveLength(1);
+    expect(ctx.storage.getMetadata).toHaveBeenCalledTimes(1);
+
+    await expect(
+      addMemoryMediaByClientRequestId(ctx, {
+        memoryClientRequestId: "offline_req_media_001",
+        clientMediaId: "media_req_001",
+        storageId: "storage_vid_conflict_001",
+        type: "video",
+      }),
+    ).rejects.toThrow(
+      "Conflict: clientMediaId already used for a different media payload.",
+    );
+
+    await expect(
+      addMemoryMediaByClientRequestId(ctx, {
+        memoryClientRequestId: "missing_request_id",
+        clientMediaId: "media_req_missing",
+        storageId: "storage_img_missing_001",
+        type: "image",
+      }),
+    ).rejects.toThrow("Memory not found for clientRequestId.");
   });
 });

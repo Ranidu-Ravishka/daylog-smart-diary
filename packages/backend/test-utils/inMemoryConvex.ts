@@ -58,12 +58,14 @@ const INDEX_FIELDS: Record<TableName, Record<string, string[]>> = {
   },
   memories: {
     by_user_day: ["userId", "dayKey"],
+    by_user_clientRequestId: ["userId", "clientRequestId"],
     by_user_happenedAt: ["userId", "happenedAt"],
     by_happenedAt: ["happenedAt"],
     by_day_happenedAt: ["dayKey", "happenedAt"],
   },
   memoryMedia: {
     by_memory: ["memoryId"],
+    by_memory_clientMediaId: ["memoryId", "clientMediaId"],
     by_user: ["userId"],
     by_user_memory_type: ["userId", "memoryId", "type"],
   },

@@ -23,6 +23,10 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
 import { EmptyState } from "@/components/ui/empty-state";
 import { AppButton } from "@/components/ui/app-button";
+import {
+  enqueueOfflineAppendDayLog,
+  isLikelyTransientNetworkError,
+} from "@/lib/offline-outbox";
 
 const c = Colors.light;
 
@@ -294,6 +298,7 @@ const DailyDetailView = () => {
   }, [memoryIds, memoryThumbnails]);
 
   const upsertDay = useMutation(api.days.upsertDay);
+  const appendDayLogEntries = useMutation(api.days.appendDayLogEntries);
 
   const [manualEntry, setManualEntry] = useState("");
   const [personInput, setPersonInput] = useState("");
@@ -363,44 +368,89 @@ const DailyDetailView = () => {
     async (stars: number) => {
       setOptimisticRating(stars);
       try {
-        await upsertDay({ dayKey, rating: stars });
+        await appendDayLogEntries({ dayKey, rating: stars });
       } catch (err) {
+        if (isLikelyTransientNetworkError(err)) {
+          await enqueueOfflineAppendDayLog({
+            dayKey,
+            rating: stars,
+          });
+
+          Alert.alert(
+            "Saved Offline",
+            "Day rating was queued and will sync when online.",
+          );
+          return;
+        }
+
         setOptimisticRating(null);
         console.error("Failed to rate day:", err);
       }
     },
-    [dayKey, upsertDay],
+    [appendDayLogEntries, dayKey],
   );
 
   const handleAddEntry = useCallback(async () => {
     if (!manualEntry.trim()) return;
     setIsSaving(true);
     try {
-      const updatedNotes = [...manualNotes, manualEntry.trim()];
-      await upsertDay({ dayKey, manualNotes: updatedNotes });
+      const note = manualEntry.trim();
+      await appendDayLogEntries({
+        dayKey,
+        manualNotesToAdd: [note],
+      });
       setManualEntry("");
     } catch (err) {
+      if (isLikelyTransientNetworkError(err)) {
+        await enqueueOfflineAppendDayLog({
+          dayKey,
+          manualNotesToAdd: [manualEntry.trim()],
+        });
+        setManualEntry("");
+        Alert.alert(
+          "Saved Offline",
+          "Day note was queued and will sync when online.",
+        );
+        return;
+      }
+
       console.error("Failed to add entry:", err);
       Alert.alert("Error", "Failed to save entry. Please try again.");
     } finally {
       setIsSaving(false);
     }
-  }, [manualEntry, manualNotes, dayKey, upsertDay]);
+  }, [appendDayLogEntries, dayKey, manualEntry]);
 
   const handleAddPerson = useCallback(async () => {
     if (!personInput.trim()) return;
     setIsSaving(true);
     try {
-      const updatedTags = [...peopleTags, personInput.trim()];
-      await upsertDay({ dayKey, peopleTags: updatedTags });
+      const person = personInput.trim();
+      await appendDayLogEntries({
+        dayKey,
+        peopleTagsToAdd: [person],
+      });
       setPersonInput("");
     } catch (err) {
+      if (isLikelyTransientNetworkError(err)) {
+        await enqueueOfflineAppendDayLog({
+          dayKey,
+          peopleTagsToAdd: [personInput.trim()],
+        });
+        setPersonInput("");
+        Alert.alert(
+          "Saved Offline",
+          "Person tag was queued and will sync when online.",
+        );
+        return;
+      }
+
       console.error("Failed to add person:", err);
       Alert.alert("Error", "Failed to save. Please try again.");
     } finally {
       setIsSaving(false);
     }
-  }, [personInput, peopleTags, dayKey, upsertDay]);
+  }, [appendDayLogEntries, dayKey, personInput]);
 
   const handleRemovePerson = useCallback(
     async (index: number) => {

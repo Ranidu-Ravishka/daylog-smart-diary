@@ -170,4 +170,45 @@ describe("days behavior", () => {
     expect(db.getTable("memories")).toHaveLength(0);
     expect(db.getTable("daySummaries")).toHaveLength(0);
   });
+
+  it("appends day logs with dedupe and safe merge semantics", async () => {
+    const db = seededDb();
+
+    const appendDayLogEntries = handler<
+      {
+        dayKey: string;
+        rating?: number;
+        manualNotesToAdd?: string[];
+        peopleTagsToAdd?: string[];
+      },
+      {
+        dayKey: string;
+        rating?: number;
+        manualNotes?: string[];
+        peopleTags?: string[];
+      } | null
+    >(daysModule.appendDayLogEntries);
+
+    const ctx = createAuthCtx(db, "clerk_member_001");
+
+    const first = await appendDayLogEntries(ctx, {
+      dayKey: "2026-04-12",
+      rating: 3,
+      manualNotesToAdd: ["Morning run"],
+      peopleTagsToAdd: ["Alex"],
+    });
+    expect(first?.manualNotes).toEqual(["Morning run"]);
+    expect(first?.peopleTags).toEqual(["Alex"]);
+
+    const second = await appendDayLogEntries(ctx, {
+      dayKey: "2026-04-12",
+      rating: 5,
+      manualNotesToAdd: ["Morning run", "Coffee catchup"],
+      peopleTagsToAdd: ["Alex", "Sam"],
+    });
+
+    expect(second?.rating).toBe(5);
+    expect(second?.manualNotes).toEqual(["Morning run", "Coffee catchup"]);
+    expect(second?.peopleTags).toEqual(["Alex", "Sam"]);
+  });
 });

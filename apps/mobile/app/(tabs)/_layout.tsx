@@ -1,6 +1,7 @@
 import { Tabs, Redirect } from "expo-router";
 import React from "react";
 import { ActivityIndicator, Platform, StyleSheet, View } from "react-native";
+import NetInfo from "@react-native-community/netinfo";
 
 import { useAuth } from "@clerk/clerk-expo";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
@@ -40,6 +41,12 @@ import {
   createBackgroundTaskRunner,
   type BackgroundTaskExecutionEvent,
 } from "@/lib/background-task-runner";
+import {
+  processOfflineOutbox,
+  type AppendDayLogOutboxPayload,
+  type CreateMemoryOutboxPayload,
+  type UploadMemoryMediaOutboxPayload,
+} from "@/lib/offline-outbox";
 
 function dedupeSignals(signals: string[]): string[] {
   return Array.from(
@@ -80,6 +87,16 @@ export default function TabLayout() {
   const updateMyLocationTrackingState = useMutation(
     api.userPreferences.updateMyLocationTrackingState,
   );
+  const createMemoryFromOutbox = useMutation(api.memories.createMemory);
+  const createMemoryMediaUploadUrlFromOutbox = useMutation(
+    api.memories.generateMemoryMediaUploadUrl,
+  );
+  const addMemoryMediaByClientRequestIdFromOutbox = useMutation(
+    api.memories.addMemoryMediaByClientRequestId,
+  );
+  const appendDayLogEntriesFromOutbox = useMutation(
+    api.days.appendDayLogEntries,
+  );
   const isPreferencesLoading =
     isAuthenticated &&
     (launchPreferences === undefined ||
@@ -110,6 +127,135 @@ export default function TabLayout() {
 
     void syncReminderNotifications(launchPreferences);
   }, [isAuthenticated, launchPreferences]);
+
+  React.useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const flushOutbox = async () => {
+      if (cancelled) {
+        return;
+      }
+
+      const uploadMemoryMedia = async (
+        payload: UploadMemoryMediaOutboxPayload,
+      ) => {
+        const localMediaResponse = await fetch(payload.localUri);
+        if (!localMediaResponse.ok) {
+          throw new Error(
+            `Staged media file could not be read (status ${localMediaResponse.status}).`,
+          );
+        }
+
+        const mediaBlob = await localMediaResponse.blob();
+        const { uploadUrl } = await createMemoryMediaUploadUrlFromOutbox({});
+
+        const uploadResponse = await fetch(uploadUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": mediaBlob.type || "application/octet-stream",
+          },
+          body: mediaBlob,
+        });
+
+        if (!uploadResponse.ok) {
+          throw new Error(`Upload failed with status ${uploadResponse.status}`);
+        }
+
+        const uploadResult = (await uploadResponse.json()) as {
+          storageId?: string;
+        };
+        if (!uploadResult.storageId) {
+          throw new Error("Upload succeeded but no storageId was returned.");
+        }
+
+        await addMemoryMediaByClientRequestIdFromOutbox({
+          memoryClientRequestId: payload.memoryClientRequestId,
+          clientMediaId: payload.mediaClientRequestId,
+          storageId: uploadResult.storageId,
+          type: "image",
+          width: payload.width,
+          height: payload.height,
+        });
+      };
+
+      const result = await processOfflineOutbox({
+        createMemory: async (payload: CreateMemoryOutboxPayload) => {
+          await createMemoryFromOutbox(payload);
+        },
+        appendDayLog: async (payload: AppendDayLogOutboxPayload) => {
+          await appendDayLogEntriesFromOutbox(payload);
+        },
+        uploadMemoryMedia,
+      });
+
+      if (
+        result.processed > 0 ||
+        result.retried > 0 ||
+        result.dropped > 0 ||
+        result.pending > 0
+      ) {
+        console.info("[offline-outbox]", result);
+      }
+    };
+
+    const runner = createBackgroundTaskRunner({
+      tickIntervalMs: 1_000,
+      onExecution: (event: BackgroundTaskExecutionEvent) => {
+        if (event.taskId !== "offline_outbox_flush") {
+          return;
+        }
+
+        console.info("[offline-outbox-task]", {
+          taskId: event.taskId,
+          status: event.status,
+          attempt: event.attempt,
+          queueDepth: event.queueDepth,
+          durationMs: event.durationMs,
+          error: event.error,
+          nextRunAt: event.nextRunAt,
+        });
+      },
+    });
+
+    runner.registerTask({
+      taskId: "offline_outbox_flush",
+      intervalMs: 20_000,
+      run: flushOutbox,
+      retryPolicy: {
+        maxAttempts: 3,
+        baseDelayMs: 10_000,
+        maxDelayMs: 2 * 60 * 1_000,
+      },
+    });
+
+    runner.start();
+    runner.triggerTaskNow("offline_outbox_flush");
+
+    const unsubscribeNetInfo = NetInfo.addEventListener((state) => {
+      const isConnected = Boolean(state.isConnected);
+      const isInternetReachable = state.isInternetReachable !== false;
+
+      if (isConnected && isInternetReachable) {
+        runner.triggerTaskNow("offline_outbox_flush");
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribeNetInfo();
+      runner.stop();
+    };
+  }, [
+    addMemoryMediaByClientRequestIdFromOutbox,
+    appendDayLogEntriesFromOutbox,
+    createMemoryFromOutbox,
+    createMemoryMediaUploadUrlFromOutbox,
+    isAuthenticated,
+  ]);
 
   React.useEffect(() => {
     if (

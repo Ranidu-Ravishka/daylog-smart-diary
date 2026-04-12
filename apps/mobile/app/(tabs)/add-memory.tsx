@@ -26,12 +26,24 @@ import {
   Shadows,
 } from "@/constants/theme";
 import { AppButton } from "@/components/ui/app-button";
+import {
+  enqueueOfflineCreateMemory,
+  enqueueOfflineMemoryMediaUpload,
+  isLikelyTransientNetworkError,
+} from "@/lib/offline-outbox";
 
 const c = Colors.light;
 
 function getTodayDayKey(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function createMediaClientRequestId(
+  memoryClientRequestId: string,
+  imageIndex: number,
+): string {
+  return `${memoryClientRequestId}_media_${imageIndex}`;
 }
 
 type SelectedImage = {
@@ -144,20 +156,27 @@ export default function AddMemoryScreen() {
   };
 
   const handleSubmit = async () => {
-    if (!title.trim()) return;
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) return;
+
+    const happenedAt = Date.now();
+    const dayKey = getTodayDayKey();
+    const clientRequestId = `mobile_mem_${happenedAt}_${Math.floor(
+      Math.random() * 1_000_000,
+    )
+      .toString()
+      .padStart(6, "0")}`;
 
     setIsSubmitting(true);
     setError(null);
 
     try {
-      const now = Date.now();
-      const dayKey = getTodayDayKey();
-
       const memory = await createMemory({
-        title: title.trim(),
+        clientRequestId,
+        title: trimmedTitle,
         description: description.trim() || undefined,
         mood,
-        happenedAt: now,
+        happenedAt,
         dayKey,
       });
 
@@ -198,6 +217,64 @@ export default function AddMemoryScreen() {
         { text: "OK", onPress: () => router.replace("/(tabs)") },
       ]);
     } catch (err: unknown) {
+      if (isLikelyTransientNetworkError(err)) {
+        try {
+          await enqueueOfflineCreateMemory({
+            clientRequestId,
+            title: trimmedTitle,
+            description: description.trim() || undefined,
+            mood,
+            happenedAt,
+            dayKey,
+          });
+
+          let queuedPhotoCount = 0;
+          for (let index = 0; index < selectedImages.length; index += 1) {
+            const image = selectedImages[index];
+            if (!image?.uri?.trim()) {
+              continue;
+            }
+
+            await enqueueOfflineMemoryMediaUpload({
+              memoryClientRequestId: clientRequestId,
+              mediaClientRequestId: createMediaClientRequestId(
+                clientRequestId,
+                index,
+              ),
+              localUri: image.uri,
+              width: image.width,
+              height: image.height,
+            });
+            queuedPhotoCount += 1;
+          }
+
+          setTitle("");
+          setDescription("");
+          setSelectedImages([]);
+          setMood(
+            preferences?.defaultMemoryMood ??
+              SETTINGS_DEFAULTS.defaultMemoryMood,
+          );
+          hasSelectedMoodManually.current = false;
+
+          Alert.alert(
+            "Saved Offline",
+            queuedPhotoCount > 0
+              ? `Memory and ${queuedPhotoCount} photo(s) were queued and will sync automatically when connection is restored.`
+              : "Memory was queued and will sync automatically when connection is restored.",
+            [{ text: "OK", onPress: () => router.replace("/(tabs)") }],
+          );
+          return;
+        } catch (queueError) {
+          setError(
+            queueError instanceof Error
+              ? queueError.message
+              : "Failed to queue memory for offline sync.",
+          );
+          return;
+        }
+      }
+
       console.error("Failed to create memory:", err);
       setError(
         err instanceof Error

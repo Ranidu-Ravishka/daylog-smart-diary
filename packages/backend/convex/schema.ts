@@ -206,6 +206,7 @@ export default defineSchema(
     // ── Memories (user-created moments) ──────────────────────
     memories: defineTable({
       userId: v.id("user"),
+      clientRequestId: v.optional(v.string()),
       title: v.string(),
       description: v.optional(v.string()),
       mood: v.optional(v.string()),
@@ -213,6 +214,7 @@ export default defineSchema(
       dayKey: v.string(), // "YYYY-MM-DD" in user timezone
     })
       .index("by_user_day", ["userId", "dayKey"])
+      .index("by_user_clientRequestId", ["userId", "clientRequestId"])
       .index("by_user_happenedAt", ["userId", "happenedAt"])
       .index("by_happenedAt", ["happenedAt"])
       .index("by_day_happenedAt", ["dayKey", "happenedAt"]),
@@ -221,12 +223,14 @@ export default defineSchema(
     memoryMedia: defineTable({
       memoryId: v.id("memories"),
       userId: v.id("user"),
+      clientMediaId: v.optional(v.string()),
       storageId: v.string(),
       type: v.union(v.literal("image"), v.literal("video")),
       width: v.optional(v.number()),
       height: v.optional(v.number()),
     })
       .index("by_memory", ["memoryId"])
+      .index("by_memory_clientMediaId", ["memoryId", "clientMediaId"])
       .index("by_user", ["userId"])
       .index("by_user_memory_type", ["userId", "memoryId", "type"]),
 
