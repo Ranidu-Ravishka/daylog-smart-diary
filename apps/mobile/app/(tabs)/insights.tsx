@@ -77,6 +77,32 @@ function isSummaryDoc(value: unknown): value is SummaryDoc {
   );
 }
 
+function formatRelativeElapsed(lastSyncAt: number, now: number): string {
+  const elapsedSeconds = Math.max(0, Math.floor((now - lastSyncAt) / 1000));
+  if (elapsedSeconds < 60) return `${elapsedSeconds}s ago`;
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours}h ago`;
+
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  return `${elapsedDays}d ago`;
+}
+
+function formatLastSyncTime(lastSyncAt: number | null, now: number): string {
+  if (lastSyncAt === null) return "Last sync: pending";
+
+  const absolute = new Date(lastSyncAt).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
+  return `Last sync: ${absolute} • Updated ${formatRelativeElapsed(lastSyncAt, now)}`;
+}
+
 function InsightsSkeleton() {
   return (
     <SafeAreaView style={styles.safe}>
@@ -103,23 +129,60 @@ function InsightsSkeleton() {
 const InsightsScreen = () => {
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshToken, setRefreshToken] = useState(0);
+  const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
+  const [relativeNow, setRelativeNow] = useState(() => Date.now());
 
   const onRefresh = useCallback(() => {
+    if (refreshing) return;
+
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
-  }, []);
+    setRefreshToken((value) => value + 1);
+  }, [refreshing]);
 
   const summaries = useQuery(
     api.summaries.listRecentSummaries,
-    isAuthenticated ? { limit: 7 } : "skip",
+    isAuthenticated ? { limit: 7, refreshToken } : "skip",
   );
   const memories = useQuery(
     api.memories.listRecentMemories,
-    isAuthenticated ? { limit: 30 } : "skip",
+    isAuthenticated ? { limit: 30, refreshToken } : "skip",
   );
 
   const isLoading =
     isAuthLoading || (isAuthenticated && memories === undefined);
+
+  const isRefreshDataReady =
+    !isAuthenticated || (summaries !== undefined && memories !== undefined);
+
+  React.useEffect(() => {
+    if (!isRefreshDataReady) return;
+
+    setLastSyncAt((current) => current ?? Date.now());
+  }, [isRefreshDataReady]);
+
+  React.useEffect(() => {
+    if (!refreshing || !isRefreshDataReady) return;
+
+    setRefreshing(false);
+    setLastSyncAt(Date.now());
+  }, [isRefreshDataReady, refreshing]);
+
+  React.useEffect(() => {
+    if (lastSyncAt === null) return;
+
+    const interval = setInterval(() => {
+      setRelativeNow(Date.now());
+    }, 1_000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [lastSyncAt]);
+
+  const syncStatusText = refreshing
+    ? "Syncing..."
+    : formatLastSyncTime(lastSyncAt, relativeNow);
 
   const resolvedSummaries = React.useMemo(() => {
     if (!Array.isArray(summaries)) return [];
@@ -193,13 +256,29 @@ const InsightsScreen = () => {
   if (!hasData) {
     return (
       <SafeAreaView style={styles.safe}>
-        <View style={{ flex: 1, justifyContent: "center" }}>
-          <EmptyState
-            icon="analytics-outline"
-            title="No Insights Yet"
-            subtitle="Start adding memories to see your mood trends, stats, and patterns here."
-          />
-        </View>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={c.tint}
+            />
+          }
+        >
+          <View style={styles.headerRow}>
+            <Text style={styles.pageTitle}>Insights</Text>
+            <Text style={styles.syncText}>{syncStatusText}</Text>
+          </View>
+          <View style={styles.emptyStateWrap}>
+            <EmptyState
+              icon="analytics-outline"
+              title="No Insights Yet"
+              subtitle="Start adding memories to see your mood trends, stats, and patterns here."
+            />
+          </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -320,6 +399,7 @@ const InsightsScreen = () => {
         {/* ── Header ──────────────────────────────────── */}
         <View style={styles.headerRow}>
           <Text style={styles.pageTitle}>Insights</Text>
+          <Text style={styles.syncText}>{syncStatusText}</Text>
         </View>
 
         {/* ── Overview Stats ──────────────────────────── */}
@@ -447,6 +527,11 @@ const styles = StyleSheet.create({
     ...Typography.title1,
     color: c.text,
   },
+  syncText: {
+    ...Typography.caption2,
+    color: c.textSecondary,
+    marginTop: 4,
+  },
 
   // Stats
   statsRow: {
@@ -478,6 +563,11 @@ const styles = StyleSheet.create({
   section: {
     paddingHorizontal: Spacing.xl,
     marginBottom: Spacing["2xl"],
+  },
+  emptyStateWrap: {
+    minHeight: 320,
+    justifyContent: "center",
+    paddingHorizontal: Spacing.xl,
   },
 
   // Days of week

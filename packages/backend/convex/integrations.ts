@@ -1897,7 +1897,10 @@ export const getMyLocationTrackingRuntimeConfig = query({
 });
 
 export const listMyIntegrationDailyDataForDay = query({
-  args: { dayKey: v.string() },
+  args: {
+    dayKey: v.string(),
+    refreshToken: v.optional(v.number()),
+  },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
     validateDayKey(args.dayKey);

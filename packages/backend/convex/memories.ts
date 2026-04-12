@@ -99,7 +99,10 @@ export const getMemory = query({
 
 // ── List memories for a specific day ────────────────────────
 export const listMemoriesByDay = query({
-  args: { dayKey: v.string() },
+  args: {
+    dayKey: v.string(),
+    refreshToken: v.optional(v.number()),
+  },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
 
@@ -116,6 +119,7 @@ export const listMemoriesByDay = query({
 export const listRecentMemories = query({
   args: {
     limit: v.optional(v.number()),
+    refreshToken: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
@@ -339,7 +343,10 @@ export const listMemoryMedia = query({
 
 // ── List first image thumbnail URL for multiple memories ───
 export const listMemoryMediaThumbnailsForMemories = query({
-  args: { memoryIds: v.array(v.id("memories")) },
+  args: {
+    memoryIds: v.array(v.id("memories")),
+    refreshToken: v.optional(v.number()),
+  },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
 

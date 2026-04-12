@@ -103,6 +103,32 @@ function getTodayDayKey(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
+function formatRelativeElapsed(lastSyncAt: number, now: number): string {
+  const elapsedSeconds = Math.max(0, Math.floor((now - lastSyncAt) / 1000));
+  if (elapsedSeconds < 60) return `${elapsedSeconds}s ago`;
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours}h ago`;
+
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  return `${elapsedDays}d ago`;
+}
+
+function formatLastSyncTime(lastSyncAt: number | null, now: number): string {
+  if (lastSyncAt === null) return "Last sync: pending";
+
+  const absolute = new Date(lastSyncAt).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
+  return `Last sync: ${absolute} • Updated ${formatRelativeElapsed(lastSyncAt, now)}`;
+}
+
 function redactPotentialSecrets(value: string): string {
   return value
     .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/g, "sk-[redacted]")
@@ -193,27 +219,33 @@ const DailyDetailView = () => {
   const scrollRef = React.useRef<ScrollView>(null);
   const manualNotesSectionYRef = React.useRef(0);
   const manualEntryInputRef = React.useRef<TextInput>(null);
+  const [refreshToken, setRefreshToken] = useState(0);
+  const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
+  const [relativeNow, setRelativeNow] = useState(() => Date.now());
 
   const summary = useQuery(
     api.summaries.getSummaryByDay,
-    isAuthenticated ? { dayKey } : "skip",
+    isAuthenticated ? { dayKey, refreshToken } : "skip",
   );
   const memories = useQuery(
     api.memories.listMemoriesByDay,
-    isAuthenticated ? { dayKey } : "skip",
+    isAuthenticated ? { dayKey, refreshToken } : "skip",
   );
   const resolvedMemories = React.useMemo(() => {
     if (!Array.isArray(memories)) return [];
     return memories.filter(isMemoryDoc);
   }, [memories]);
-  const day = useQuery(api.days.getDay, isAuthenticated ? { dayKey } : "skip");
+  const day = useQuery(
+    api.days.getDay,
+    isAuthenticated ? { dayKey, refreshToken } : "skip",
+  );
   const summaryQuota = useQuery(
     api.summaries.getSummaryQuotaForDay,
-    isAuthenticated ? {} : "skip",
+    isAuthenticated ? { refreshToken } : "skip",
   );
   const rawIntegrationDailyData = useQuery(
     api.integrations.listMyIntegrationDailyDataForDay,
-    isAuthenticated ? { dayKey } : "skip",
+    isAuthenticated ? { dayKey, refreshToken } : "skip",
   );
   const generateSummaryForDay = useAction(
     api.summaryGeneration.generateSummaryForDay,
@@ -224,7 +256,7 @@ const DailyDetailView = () => {
   );
   const rawMemoryThumbnails = useQuery(
     api.memories.listMemoryMediaThumbnailsForMemories,
-    isAuthenticated ? { memoryIds } : "skip",
+    isAuthenticated ? { memoryIds, refreshToken } : "skip",
   );
   const memoryThumbnails = React.useMemo(() => {
     if (!Array.isArray(rawMemoryThumbnails)) return [];
@@ -274,9 +306,11 @@ const DailyDetailView = () => {
   const [optimisticRating, setOptimisticRating] = useState<number | null>(null);
 
   const onRefresh = useCallback(() => {
+    if (refreshing) return;
+
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
-  }, []);
+    setRefreshToken((value) => value + 1);
+  }, [refreshing]);
 
   const rating = optimisticRating ?? day?.rating ?? 0;
   const peopleTags = React.useMemo(
@@ -290,6 +324,40 @@ const DailyDetailView = () => {
 
   const isLoading =
     isAuthLoading || (isAuthenticated && memories === undefined);
+
+  const isRefreshDataReady =
+    !isAuthenticated ||
+    (summary !== undefined &&
+      memories !== undefined &&
+      day !== undefined &&
+      summaryQuota !== undefined &&
+      rawIntegrationDailyData !== undefined &&
+      rawMemoryThumbnails !== undefined);
+
+  React.useEffect(() => {
+    if (!isRefreshDataReady) return;
+
+    setLastSyncAt((current) => current ?? Date.now());
+  }, [isRefreshDataReady]);
+
+  React.useEffect(() => {
+    if (!refreshing || !isRefreshDataReady) return;
+
+    setRefreshing(false);
+    setLastSyncAt(Date.now());
+  }, [isRefreshDataReady, refreshing]);
+
+  React.useEffect(() => {
+    if (lastSyncAt === null) return;
+
+    const interval = setInterval(() => {
+      setRelativeNow(Date.now());
+    }, 1_000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [lastSyncAt]);
 
   const handleRateDay = useCallback(
     async (stars: number) => {
@@ -399,6 +467,9 @@ const DailyDetailView = () => {
   const sourcesUsed = summary?.sourcesUsed ?? [];
   const hasDataSources =
     sourcesUsed.length > 0 || integrationDailyData.length > 0;
+  const syncStatusText = refreshing
+    ? "Syncing..."
+    : formatLastSyncTime(lastSyncAt, relativeNow);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -418,6 +489,7 @@ const DailyDetailView = () => {
         <View style={styles.headerRow}>
           <Text style={styles.pageTitle}>Today{"'s"} Detail</Text>
           <Text style={styles.dateText}>{dayKey}</Text>
+          <Text style={styles.syncText}>{syncStatusText}</Text>
         </View>
 
         {/* ── Quick Metrics ───────────────────────────── */}
@@ -786,6 +858,11 @@ const styles = StyleSheet.create({
     ...Typography.callout,
     color: c.textSecondary,
     marginTop: 2,
+  },
+  syncText: {
+    ...Typography.caption2,
+    color: c.textSecondary,
+    marginTop: 4,
   },
 
   // Metrics

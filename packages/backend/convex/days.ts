@@ -55,7 +55,10 @@ export const upsertDay = mutation({
 
 // ── Get a single day record ─────────────────────────────────
 export const getDay = query({
-  args: { dayKey: v.string() },
+  args: {
+    dayKey: v.string(),
+    refreshToken: v.optional(v.number()),
+  },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
 
