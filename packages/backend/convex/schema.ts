@@ -46,6 +46,34 @@ const summaryQualityScoresValidator = v.object({
   failure: v.number(),
 });
 
+const userDeletionStageValidator = v.union(
+  v.literal("memoryMedia"),
+  v.literal("memories"),
+  v.literal("daySummaries"),
+  v.literal("days"),
+  v.literal("integrations"),
+  v.literal("integrationDailyData"),
+  v.literal("integrationSecrets"),
+  v.literal("integrationSyncRuns"),
+  v.literal("userPreferences"),
+  v.literal("auditLogs"),
+  v.literal("summaryGenerationQuotas"),
+);
+
+const userDeletionProgressValidator = v.object({
+  deletedMemories: v.number(),
+  deletedSummaries: v.number(),
+  deletedDays: v.number(),
+  deletedIntegrations: v.number(),
+  deletedPreferences: v.number(),
+  deletedAuditLogs: v.number(),
+  deletedMemoryMedia: v.number(),
+  deletedIntegrationDailyData: v.number(),
+  deletedIntegrationSecrets: v.number(),
+  deletedIntegrationSyncRuns: v.number(),
+  deletedSummaryGenerationQuotas: v.number(),
+});
+
 const activityLevelValidator = v.union(
   v.literal("active"),
   v.literal("mixed"),
@@ -502,6 +530,33 @@ export default defineSchema(
       .index("by_lowQuality_evaluatedAt", ["lowQuality", "evaluatedAt"])
       .index("by_generationEventId", ["generationEventId"])
       .index("by_user_day_evaluatedAt", ["userId", "dayKey", "evaluatedAt"]),
+
+    // ── Audit logs (admin + security) ────────────────────────
+    userDeletionJobs: defineTable({
+      userId: v.id("user"),
+      clerkUserId: v.string(),
+      requestedByUserId: v.optional(v.id("user")),
+      status: v.union(
+        v.literal("queued"),
+        v.literal("running"),
+        v.literal("completed"),
+      ),
+      stage: userDeletionStageValidator,
+      cursor: v.optional(v.string()),
+      processedBatches: v.number(),
+      checkpoints: v.number(),
+      progress: userDeletionProgressValidator,
+      startedAt: v.number(),
+      updatedAt: v.number(),
+      lastCheckpointAt: v.optional(v.number()),
+      completedAt: v.optional(v.number()),
+      metricsAppliedAt: v.optional(v.number()),
+      userDeletedAt: v.optional(v.number()),
+      lastError: v.optional(v.string()),
+    })
+      .index("by_user_status", ["userId", "status"])
+      .index("by_clerk_status", ["clerkUserId", "status"])
+      .index("by_updatedAt", ["updatedAt"]),
 
     // ── Audit logs (admin + security) ────────────────────────
     auditLogs: defineTable({
