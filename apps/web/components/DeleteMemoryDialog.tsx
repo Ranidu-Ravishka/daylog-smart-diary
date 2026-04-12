@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { captureException } from "@/lib/observability";
 import { toastError, toastSuccess } from "@/lib/toast";
 
 interface DeleteMemoryDialogProps {
@@ -42,7 +43,9 @@ export function DeleteMemoryDialog({
       onDeleteSuccess?.();
     } catch (error) {
       toastError("Failed to delete memory");
-      console.error("Delete error:", error);
+      captureException("web_memory_delete_failed", error, {
+        memoryId,
+      });
     } finally {
       setIsDeleting(false);
     }

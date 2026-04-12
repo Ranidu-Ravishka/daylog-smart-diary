@@ -1,4 +1,22 @@
 type StructuredContext = Record<string, unknown>;
+type LogLevel = "info" | "warn" | "error";
+
+type SerializableError = {
+  name: string;
+  message: string;
+  stack?: string;
+};
+
+type StructuredLogEnvelope = {
+  schemaVersion: 1;
+  app: "daylog";
+  surface: "backend";
+  level: LogLevel;
+  event: string;
+  timestamp: string;
+  context: StructuredContext;
+  error?: SerializableError;
+};
 
 function toSerializableError(error: unknown) {
   if (error instanceof Error) {
@@ -17,15 +35,20 @@ function toSerializableError(error: unknown) {
 }
 
 function writeStructured(
-  level: "info" | "warn" | "error",
+  level: LogLevel,
   event: string,
   context: StructuredContext = {},
+  error?: SerializableError,
 ) {
-  const payload = {
+  const payload: StructuredLogEnvelope = {
+    schemaVersion: 1,
+    app: "daylog",
+    surface: "backend",
     level,
     event,
     timestamp: new Date().toISOString(),
-    ...context,
+    context,
+    ...(error ? { error } : {}),
   };
 
   const line = JSON.stringify(payload);
@@ -62,12 +85,9 @@ export function captureException(
 ) {
   const serialized = toSerializableError(error);
 
-  writeStructured("error", event, {
-    ...context,
-    error: {
-      name: serialized.name,
-      message: serialized.message,
-      stack: serialized.stack,
-    },
+  writeStructured("error", event, context, {
+    name: serialized.name,
+    message: serialized.message,
+    stack: serialized.stack,
   });
 }

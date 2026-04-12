@@ -31,6 +31,7 @@ import {
   enqueueOfflineMemoryMediaUpload,
   isLikelyTransientNetworkError,
 } from "@/lib/offline-outbox";
+import { captureException } from "@/lib/observability";
 
 const c = Colors.light;
 
@@ -150,7 +151,10 @@ export default function AddMemoryScreen() {
 
       return true;
     } catch (err) {
-      console.error("Image upload failed:", err);
+      captureException("mobile_memory_image_upload_failed", err, {
+        memoryId,
+        hasImageMetadata: Boolean(imageMeta),
+      });
       return false;
     }
   };
@@ -275,7 +279,10 @@ export default function AddMemoryScreen() {
         }
       }
 
-      console.error("Failed to create memory:", err);
+      captureException("mobile_memory_create_failed", err, {
+        dayKey,
+        selectedImageCount: selectedImages.length,
+      });
       setError(
         err instanceof Error
           ? err.message

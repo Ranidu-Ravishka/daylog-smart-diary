@@ -114,6 +114,15 @@ Required:
 - `EXPO_PUBLIC_CONVEX_URL`
 - `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`
 - `EXPO_PUBLIC_WEB_APP_URL` (web app base URL used for OAuth connect flow)
+- `EXPO_PUBLIC_SENTRY_DSN` (mobile crash/event ingestion DSN)
+
+Optional for one-time ingestion verification:
+
+- `EXPO_PUBLIC_SENTRY_FORCE_TEST_EXCEPTION=true` (captures one forced exception on startup)
+
+Optional for durable info-event analytics transport:
+
+- `EXPO_PUBLIC_INFO_EVENT_SAMPLE_RATE` (default `0.1`)
 
 ## Local development
 

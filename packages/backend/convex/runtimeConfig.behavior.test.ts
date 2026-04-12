@@ -20,6 +20,7 @@ const runtimeEnvKeys = [
   "RETENTION_INTEGRATION_DATA_DAYS",
   "RETENTION_LOCATION_SIGNALS_DAYS",
   "RETENTION_SUMMARY_EVENTS_DAYS",
+  "RETENTION_INFO_EVENTS_DAYS",
   "RETENTION_EXPORT_JOBS_DAYS",
   "RETENTION_DELETE_BATCH_SIZE",
   "SUMMARY_LOW_QUALITY_THRESHOLD",
@@ -63,6 +64,7 @@ describe("runtime config behavior", () => {
     process.env.RETENTION_INTEGRATION_DATA_DAYS = "120";
     process.env.RETENTION_LOCATION_SIGNALS_DAYS = "-1";
     process.env.RETENTION_SUMMARY_EVENTS_DAYS = "30";
+    process.env.RETENTION_INFO_EVENTS_DAYS = "45";
     process.env.RETENTION_EXPORT_JOBS_DAYS = "21";
 
     const defaults = getRetentionPolicyDefaults();
@@ -72,6 +74,7 @@ describe("runtime config behavior", () => {
     expect(defaults.integrationDailyData.retentionDays).toBe(120);
     expect(defaults.locationSignals.retentionDays).toBe(30);
     expect(defaults.summaryGenerationEvents.retentionDays).toBe(30);
+    expect(defaults.infoEvents.retentionDays).toBe(45);
     expect(defaults.exportJobs.retentionDays).toBe(21);
     expect(getExportJobRetentionDays()).toBe(21);
   });

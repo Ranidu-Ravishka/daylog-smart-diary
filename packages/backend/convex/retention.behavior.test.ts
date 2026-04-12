@@ -207,10 +207,36 @@ describe("retention behavior", () => {
           syncedAt: fresh,
         },
       ],
+      observabilityInfoEvents: [
+        {
+          _id: "info_event_stale_001",
+          _creationTime: 8,
+          app: "daylog",
+          surface: "mobile",
+          level: "info",
+          event: "mobile_offline_outbox_flush_result",
+          timestamp: new Date(stale).toISOString(),
+          emittedAt: stale,
+          receivedAt: stale,
+          sampleRate: 0.1,
+        },
+        {
+          _id: "info_event_fresh_001",
+          _creationTime: 9,
+          app: "daylog",
+          surface: "web",
+          level: "info",
+          event: "oauth_start_request_received",
+          timestamp: new Date(fresh).toISOString(),
+          emittedAt: fresh,
+          receivedAt: fresh,
+          sampleRate: 0.1,
+        },
+      ],
       summaryGenerationEvents: [
         {
           _id: staleEventId,
-          _creationTime: 9,
+          _creationTime: 10,
           userId: MEMBER_ID,
           dayKey: "2025-11-01",
           createdAt: stale,
@@ -223,7 +249,7 @@ describe("retention behavior", () => {
         },
         {
           _id: "summary_event_fresh_001",
-          _creationTime: 10,
+          _creationTime: 11,
           userId: MEMBER_ID,
           dayKey: "2026-04-01",
           createdAt: fresh,
@@ -238,7 +264,7 @@ describe("retention behavior", () => {
       summaryQualityEvaluations: [
         {
           _id: "quality_stale_001",
-          _creationTime: 11,
+          _creationTime: 12,
           generationEventId: staleEventId,
           evaluatedAt: stale,
           score: 0.2,
@@ -255,6 +281,7 @@ describe("retention behavior", () => {
           integrationDailyData: number;
           locationSignals: number;
           summaryGenerationEvents: number;
+          infoEvents: number;
           exportJobs: number;
         };
       }
@@ -274,6 +301,7 @@ describe("retention behavior", () => {
       integrationDailyData: 1,
       locationSignals: 1,
       summaryGenerationEvents: 1,
+      infoEvents: 1,
       exportJobs: 0,
     });
 
@@ -289,6 +317,9 @@ describe("retention behavior", () => {
     expect(
       db.getTable("summaryGenerationEvents").map((row) => row._id),
     ).toEqual(["summary_event_fresh_001"]);
+    expect(
+      db.getTable("observabilityInfoEvents").map((row) => row._id),
+    ).toEqual(["info_event_fresh_001"]);
     expect(db.getTable("summaryQualityEvaluations")).toHaveLength(0);
 
     expect(db.getTable("dataRetentionRuns")).toHaveLength(1);

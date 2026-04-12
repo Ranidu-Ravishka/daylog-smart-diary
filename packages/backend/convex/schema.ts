@@ -448,6 +448,23 @@ export default defineSchema(
       .index("by_status_at", ["status", "at"])
       .index("by_outcome_at", ["outcome", "at"]),
 
+    // ── Sampled info-level observability transport (durable analytics) ───
+    observabilityInfoEvents: defineTable({
+      app: v.literal("daylog"),
+      surface: v.union(v.literal("web"), v.literal("mobile")),
+      level: v.literal("info"),
+      event: v.string(),
+      timestamp: v.string(),
+      emittedAt: v.number(),
+      receivedAt: v.number(),
+      sampleRate: v.number(),
+      sourceEnvironment: v.optional(v.string()),
+      contextJson: v.optional(v.string()),
+    })
+      .index("by_receivedAt", ["receivedAt"])
+      .index("by_surface_receivedAt", ["surface", "receivedAt"])
+      .index("by_event_receivedAt", ["event", "receivedAt"]),
+
     // ── Data retention governance (policy + execution audit) ──────────────
     dataRetentionPolicies: defineTable({
       key: v.string(),
@@ -472,6 +489,7 @@ export default defineSchema(
         integrationDailyData: v.number(),
         locationSignals: v.number(),
         summaryGenerationEvents: v.number(),
+        infoEvents: v.optional(v.number()),
         exportJobs: v.optional(v.number()),
       }),
       error: v.optional(v.string()),

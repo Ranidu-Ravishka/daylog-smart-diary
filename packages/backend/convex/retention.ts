@@ -17,6 +17,7 @@ const POLICY_KEYS: RetentionPolicyKey[] = [
   "integrationDailyData",
   "locationSignals",
   "summaryGenerationEvents",
+  "infoEvents",
   "exportJobs",
 ];
 
@@ -35,6 +36,7 @@ type RetentionDeleteCounts = {
   integrationDailyData: number;
   locationSignals: number;
   summaryGenerationEvents: number;
+  infoEvents: number;
   exportJobs: number;
 };
 
@@ -281,6 +283,27 @@ async function purgeExportJobs(
   return staleJobs.length;
 }
 
+async function purgeInfoEvents(
+  ctx: Pick<MutationCtx, "db">,
+  cutoff: number,
+  maxDeletes: number,
+  dryRun: boolean,
+): Promise<number> {
+  const staleEvents = await (ctx.db as any)
+    .query("observabilityInfoEvents")
+    .withIndex("by_receivedAt", (q: any) => q.lt("receivedAt", cutoff))
+    .order("asc")
+    .take(maxDeletes);
+
+  if (dryRun) return staleEvents.length;
+
+  for (const event of staleEvents) {
+    await (ctx.db as any).delete(event._id);
+  }
+
+  return staleEvents.length;
+}
+
 async function runRetentionCleanupInternal(
   ctx: MutationCtx,
   args: CleanupExecutionArgs,
@@ -294,6 +317,7 @@ async function runRetentionCleanupInternal(
     integrationDailyData: 0,
     locationSignals: 0,
     summaryGenerationEvents: 0,
+    infoEvents: 0,
     exportJobs: 0,
   };
 
@@ -354,6 +378,15 @@ async function runRetentionCleanupInternal(
           args.maxDeletesPerPolicy,
           args.dryRun,
         );
+    }
+
+    if (effectivePolicies.infoEvents.enabled) {
+      deletedCounts.infoEvents = await purgeInfoEvents(
+        ctx,
+        retentionCutoff(startedAt, effectivePolicies.infoEvents.retentionDays),
+        args.maxDeletesPerPolicy,
+        args.dryRun,
+      );
     }
 
     if (effectivePolicies.exportJobs.enabled) {

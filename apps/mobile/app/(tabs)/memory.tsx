@@ -27,6 +27,7 @@ import {
   enqueueOfflineAppendDayLog,
   isLikelyTransientNetworkError,
 } from "@/lib/offline-outbox";
+import { captureException } from "@/lib/observability";
 
 const c = Colors.light;
 
@@ -384,7 +385,10 @@ const DailyDetailView = () => {
         }
 
         setOptimisticRating(null);
-        console.error("Failed to rate day:", err);
+        captureException("mobile_day_rating_failed", err, {
+          dayKey,
+          stars,
+        });
       }
     },
     [appendDayLogEntries, dayKey],
@@ -414,7 +418,9 @@ const DailyDetailView = () => {
         return;
       }
 
-      console.error("Failed to add entry:", err);
+      captureException("mobile_day_note_add_failed", err, {
+        dayKey,
+      });
       Alert.alert("Error", "Failed to save entry. Please try again.");
     } finally {
       setIsSaving(false);
@@ -445,7 +451,9 @@ const DailyDetailView = () => {
         return;
       }
 
-      console.error("Failed to add person:", err);
+      captureException("mobile_day_person_add_failed", err, {
+        dayKey,
+      });
       Alert.alert("Error", "Failed to save. Please try again.");
     } finally {
       setIsSaving(false);
@@ -460,7 +468,10 @@ const DailyDetailView = () => {
         );
         await upsertDay({ dayKey, peopleTags: updatedTags });
       } catch (err) {
-        console.error("Failed to remove person:", err);
+        captureException("mobile_day_person_remove_failed", err, {
+          dayKey,
+          index,
+        });
       }
     },
     [peopleTags, dayKey, upsertDay],

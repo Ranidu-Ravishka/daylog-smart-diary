@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { captureException } from "@/lib/observability";
 import { toastError, toastSuccess } from "@/lib/toast";
 
 export default function AccountPage() {
@@ -30,7 +31,9 @@ export default function AccountPage() {
       await signOut();
       toastSuccess("Account deleted successfully.");
     } catch (err) {
-      console.error("Failed to delete account:", err);
+      captureException("web_account_delete_failed", err, {
+        hasUser: Boolean(user),
+      });
       toastError("Failed to delete account. Please try again.");
       setIsDeleting(false);
     }

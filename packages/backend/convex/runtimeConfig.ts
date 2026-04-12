@@ -1,3 +1,5 @@
+import { logWarn } from "./observability";
+
 const SUMMARY_DAILY_GENERATION_LIMIT_ENV = "SUMMARY_DAILY_GENERATION_LIMIT";
 const DEFAULT_SUMMARY_DAILY_GENERATION_LIMIT = 5;
 
@@ -6,6 +8,7 @@ const RETENTION_DAY_SUMMARIES_DAYS_ENV = "RETENTION_DAY_SUMMARIES_DAYS";
 const RETENTION_INTEGRATION_DATA_DAYS_ENV = "RETENTION_INTEGRATION_DATA_DAYS";
 const RETENTION_LOCATION_SIGNALS_DAYS_ENV = "RETENTION_LOCATION_SIGNALS_DAYS";
 const RETENTION_SUMMARY_EVENTS_DAYS_ENV = "RETENTION_SUMMARY_EVENTS_DAYS";
+const RETENTION_INFO_EVENTS_DAYS_ENV = "RETENTION_INFO_EVENTS_DAYS";
 const RETENTION_EXPORT_JOBS_DAYS_ENV = "RETENTION_EXPORT_JOBS_DAYS";
 const RETENTION_DELETE_BATCH_SIZE_ENV = "RETENTION_DELETE_BATCH_SIZE";
 const SUMMARY_LOW_QUALITY_THRESHOLD_ENV = "SUMMARY_LOW_QUALITY_THRESHOLD";
@@ -36,9 +39,13 @@ function parseBoundedInt(config: NumericConfig): number {
 
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < config.min || parsed > config.max) {
-    console.warn(
-      `[config] Invalid ${config.envName}='${raw}'. Falling back to ${config.fallback}.`,
-    );
+    logWarn("runtime_config_invalid_integer", {
+      envName: config.envName,
+      raw,
+      fallback: config.fallback,
+      min: config.min,
+      max: config.max,
+    });
     return config.fallback;
   }
 
@@ -51,9 +58,13 @@ function parseBoundedNumber(config: NumericConfig): number {
 
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < config.min || parsed > config.max) {
-    console.warn(
-      `[config] Invalid ${config.envName}='${raw}'. Falling back to ${config.fallback}.`,
-    );
+    logWarn("runtime_config_invalid_number", {
+      envName: config.envName,
+      raw,
+      fallback: config.fallback,
+      min: config.min,
+      max: config.max,
+    });
     return config.fallback;
   }
 
@@ -72,9 +83,11 @@ function parseBoolean(config: BooleanConfig): boolean {
     return false;
   }
 
-  console.warn(
-    `[config] Invalid ${config.envName}='${raw}'. Falling back to ${String(config.fallback)}.`,
-  );
+  logWarn("runtime_config_invalid_boolean", {
+    envName: config.envName,
+    raw,
+    fallback: config.fallback,
+  });
   return config.fallback;
 }
 
@@ -82,17 +95,22 @@ export function getSummaryDailyGenerationLimit(): number {
   const raw = process.env[SUMMARY_DAILY_GENERATION_LIMIT_ENV]?.trim();
 
   if (!raw) {
-    console.warn(
-      `[config] Missing ${SUMMARY_DAILY_GENERATION_LIMIT_ENV}. Falling back to ${DEFAULT_SUMMARY_DAILY_GENERATION_LIMIT}.`,
-    );
+    logWarn("runtime_config_missing_daily_generation_limit", {
+      envName: SUMMARY_DAILY_GENERATION_LIMIT_ENV,
+      fallback: DEFAULT_SUMMARY_DAILY_GENERATION_LIMIT,
+    });
     return DEFAULT_SUMMARY_DAILY_GENERATION_LIMIT;
   }
 
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 1000) {
-    console.warn(
-      `[config] Invalid ${SUMMARY_DAILY_GENERATION_LIMIT_ENV}='${raw}'. Falling back to ${DEFAULT_SUMMARY_DAILY_GENERATION_LIMIT}.`,
-    );
+    logWarn("runtime_config_invalid_daily_generation_limit", {
+      envName: SUMMARY_DAILY_GENERATION_LIMIT_ENV,
+      raw,
+      fallback: DEFAULT_SUMMARY_DAILY_GENERATION_LIMIT,
+      min: 1,
+      max: 1000,
+    });
     return DEFAULT_SUMMARY_DAILY_GENERATION_LIMIT;
   }
 
@@ -105,6 +123,7 @@ export type RetentionPolicyKey =
   | "integrationDailyData"
   | "locationSignals"
   | "summaryGenerationEvents"
+  | "infoEvents"
   | "exportJobs";
 
 export function getRetentionPolicyDefaults(): Record<
@@ -160,6 +179,16 @@ export function getRetentionPolicyDefaults(): Record<
       retentionDays: parseBoundedInt({
         envName: RETENTION_SUMMARY_EVENTS_DAYS_ENV,
         fallback: 60,
+        min: 1,
+        max: 3650,
+      }),
+      sensitive: false,
+      enabled: true,
+    },
+    infoEvents: {
+      retentionDays: parseBoundedInt({
+        envName: RETENTION_INFO_EVENTS_DAYS_ENV,
+        fallback: 90,
         min: 1,
         max: 3650,
       }),

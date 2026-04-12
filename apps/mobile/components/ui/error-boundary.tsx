@@ -3,6 +3,7 @@ import { View, Text, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors, Spacing, Typography } from "@/constants/theme";
 import { AppButton } from "@/components/ui/app-button";
+import { captureException } from "@/lib/observability";
 
 const c = Colors.light;
 
@@ -23,7 +24,9 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("ErrorBoundary caught:", error, info.componentStack);
+    captureException("mobile_error_boundary_caught", error, {
+      componentStack: info.componentStack,
+    });
   }
 
   private handleRetry = () => {
