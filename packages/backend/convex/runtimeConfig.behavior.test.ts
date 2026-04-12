@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  getBackgroundLocationBatchFlushIntervalMinutes,
+  getBackgroundLocationBatchMaxPoints,
+  getBackgroundLocationMaxBatteryDrainPercentPerHour,
+  getBackgroundLocationMaxUpdatesPerHour,
+  getEnableBackgroundLocationTracking,
+  getExportJobRetentionDays,
   getRetentionDeleteBatchSize,
   getRetentionPolicyDefaults,
   getSummaryDailyGenerationLimit,
@@ -14,8 +20,14 @@ const runtimeEnvKeys = [
   "RETENTION_INTEGRATION_DATA_DAYS",
   "RETENTION_LOCATION_SIGNALS_DAYS",
   "RETENTION_SUMMARY_EVENTS_DAYS",
+  "RETENTION_EXPORT_JOBS_DAYS",
   "RETENTION_DELETE_BATCH_SIZE",
   "SUMMARY_LOW_QUALITY_THRESHOLD",
+  "ENABLE_BACKGROUND_LOCATION_TRACKING",
+  "BACKGROUND_LOCATION_BATCH_MAX_POINTS",
+  "BG_LOC_MAX_UPDATES_PER_HOUR",
+  "BG_LOC_BATCH_FLUSH_INTERVAL_MIN",
+  "BG_LOC_MAX_BATTERY_DRAIN_PCT_PER_HR",
 ] as const;
 
 const baselineEnv = Object.fromEntries(
@@ -51,6 +63,7 @@ describe("runtime config behavior", () => {
     process.env.RETENTION_INTEGRATION_DATA_DAYS = "120";
     process.env.RETENTION_LOCATION_SIGNALS_DAYS = "-1";
     process.env.RETENTION_SUMMARY_EVENTS_DAYS = "30";
+    process.env.RETENTION_EXPORT_JOBS_DAYS = "21";
 
     const defaults = getRetentionPolicyDefaults();
 
@@ -59,6 +72,8 @@ describe("runtime config behavior", () => {
     expect(defaults.integrationDailyData.retentionDays).toBe(120);
     expect(defaults.locationSignals.retentionDays).toBe(30);
     expect(defaults.summaryGenerationEvents.retentionDays).toBe(30);
+    expect(defaults.exportJobs.retentionDays).toBe(21);
+    expect(getExportJobRetentionDays()).toBe(21);
   });
 
   it("enforces numeric bounds for batch size and quality threshold", () => {
@@ -73,5 +88,40 @@ describe("runtime config behavior", () => {
 
     process.env.SUMMARY_LOW_QUALITY_THRESHOLD = "0.7";
     expect(getSummaryLowQualityThreshold()).toBe(0.7);
+  });
+
+  it("parses background tracking feature flag and bounds", () => {
+    delete process.env.ENABLE_BACKGROUND_LOCATION_TRACKING;
+    expect(getEnableBackgroundLocationTracking()).toBe(false);
+
+    process.env.ENABLE_BACKGROUND_LOCATION_TRACKING = "true";
+    expect(getEnableBackgroundLocationTracking()).toBe(true);
+
+    process.env.ENABLE_BACKGROUND_LOCATION_TRACKING = "invalid";
+    expect(getEnableBackgroundLocationTracking()).toBe(false);
+
+    process.env.BACKGROUND_LOCATION_BATCH_MAX_POINTS = "1000";
+    expect(getBackgroundLocationBatchMaxPoints()).toBe(32);
+
+    process.env.BACKGROUND_LOCATION_BATCH_MAX_POINTS = "64";
+    expect(getBackgroundLocationBatchMaxPoints()).toBe(64);
+
+    process.env.BG_LOC_MAX_UPDATES_PER_HOUR = "10";
+    expect(getBackgroundLocationMaxUpdatesPerHour()).toBe(120);
+
+    process.env.BG_LOC_MAX_UPDATES_PER_HOUR = "360";
+    expect(getBackgroundLocationMaxUpdatesPerHour()).toBe(360);
+
+    process.env.BG_LOC_BATCH_FLUSH_INTERVAL_MIN = "1";
+    expect(getBackgroundLocationBatchFlushIntervalMinutes()).toBe(15);
+
+    process.env.BG_LOC_BATCH_FLUSH_INTERVAL_MIN = "30";
+    expect(getBackgroundLocationBatchFlushIntervalMinutes()).toBe(30);
+
+    process.env.BG_LOC_MAX_BATTERY_DRAIN_PCT_PER_HR = "100";
+    expect(getBackgroundLocationMaxBatteryDrainPercentPerHour()).toBe(12);
+
+    process.env.BG_LOC_MAX_BATTERY_DRAIN_PCT_PER_HR = "8";
+    expect(getBackgroundLocationMaxBatteryDrainPercentPerHour()).toBe(8);
   });
 });

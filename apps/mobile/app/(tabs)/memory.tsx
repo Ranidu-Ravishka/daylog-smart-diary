@@ -90,6 +90,9 @@ function toProviderLabel(provider: string): string {
     spotify: "Spotify",
     apple_health: "Apple Health",
     location: "Location (foreground)",
+    fitness: "Fitness",
+    calendar: "Calendar",
+    activity_summary: "Activity Summary",
   };
 
   return labels[provider] ?? provider;
@@ -98,6 +101,12 @@ function toProviderLabel(provider: string): string {
 function getTodayDayKey(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function redactPotentialSecrets(value: string): string {
+  return value
+    .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/g, "sk-[redacted]")
+    .replace(/(api key provided\s*:?\s*)[A-Za-z0-9_*.-]+/gi, "$1[redacted]");
 }
 
 function getSummaryGenerationErrorMessage(error: unknown): string {
@@ -132,7 +141,31 @@ function getSummaryGenerationErrorMessage(error: unknown): string {
     .replace(/^Error:\s*/i, "")
     .trim();
 
-  return cleaned || fallback;
+  const redacted = redactPotentialSecrets(cleaned);
+  if (/OpenAI authentication failed \((401|403)\)/i.test(redacted)) {
+    return "Summary generation is temporarily unavailable. Please try again later.";
+  }
+
+  return redacted || fallback;
+}
+
+function getSummaryGenerationFailureResultMessage(
+  result: unknown,
+): string | null {
+  if (typeof result !== "object" || result === null) return null;
+
+  const candidate = result as {
+    success?: unknown;
+    message?: unknown;
+  };
+
+  if (candidate.success !== false) return null;
+
+  if (typeof candidate.message === "string" && candidate.message.trim()) {
+    return candidate.message.trim();
+  }
+
+  return "Could not generate summary right now.";
 }
 
 function MemorySkeleton() {
@@ -337,7 +370,11 @@ const DailyDetailView = () => {
     setSummaryGenerationError(null);
 
     try {
-      await generateSummaryForDay({ dayKey });
+      const result = await generateSummaryForDay({ dayKey });
+      const failureMessage = getSummaryGenerationFailureResultMessage(result);
+      if (failureMessage) {
+        setSummaryGenerationError(failureMessage);
+      }
     } catch (error) {
       setSummaryGenerationError(getSummaryGenerationErrorMessage(error));
     } finally {

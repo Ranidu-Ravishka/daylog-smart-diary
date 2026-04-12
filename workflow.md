@@ -1,573 +1,609 @@
-# DayLog Deep Technical Review (Senior Engineering Pass)
+# DayLog Production Engineering Workflow
 
-Last updated: 2026-04-03
-
-## Executive Summary (Leadership Readout)
-
-DayLog has evolved from a multi-app bootstrap into a functionally complete cross-platform journaling system with shared backend contracts, production-grade auth integration, AI summary generation, and contextual integrations (calendar/fitness/music/location/health). The architecture direction is strong, and many previously identified high risks have been fixed. A strict evidence-based final production gate audit was re-run on 2026-04-03.
-
-Final production-readiness gate (2026-04-03): **NOT READY**.
-
-Section verdict count:
-
-- PASS: 1, 2, 5, 6, 9
-- FAIL: 3, 4, 7, 8
-
-Blocking issues to clear before READY:
-
-1. Backend coverage gate is mis-scoped (it currently measures behavior tests/harness rather than backend source modules).
-2. No repository-level proof/migration sweep for legacy non-opaque integration `tokenRef` values in `integrations` rows.
-3. Cross-package boundary violations exist in web components via deep relative imports into backend generated paths.
-4. Live GitHub branch-protection required-check configuration remains externally unverified from repository code alone.
-
-Current maturity snapshot:
-
-1. **Core product loop is shipped** across web and mobile: memory capture, day metadata, and summary rendering.
-2. **Admin control plane is broad and mostly hardened**: indexed paginated audit logs and summary-backed dashboard health cards are in place.
-3. **Integration subsystem is mature in design** (provider allowlists, token refs, sync-run idempotency, envelope encryption), but migration assurance remains incomplete.
-4. **Operational posture is stronger** (strict env validation + CI validation + secret scan) with a single canonical CI gate (`backend-validation`).
-5. **Behavioral testing has expanded materially**, but coverage gate scope still reduces confidence in source-level risk detection.
-
-Executive risk ranking (highest first):
-
-1. Coverage gate mis-scoping risk.
-2. Legacy non-opaque integration tokenRef migration/proof risk.
-3. Cross-package boundary hygiene risk.
-4. External branch-protection verification risk.
-
-Recommended near-term objective:
-
-- Complete a focused production hardening sprint to clear the four gate blockers above, then re-run the final production audit and close with evidence.
+Last updated: 2026-04-08
 
 ## 1) Purpose
 
-This document captures a deep, evidence-backed technical review of DayLog from project bootstrap to the current state. It is intended to be the working source for:
+This document is the mandatory engineering workflow for DayLog.
+It defines how we design, build, review, validate, release, and operate changes across:
 
-- architecture understanding,
-- implementation inventory,
-- risk and technical-debt tracking,
-- next-step execution planning.
+- web app (`apps/web`)
+- admin app (`apps/admin`)
+- mobile app (`apps/mobile`)
+- backend (`packages/backend`)
 
-The review covers web, mobile, admin, backend (Convex), auth, AI summary generation, integrations, CI/security posture, and observed scaling risks.
+This workflow is strict by default. Any exception must be documented and approved.
 
-## 2) Scope and Review Method
+## 2) Operating Principles
 
-Review method used:
+1. `main` is always releasable.
+2. Prefer small, reversible changes over large batch changes.
+3. Every production-affecting change must be backed by automated evidence.
+4. Security, privacy, and data integrity are non-negotiable.
+5. Cross-surface compatibility is required for shared contracts.
 
-1. Read root docs and runbooks.
-2. Reconstruct timeline from git history (oldest to newest).
-3. Map backend modules, schema, and handler boundaries.
-4. Map web/admin/mobile implementation surfaces.
-5. Trace cross-system data flow (auth, summaries, integrations, exports).
-6. Identify concrete technical debt and delivery risk.
+## 3) Repository Boundaries
 
-Evidence model:
+Monorepo stack:
 
-- Findings are based on committed repository code and docs.
-- No speculative architecture assumptions are presented as facts.
+- package manager: pnpm workspaces
+- task orchestration: turbo
+- backend: Convex
+- auth: Clerk
+- summaries: OpenAI-backed generation
 
-## Program Status Matrix (Current Snapshot)
+A change in one surface can impact all others. Treat shared contracts as production APIs.
 
-- Monorepo foundation: Stable, high depth/high confidence, low risk. Next gate: keep config drift low across packages.
-- Backend schema/domain model: Stable, high depth/high confidence, low risk. Next gate: maintain schema/index discipline with growth.
-- Auth and authorization boundaries: Stable, high depth/high confidence, low-medium risk. Next gate: keep negative-path authz tests expanding.
-- Web dashboard core flow: Shipped, high depth/high confidence, medium risk. Next gate: continue UX and resilience polish.
-- Mobile core flow: Shipped, high depth/medium-high confidence, medium risk. Next gate: maintain device-level regression matrix for services.
-- Admin CRUD surface: Shipped, high depth/medium-high confidence, medium risk. Next gate: remove remaining top-200 helper usage drift.
-- Audit log review flow: Hardened, high depth/high confidence, low risk. Next gate: maintain continuity tests with index changes.
-- AI summary generation: Shipped, medium-high depth/medium-high confidence, medium risk. Next gate: continue quality evaluation calibration.
-- Integration sync architecture: Strong direction, high depth/medium-high confidence, medium-high risk. Next gate: prove non-opaque tokenRef migration completion.
-- Data export/privacy controls: Shipped, medium-high depth/medium-high confidence, low-medium risk. Next gate: maintain privacy-default export behavior.
-- CI and release gates: Mostly aligned, medium-high depth/medium confidence, medium risk. Next gate: verify live branch protection configuration.
-- Backend automated tests: Broad behavior suite, medium-high depth/medium confidence, high risk. Next gate: fix source coverage gating scope.
+## 4) Roles and Accountability
 
-Interpretation:
+- Author:
+  - Owns design, implementation, testing evidence, and rollout notes.
+- Reviewer:
+  - Owns risk-based review quality (correctness, security, regressions).
+- Release Driver:
+  - Owns go/no-go, deployment coordination, rollback readiness.
+- Incident Commander (when needed):
+  - Owns hotfix path and post-incident follow-through.
 
-- Platform architecture is in a good state.
-- Product surface is broad enough for user validation.
-- Remaining production gate risk is concentrated in verification/governance gaps rather than missing product capabilities.
+## 5) Change Risk Levels
 
-## 3) Evolution Timeline (Beginning -> Current)
+Classify each PR before coding. Use highest applicable level.
 
-### Phase A: Monorepo and multi-app foundation
+### R0 - Low Risk
 
-- Turborepo + pnpm workspace established.
-- Apps split into `apps/web`, `apps/admin`, `apps/mobile`.
-- Shared packages introduced (`packages/backend`, `packages/ui`, eslint/ts configs).
+Examples:
 
-Primary result:
+- docs-only
+- copy updates without behavior changes
+- comments/refactors with no runtime impact
 
-- Solid platform for shared backend contract and independent app delivery cadence.
+Minimum gates:
 
-### Phase B: Auth migration and hardening direction
+- lint
+- typecheck
+- one reviewer
 
-- Admin app migrated from Auth0 to Clerk.
-- Convex + Clerk alignment introduced progressively across clients.
-- Auth fallback and runtime resilience added during migration window.
+### R1 - Standard Product Risk
 
-Primary result:
+Examples:
 
-- Unified auth provider direction across ecosystem.
+- single-surface UX or logic changes
+- non-sensitive settings updates
+- isolated backend logic with bounded blast radius
 
-### Phase C: Backend domain assembly (Convex)
+Minimum gates:
 
-- Core schema introduced for users, preferences, memories, day records, summaries, integrations, and audit logs.
-- Authz helpers (`requireUser`, `requireAdmin`, `requireOwnership`) centralized.
-- Clerk webhook handling added for user lifecycle sync/deletion.
+- full local checklist
+- CI green
+- one reviewer
 
-Primary result:
+### R2 - High Cross-Surface Risk
 
-- Backend became the single source of truth for all clients.
+Examples:
 
-### Phase D: Core product loop delivered
+- shared API contract changes
+- schema/index updates
+- integration sync flow changes
+- auth/session boundary changes
+- admin governance and data operations
 
-- Web dashboard flow delivered (memories, day context, summary area).
-- Mobile core tabs and core loop shipped.
-- Admin CRUD and governance surfaces added.
+Minimum gates:
 
-Primary result:
+- full local checklist
+- CI green
+- migration/rollback note
+- two reviewers when available
 
-- End-to-end usable product with web/mobile/admin parity around shared domain.
+### R3 - Critical Risk
 
-### Phase E: AI summaries and context enrichment
+Examples:
 
-- OpenAI-backed day summary generation implemented.
-- Daily generation quota model added.
-- Retry/backoff and structured output handling improved.
+- sensitive context tracking (location, health, communication metadata)
+- encryption/secret handling
+- deletion/retention/cascade logic
+- webhook validation and identity boundaries
 
-Primary result:
+Minimum gates:
 
-- AI feature moved from prototype capability to governed production behavior.
+- full local checklist
+- CI green
+- explicit threat model note
+- privacy checklist completion
+- rollout guardrails and rollback playbook
+- two reviewers required
 
-### Phase F: Integrations and operational hardening
+## 6) Branching and Commits
 
-- OAuth provider flows (Google Calendar/Fit, Spotify) added.
-- Integration secret storage + token refresh lifecycle + sync-run idempotency added.
-- Mobile contextual ingestion expanded (foreground location, health, screen-time adapters).
-- CI/security improvements shipped (secret scan, stricter validation, validation gates).
+### 6.1 Branch Naming
 
-Primary result:
+- `feature/<area>-<short-desc>`
+- `fix/<area>-<short-desc>`
+- `hotfix/<area>-<short-desc>`
+- `chore/<area>-<short-desc>`
 
-- Multi-source context pipeline is functionally complete for next-stage refinement.
+Examples:
 
-## 4) Current Architecture (System Map)
+- `feature/mobile-background-location-guardrails`
+- `fix/web-oauth-callback-state-validation`
 
-### 4.1 Monorepo and Toolchain
+### 6.2 Commit Style
 
-- Workspace orchestration: Turborepo + pnpm.
-- Language: TypeScript across apps and packages.
-- CI orchestration: GitHub Actions workflow at `.github/workflows/backend-validation.yml`.
-- Shared UI primitives and constants in `packages/ui`.
+Use Conventional Commits:
 
-### 4.2 Backend Architecture (Convex)
+- `feat`
+- `fix`
+- `perf`
+- `refactor`
+- `test`
+- `docs`
+- `chore`
 
-#### 4.2.1 Domain tables and model shape
+Requirements:
 
-Core tables include:
+- imperative subject
+- scope included when useful (`feat(web): ...`)
+- body includes why and risk notes for non-trivial changes
 
-- `user`
-- `userPreferences`
-- `memories`
-- `memoryMedia`
-- `days`
-- `daySummaries`
-- `summaryGenerationQuotas`
-- `integrations`
-- `integrationSecrets`
-- `integrationSyncRuns`
-- `integrationDailyData`
-- `auditLogs`
+## 7) Delivery Lifecycle
 
-Important modeling choice:
+### 7.1 Plan
 
-- `dayKey`-centric time model (`YYYY-MM-DD`) is consistently used for daily joins and syncs.
+Before coding, document:
 
-#### 4.2.2 Auth and authorization model
+- problem statement
+- impacted modules
+- risk level (R0-R3)
+- validation plan
+- rollback strategy (R2/R3)
 
-- Clerk identity is bridged to internal user rows.
-- `requireUser` gates authenticated access.
-- `requireAdmin` gates admin-only operations.
-- `requireOwnership` enforces resource ownership for user-scoped records.
-- Webhook sync keeps backend user state aligned with Clerk lifecycle events.
+### 7.2 Implement
 
-#### 4.2.3 Summaries pipeline
+Implementation rules:
 
-- Summary generation action assembles context from memories/day metadata/integration rows.
-- Quota reservation/enforcement protects cost and abuse boundaries.
-- OpenAI call layer has retry behavior and structured parsing.
-- `summaryGenerationQuotas` provides per-day guardrails.
+- keep diffs focused
+- avoid unrelated refactors in same PR
+- preserve backwards compatibility for shared contracts unless a planned migration is included
 
-#### 4.2.4 Integration subsystem
+### 7.3 Validate Locally
 
-Key architecture patterns:
+Run required local checks before requesting review.
 
-- provider allowlists and parsing helpers centralized,
-- OAuth tokens associated with opaque `tokenRef`,
-- secrets held in `integrationSecrets` table,
-- per-user/provider/day sync-run idempotency state in `integrationSyncRuns`,
-- normalized daily context rows in `integrationDailyData`.
+### 7.4 Review
 
-This remains a strong integration architecture direction, with clear extension points for new providers.
+Review focuses on:
 
-#### 4.2.5 Admin backend surface
+- correctness and regressions
+- authz/authn boundaries
+- data integrity and idempotency
+- scalability (pagination, bounded queries, N+1 avoidance)
+- observability and operability
 
-- Admin dashboard metrics query and operational cards.
-- Admin CRUD endpoints per major domain entity.
-- Audit log read/write operations.
-- Paginated queries exist for large entities.
+### 7.5 Merge
 
-### 4.3 Web App Architecture (`apps/web`)
+Merge only after:
 
-- Next.js App Router with Clerk + Convex providers.
-- Dashboard shell with summary/settings/export/account navigation.
-- Daily summary page consumes Convex queries/actions.
-- Settings page manages integrations and provider sync actions.
-- Export page supports JSON/TXT payload export and optional location-signal inclusion.
-- OAuth start/callback routes handled server-side in web app API routes.
+- required approvals
+- required checks green
+- unresolved critical comments closed
 
-### 4.4 Admin App Architecture (`apps/admin`)
+### 7.6 Deploy
 
-- Next.js App Router + Clerk.
-- Proxy/middleware gate validates auth/admin and sets signed short-lived admin cache cookie.
-- Admin guard wrapper is used across admin route pages.
-- Full list/create/edit/delete coverage for users, memories, days, summaries, integrations, preferences, and content.
-- Audit logs page uses paginated query + client filters.
+Follow `DEPLOY_RUNBOOK.md` and execute smoke checks.
 
-### 4.5 Mobile App Architecture (`apps/mobile`)
+### 7.7 Verify
 
-- Expo Router tabs + Clerk + Convex provider chain.
-- Core tabs:
-  - Home,
-  - Add Memory,
-  - Insights,
-  - Memory (daily detail),
-  - Profile/Settings,
-  - Quick setup flow.
-- Device-context services:
-  - reminder scheduler/sync,
-  - foreground location tracking,
-  - Apple Health ingestion bridge,
-  - Android/iOS screen-time ingestion bridges.
+Post-deploy verification is mandatory for R2/R3 changes.
 
-Notable mobile strength:
+## 8) Mandatory Local Validation Commands
 
-- profile/settings screen acts as integration and preference control plane, including quiet hours and location tracking state.
+Run from repo root unless noted.
 
-## 5) Cross-System Data Flow (How Parts Connect)
+Core (all non-doc PRs):
 
-### 5.1 Auth and identity flow
+```bash
+pnpm install
+pnpm lint
+pnpm typecheck
+```
 
-1. User authenticates via Clerk (web/mobile/admin).
-2. Convex receives auth context via provider bridge.
-3. Backend user row exists via webhook sync or sync mutation path.
-4. Domain handlers authorize by user/admin/ownership checks.
+Backend-affecting changes:
 
-### 5.2 Core day loop flow
+```bash
+pnpm --filter @repo/backend lint
+pnpm --filter @repo/backend test:run
+pnpm test:coverage:backend
+```
 
-1. User creates memories (`memories` + optional `memoryMedia`).
-2. User updates day metadata (`days`: rating, notes, people tags).
-3. Summary action composes all day context and writes `daySummaries`.
-4. Web/mobile surfaces render a unified day narrative.
+Web-affecting changes:
 
-### 5.3 Integrations flow (OAuth providers)
+```bash
+pnpm build:web
+pnpm --filter web test:oauth-abuse
+```
 
-1. Client starts OAuth via web route `/api/integrations/oauth/[provider]/start`.
-2. Callback exchanges code for tokens and mutates Convex integration state.
-3. Tokens are linked via `tokenRef`; secrets stored server-side.
-4. User-triggered sync writes normalized provider/day rows to `integrationDailyData`.
-5. Summary generation includes this context in prompts/sources.
+Admin-affecting changes:
 
-### 5.4 Mobile native-context flow
+```bash
+pnpm build:admin
+pnpm --filter admin lint
+```
 
-1. Tab layout boot syncs reminders from user preferences.
-2. If foreground location tracking is enabled, app watches location only while app is active.
-3. Coarse location signal rows are written via integration daily data mutation.
-4. Preference state tracks permission/last update metadata.
+Mobile-affecting changes:
 
-### 5.5 Export flow
+```bash
+pnpm --filter mobile check-types
+pnpm --filter mobile lint
+pnpm --filter mobile build:ci
+pnpm --filter mobile exec vitest run
+```
 
-1. Web export page calls backend export query.
-2. Query returns summaries/memories/days/integrationDailyData.
-3. Location rows can be excluded unless explicitly requested.
-4. Download generated as JSON or text.
+Notes:
 
-## 6) Strengths (What Was Implemented Well)
+- Mobile unit tests exist in `apps/mobile/lib/*.test.ts`; they are required for mobile logic changes.
+- If a command is intentionally skipped, document why in PR with owner approval.
 
-1. **Strong backend contract reuse** across web/admin/mobile reduces divergence risk.
-2. **Good authz discipline** (user/admin/ownership helper model is explicit and repeatable).
-3. **Integration reliability patterns are mature** (allowlists, refresh logic, idempotency state).
-4. **AI summary pipeline is governed** (quota and retries, not just raw model calls).
-5. **Privacy-aware export controls** (optional location inclusion) are a strong trust design choice.
-6. **Operational quality improved** with stricter env validation and CI security checks.
+## 9) CI and Branch Protection
 
-## 7) Findings: Risks, Inconsistencies, and Debt
+Source of truth:
 
-### 7.1 High severity
+- workflow: `.github/workflows/backend-validation.yml`
+- policy: `.github/branch-protection.expected.json`
 
-#### Finding H1: Backend coverage gate is mis-scoped
+Current required branch check:
 
-- Coverage thresholds are configured at 80%, but coverage `include` targets behavior test files plus the in-memory harness rather than backend source modules.
+- `backend-validation`
 
-Impact:
+Policy verification command:
 
-- CI can report strong coverage while source-level regressions remain under-detected.
+```bash
+GITHUB_TOKEN=<token> GITHUB_REPOSITORY=<owner/repo> pnpm verify:branch-protection -- --branch main
+```
 
-Recommendation:
+Any change to CI policy requires:
 
-- Re-scope coverage `include` to backend source modules (`convex/**/*.ts`) and exclude tests/generated files.
-- Rebaseline and keep thresholds enforced in CI after source-level coverage is measured.
+- update to expected policy file
+- runbook update
+- explicit PR note under "CI impact"
 
-#### Finding H2: Missing migration proof for legacy non-opaque integration tokenRef values
+## 10) Pull Request Standard
 
-- Integration secrets encryption and migration helpers exist, but there is no repository-level audit proving all `integrations.tokenRef` values are opaque references.
+Every PR must include:
 
-Impact:
+1. Problem and intent
+2. Risk level (R0-R3)
+3. What changed (by module)
+4. Validation evidence (commands + pass/fail)
+5. Screenshots/video for UI changes (web/admin/mobile)
+6. Migration and rollback notes (R2/R3)
+7. Privacy/security checklist for sensitive features
 
-- Legacy direct-token rows can persist unnoticed, weakening secrets-at-rest assurance.
+Preferred PR size:
 
-Recommendation:
+- under 500 net lines
 
-- Add admin audit + migration functions for `integrations` rows with non-opaque `tokenRef` values.
-- Add runbook steps and release evidence requirements to show zero remaining legacy rows.
+If larger:
 
-### 7.2 Medium severity
+- justify why split was not practical
+- provide review map by file and risk hotspots
 
-#### Finding M1: Cross-package type import boundaries are brittle in web
+## 11) Data and Schema Change Protocol
 
-- Some web components import generated backend model types via deep relative paths.
+Applies to schema/index/data-model changes.
 
-Impact:
+Requirements:
 
-- Refactor fragility and workspace-boundary coupling.
+1. Forward-compatible rollout plan
+2. Backfill or migration strategy (if needed)
+3. Idempotent migration behavior
+4. Rollback strategy with failure handling
+5. Post-deploy validation query or dashboard checks
 
-Recommendation:
+Additional constraints:
 
-- Re-export needed types from package entry points and consume through alias imports only.
+- all user-facing queries must stay bounded (pagination or explicit limits)
+- avoid unbounded table scans on hot paths
+- avoid per-row lookup loops when set-based alternatives exist
 
-#### Finding M2: Branch-protection required checks are not verifiable from repository code
+## 12) Sensitive Context and Privacy Standard
 
-- CI/docs are aligned on `backend-validation`, but live GitHub branch rule state is external and was not API-verified in this review.
+Applies to location, health/fitness, calendar/notification context, communication metadata, and inferred mood/activity signals.
 
-Impact:
+Mandatory requirements:
 
-- Production readiness cannot be closed with full evidence without branch-rule verification.
+1. Explicit opt-in before collection
+2. Feature-scoped permissions (no silent enablement of adjacent signals)
+3. Fail-closed behavior when permissions are denied
+4. Coarse, minimum-necessary data retention by default
+5. Disable path stops new writes immediately
+6. Export/delete flows include newly collected fields
+7. No raw secret or sensitive payload logging
 
-Recommendation:
+Merge is blocked if this section is incomplete for applicable changes.
 
-- Add explicit release checklist evidence: screenshot/API output of required checks for `main`.
-- Optionally add automated policy checks (GitHub API script) in release workflow.
+## 13) Observability and Reliability Requirements
 
-### 7.3 Closed since prior review
+For R1-R3 changes:
 
-The following previously high-risk issues are now closed by implementation and test evidence:
+- emit structured logs for key state transitions
+- include actionable error messages for users/operators
+- ensure failures are observable without attaching debuggers
+- avoid console-only error handling in production user flows
 
-1. Audit log filtered pagination correctness.
-2. Admin dashboard full-table collect hot path risk.
-3. OAuth abuse-path test coverage (tampered state, replay, user mismatch, malformed payloads).
+For background/sync pipelines:
 
-## 8) Security and Compliance Posture Snapshot
+- idempotency keys or equivalent guards
+- timeout and retry strategy documented
+- degraded mode behavior defined
 
-Current positives:
+## 14) Release Checklist
 
-- Required env validation for critical backend/admin secrets.
-- Clerk webhook signature verification.
-- CI secret-scan gate.
-- Admin middleware gate + signed admin-cache cookie strategy.
-- Integration secret envelope encryption with keyring + active key id controls.
-- Privacy-first export default excluding location signals unless explicitly enabled.
+Before release:
 
-Security backlog to prioritize:
+1. Latest `main` has green required checks
+2. Branch protection policy verified
+3. Environment variables validated (no placeholders)
+4. Security-sensitive migrations audited (if applicable)
+5. Smoke test plan assigned and owned
 
-1. Close legacy non-opaque `tokenRef` migration proof gap.
-2. Enforce source-level backend coverage in CI.
-3. Add lint guardrails for package-boundary imports.
-4. Add branch-protection verification evidence to release readiness checklist.
+After release:
 
-## 9) Testing and Quality Status
+1. Sign-in and dashboard flow succeeds
+2. Summary generation succeeds
+3. Integration connect/sync path succeeds
+4. Admin critical pages load
+5. Error rates show no unexpected spike
 
-Current:
+## 15) Hotfix Process
 
-- Backend behavior suites are present for auth, audit logs, summaries, integrations, and in-memory harness behavior.
-- Web OAuth abuse suite is present and passing.
-- CI/local validation commands passed in this review window:
-  - `pnpm --filter @repo/backend lint`
-  - `pnpm --filter @repo/backend test:run`
-  - `pnpm --filter admin build`
-  - `pnpm --filter web test:oauth-abuse`
-  - `pnpm lint`
-  - `pnpm typecheck`
+For production-impacting defects:
 
-Gap:
+1. Branch from `main` using `hotfix/...`
+2. Implement minimal targeted fix
+3. Add/adjust tests for root cause
+4. Open expedited PR with incident context
+5. Require approvals and green CI
+6. Deploy, verify, and publish incident follow-up actions
 
-- Backend coverage gate currently does not measure backend source modules directly.
-- No dedicated behavior tests yet for `integrations` non-opaque tokenRef audit/migration flows.
+No "fix now, test later" merges to `main`.
 
-Recommended minimal high-value test suites:
+## 16) Definition of Done
 
-1. Source-level coverage enforcement for backend Convex modules.
-2. Behavior tests for non-opaque tokenRef migration/audit utilities.
-3. Contract tests for package-boundary type exports consumed by web/mobile/admin.
+A change is done only when all are true:
 
-## 10) Delivery Plan (Prioritized)
+1. Functional behavior meets acceptance criteria
+2. Required local checks completed
+3. Required CI checks green
+4. Security/privacy requirements satisfied
+5. Reliability and failure handling are explicit
+6. Tests cover changed risk surface
+7. Documentation/runbook updates are complete
+8. Rollback impact is understood for production
 
-### 0-2 weeks (production gate closure)
+If any item is missing, the work is not done.
 
-1. Re-scope backend coverage gate to source modules and rebaseline thresholds.
-2. Add and run admin audit/migration for non-opaque `integrations.tokenRef` rows.
-3. Replace deep relative backend type imports in web with package exports.
-4. Capture branch-protection required-check evidence for `main`.
+## 17) Exception Handling
 
-### 2-6 weeks (hardening and automation)
+Exceptions are rare and must include:
 
-1. Add automated branch-policy verification script to release process.
-2. Add lint rules preventing cross-package deep relative imports.
-3. Expand integration migration tests and release runbook checks.
+- reason and risk
+- approver
+- compensating controls
+- follow-up deadline
 
-## Action Tickets (Owner + Effort + Outcome)
+Allowed examples:
 
-The following backlog translates this review into execution-ready engineering tickets.
+- temporary CI bypass for external outage with manual validation evidence
+- staged mitigation for urgent incident with explicit post-incident hardening tasks
 
-### Priority P0 (Gate blockers)
+Unapproved exceptions are policy violations.
 
-1. P0-01: Re-scope backend coverage gate to source modules.
-   Owner: Backend + DevEx.
-   Effort: S-M.
-   Outcome: Trustworthy CI quality signal.
-   Acceptance criteria: Coverage include points to backend source files; thresholds enforced and green.
-2. P0-02: Audit and migrate non-opaque integrations tokenRef.
-   Owner: Backend + Security.
-   Effort: M.
-   Outcome: Secrets-at-rest assurance closure.
-   Acceptance criteria: Audit shows zero non-opaque rows after migration; runbook contains evidence steps.
-3. P0-03: Fix web deep relative backend type imports.
-   Owner: Web + Backend.
-   Effort: S.
-   Outcome: Stable package boundaries.
-   Acceptance criteria: No imports from `../../../packages/backend/**` remain in app code.
-4. P0-04: Verify branch protection required checks.
-   Owner: DevEx + Release.
-   Effort: S.
-   Outcome: Production gate evidence completeness.
-   Acceptance criteria: `main` branch rule evidence shows required checks include only `backend-validation`.
+## 18) Cross-Surface Contract Enforcement
 
-### Priority P1 (Follow-on hardening)
+All shared contracts between web, mobile, admin, and backend must be treated as production APIs.
 
-1. P1-01: Add lint rule for package-boundary import hygiene.
-   Owner: DevEx.
-   Effort: S.
-   Outcome: Prevent recurrence of boundary drift.
-   Acceptance criteria: CI fails on deep relative imports into sibling package internals.
-2. P1-02: Add migration behavior tests for legacy token paths.
-   Owner: Backend QA.
-   Effort: S-M.
-   Outcome: Regression safety for secrets uplift.
-   Acceptance criteria: Deterministic tests cover audit + migration + idempotent reruns.
-3. P1-03: Automate branch policy verification.
-   Owner: DevEx + Security.
-   Effort: M.
-   Outcome: Repeatable release governance checks.
-   Acceptance criteria: Scripted API check runs in release checklist and outputs pass/fail evidence.
+Requirements:
 
-### Suggested sequencing
+1. Single source of truth:
+   - Shared types/validators must be defined in backend or shared packages
+2. No implicit assumptions:
+   - Frontend must not assume fields not defined in backend contracts
+3. Backward compatibility:
+   - Breaking changes require migration strategy (R2/R3)
+4. Validation:
+   - All external inputs must pass strict validation (no "any" bypass)
 
-1. Close all P0 tickets first and re-run final production gate.
-2. Execute P1 automation and anti-regression controls in the next hardening cycle.
+CI expectation:
 
-### Suggested ownership model
+- Contract-breaking changes must fail typecheck or tests
+- Boundary checks must be enforced (no direct backend misuse)
 
-1. Backend lead owns coverage gating and tokenRef migration deliverables.
-2. DevEx/release lead owns branch-protection verification evidence and automation.
-3. Web lead owns import-boundary remediations with backend support.
+Failure to follow this leads to silent production bugs.
 
-## 11) Architecture Decisions Worth Keeping
+## 19) Feature Flags and Controlled Rollouts
 
-Keep these as long-term patterns:
+All high-risk or user-sensitive features must be behind feature flags.
 
-1. Convex as a shared backend contract for all clients.
-2. Day-key normalized daily data model.
-3. Explicit authz helper boundaries.
-4. Integration secret/tokenRef separation from user-visible integration state.
-5. Quota-guarded AI generation as a first-class concern.
+Examples:
 
-## 12) Definition of Done for "Next Maturity Milestone"
+- integrations
+- summary generation changes
+- background tracking
+- AI features
 
-The next milestone should be considered complete when all are true:
+Requirements:
 
-1. Backend source-level coverage gating is enforced in CI and passing.
-2. Integration token migration audit reports zero non-opaque `integrations.tokenRef` rows.
-3. Web package-boundary imports no longer reference backend internals via deep relative paths.
-4. Core backend and OAuth abuse behavior suites are green in CI.
-5. Branch protection evidence confirms required checks for `main` include only `backend-validation`.
+1. Feature flags must be:
+   - remotely configurable (runtimeConfig or backend-driven)
+   - environment-aware (dev/staging/prod)
 
-## 13) Commit Milestones (Recent High-Signal Markers)
+2. Rollout strategy:
 
-Selected timeline markers (chronological):
+- Phase 1: internal testing
+- Phase 2: limited user rollout
+- Phase 3: full release
 
-- 2026-02-23: backend schema/auth helpers integration landed.
-- 2026-02-25: admin dashboard/CRUD/guards added.
-- 2026-03-08 to 2026-03-09: mobile core loop and web dashboard shipped.
-- 2026-03-21: AI summary generation implemented.
-- 2026-03-22: strict env validation + media upload + pagination + auth gating improvements.
-- 2026-03-23: integration secrets + sync run tracking + preference sync + stabilization.
-- 2026-03-25: reminders/integrations OAuth + foreground location + health/screen-time.
-- 2026-03-28: provider validation centralization and validators tests.
-- 2026-04-03: final evidence-based production gate audit completed; status remains NOT READY pending four explicit blockers.
+3. Kill switch:
 
-## 14) Quick Reference: Key Files by Concern
+- Every critical feature must be disable-able without redeploy
 
-Backend core:
+Merge is blocked for R2/R3 features without rollout strategy.
 
-- `packages/backend/convex/schema.ts`
-- `packages/backend/convex/authz.ts`
-- `packages/backend/convex/users.ts`
-- `packages/backend/convex/webhooks.ts`
-- `packages/backend/convex/memories.ts`
-- `packages/backend/convex/days.ts`
-- `packages/backend/convex/summaries.ts`
-- `packages/backend/convex/summaryGeneration.ts`
-- `packages/backend/convex/integrations.ts`
-- `packages/backend/convex/integrationProviders.ts`
-- `packages/backend/convex/admin.ts`
-- `packages/backend/convex/userPreferences.ts`
+## 20) Performance Budget and Constraints
 
-Web:
+All features must respect performance budgets.
 
-- `apps/web/app/providers.tsx`
-- `apps/web/app/dashboard/page.tsx`
-- `apps/web/app/dashboard/settings/page.tsx`
-- `apps/web/app/dashboard/export/page.tsx`
-- `apps/web/app/api/integrations/oauth/[provider]/start/route.ts`
-- `apps/web/app/api/integrations/oauth/[provider]/callback/route.ts`
-- `apps/web/app/integrations/oauth/complete/page.tsx`
+Backend:
 
-Admin:
+- No unbounded queries on user-facing paths
+- Queries must be paginated or explicitly limited
+- Avoid N+1 query patterns
 
-- `apps/admin/proxy.ts`
-- `apps/admin/app/providers.tsx`
-- `apps/admin/app/admin/dashboard/page.tsx`
-- `apps/admin/app/audit-logs/page.tsx`
+Web/Admin:
+
+- First load must not block on heavy data
+- Use loading states for async operations
 
 Mobile:
 
-- `apps/mobile/app/_layout.tsx`
-- `apps/mobile/app/(tabs)/_layout.tsx`
-- `apps/mobile/app/(tabs)/index.tsx`
-- `apps/mobile/app/(tabs)/add-memory.tsx`
-- `apps/mobile/app/(tabs)/memory.tsx`
-- `apps/mobile/app/(tabs)/insights.tsx`
-- `apps/mobile/app/(tabs)/quick-setup.tsx`
-- `apps/mobile/app/(tabs)/profile.tsx`
-- `apps/mobile/lib/reminder-notifications.ts`
-- `apps/mobile/lib/foreground-location-tracker.ts`
+- Avoid excessive background processing
+- Limit network calls and batching frequency
+- Minimize battery impact
 
-CI and ops docs:
+PRs must include:
 
-- `.github/workflows/backend-validation.yml`
-- `README.md`
-- `CONVEX_SETUP.md`
-- `DEPLOY_RUNBOOK.md`
-- `SECURITY.md`
+- performance impact note (if applicable)
 
----
+Regressions must be treated as defects.
 
-This document should be updated whenever major architectural behavior changes (auth model, schema/table design, integration providers, CI gate definitions, or summary generation pipeline).
+## 21) Observability Standard
+
+All production flows must be observable.
+
+Requirements:
+
+1. Structured logging:
+
+- Use consistent format:
+  - event name
+  - userId (if applicable)
+  - status (success/failure)
+  - error reason (if failure)
+
+2. Error tracking:
+
+- All critical errors must be captured (e.g., Sentry)
+- No silent failures
+
+3. Key events to log:
+
+- summary generation start/end
+- integration sync start/end
+- webhook processing
+- export requests
+- background tracking events
+
+4. User-facing errors:
+
+- Must be actionable
+- Must not expose internal details
+
+Console-only logging is not acceptable for production-critical paths.
+
+## 22) Mobile-Specific Production Rules
+
+Mobile behavior must respect OS constraints and user expectations.
+
+Requirements:
+
+1. Background features:
+
+- Must be explicitly enabled
+- Must respect OS permissions
+- Must fail safely if permissions revoked
+
+2. Battery impact:
+
+- Background tracking must be bounded
+- Avoid high-frequency polling
+
+3. Network reliability:
+
+- Offline-safe behavior required where applicable
+- Retry strategy must be defined
+
+4. UI consistency:
+
+- Every async action must have:
+  - loading state
+  - success feedback
+  - error handling
+
+Mobile-specific failures must not silently degrade behavior.
+
+## 23) Data Lifecycle and Retention
+
+All stored data must have a defined lifecycle.
+
+Requirements:
+
+1. Retention policy:
+
+- Define how long data is stored
+- Apply especially to:
+  - location data
+  - health data
+  - integration data
+
+2. Cleanup:
+
+- Background jobs must enforce retention rules
+- Must be idempotent
+
+3. User control:
+
+- Users must be able to:
+  - export data
+  - delete data
+
+4. Storage control:
+
+- Avoid unbounded data growth
+- Use limits or archival strategies
+
+Unbounded storage growth is not acceptable.
+
+## 24) Integration Reliability Standard
+
+All external integrations must be resilient and observable.
+
+Requirements:
+
+1. Sync behavior:
+
+- Must be idempotent
+- Must handle partial failures
+
+2. Retry policy:
+
+- Define retry strategy (with limits)
+- Avoid infinite loops
+
+3. Health tracking:
+
+- Track:
+  - success rate
+  - failure rate
+  - last sync time
+
+4. User visibility:
+
+- Users must see:
+  - connection status
+  - last sync result
+
+5. Failure handling:
+
+- Must degrade gracefully
+- Must not block core app usage
+
+Integration failures must be visible and recoverable.

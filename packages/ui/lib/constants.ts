@@ -38,6 +38,11 @@ export const SETTINGS_DEFAULTS = {
   autoSyncIntegrations: true,
   defaultMemoryMood: "happy",
   locationTrackingEnabled: false,
+  callLogsTrackingEnabled: false,
+  moodDetectionFaceRecognitionEnabled: false,
+  fitnessTrackingEnabled: false,
+  calendarNotificationsTrackingEnabled: false,
+  backgroundLocationTrackingEnabled: false,
 } as const;
 
 export const INTEGRATION_PROVIDERS = [

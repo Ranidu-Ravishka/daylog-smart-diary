@@ -31,6 +31,11 @@ const defaultPreferenceSettings = {
   autoSyncIntegrations: true,
   defaultMemoryMood: "happy",
   locationTrackingEnabled: false,
+  callLogsTrackingEnabled: false,
+  moodDetectionFaceRecognitionEnabled: false,
+  fitnessTrackingEnabled: false,
+  calendarNotificationsTrackingEnabled: false,
+  backgroundLocationTrackingEnabled: false,
   locationPermissionStatus: "unknown" as const,
 };
 
@@ -81,9 +86,17 @@ export const syncUserPreferencesFromClerk = mutation({
     autoSyncIntegrations: v.optional(v.boolean()),
     defaultMemoryMood: v.optional(v.string()),
     locationTrackingEnabled: v.optional(v.boolean()),
+    callLogsTrackingEnabled: v.optional(v.boolean()),
+    moodDetectionFaceRecognitionEnabled: v.optional(v.boolean()),
+    fitnessTrackingEnabled: v.optional(v.boolean()),
+    calendarNotificationsTrackingEnabled: v.optional(v.boolean()),
+    backgroundLocationTrackingEnabled: v.optional(v.boolean()),
     locationPermissionStatus: v.optional(locationPermissionStatusValidator),
     locationLastUpdatedAt: v.optional(v.number()),
     locationLastArea: v.optional(v.string()),
+    backgroundLocationAutoDisabledAt: v.optional(v.number()),
+    backgroundLocationAutoDisableReason: v.optional(v.string()),
+    backgroundLocationBatteryImpactScore: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     await requireIdentityMatch(ctx, args.clerkUserId);
@@ -140,6 +153,26 @@ export const syncUserPreferencesFromClerk = mutation({
           args.locationTrackingEnabled ??
           existing.locationTrackingEnabled ??
           defaultPreferenceSettings.locationTrackingEnabled,
+        callLogsTrackingEnabled:
+          args.callLogsTrackingEnabled ??
+          existing.callLogsTrackingEnabled ??
+          defaultPreferenceSettings.callLogsTrackingEnabled,
+        moodDetectionFaceRecognitionEnabled:
+          args.moodDetectionFaceRecognitionEnabled ??
+          existing.moodDetectionFaceRecognitionEnabled ??
+          defaultPreferenceSettings.moodDetectionFaceRecognitionEnabled,
+        fitnessTrackingEnabled:
+          args.fitnessTrackingEnabled ??
+          existing.fitnessTrackingEnabled ??
+          defaultPreferenceSettings.fitnessTrackingEnabled,
+        calendarNotificationsTrackingEnabled:
+          args.calendarNotificationsTrackingEnabled ??
+          existing.calendarNotificationsTrackingEnabled ??
+          defaultPreferenceSettings.calendarNotificationsTrackingEnabled,
+        backgroundLocationTrackingEnabled:
+          args.backgroundLocationTrackingEnabled ??
+          existing.backgroundLocationTrackingEnabled ??
+          defaultPreferenceSettings.backgroundLocationTrackingEnabled,
         locationPermissionStatus:
           args.locationPermissionStatus ??
           existing.locationPermissionStatus ??
@@ -147,6 +180,15 @@ export const syncUserPreferencesFromClerk = mutation({
         locationLastUpdatedAt:
           args.locationLastUpdatedAt ?? existing.locationLastUpdatedAt,
         locationLastArea: args.locationLastArea ?? existing.locationLastArea,
+        backgroundLocationAutoDisabledAt:
+          args.backgroundLocationAutoDisabledAt ??
+          existing.backgroundLocationAutoDisabledAt,
+        backgroundLocationAutoDisableReason:
+          args.backgroundLocationAutoDisableReason ??
+          existing.backgroundLocationAutoDisableReason,
+        backgroundLocationBatteryImpactScore:
+          args.backgroundLocationBatteryImpactScore ??
+          existing.backgroundLocationBatteryImpactScore,
         updatedAt: now,
       });
 
@@ -184,11 +226,31 @@ export const syncUserPreferencesFromClerk = mutation({
       locationTrackingEnabled:
         args.locationTrackingEnabled ??
         defaultPreferenceSettings.locationTrackingEnabled,
+      callLogsTrackingEnabled:
+        args.callLogsTrackingEnabled ??
+        defaultPreferenceSettings.callLogsTrackingEnabled,
+      moodDetectionFaceRecognitionEnabled:
+        args.moodDetectionFaceRecognitionEnabled ??
+        defaultPreferenceSettings.moodDetectionFaceRecognitionEnabled,
+      fitnessTrackingEnabled:
+        args.fitnessTrackingEnabled ??
+        defaultPreferenceSettings.fitnessTrackingEnabled,
+      calendarNotificationsTrackingEnabled:
+        args.calendarNotificationsTrackingEnabled ??
+        defaultPreferenceSettings.calendarNotificationsTrackingEnabled,
+      backgroundLocationTrackingEnabled:
+        args.backgroundLocationTrackingEnabled ??
+        defaultPreferenceSettings.backgroundLocationTrackingEnabled,
       locationPermissionStatus:
         args.locationPermissionStatus ??
         defaultPreferenceSettings.locationPermissionStatus,
       locationLastUpdatedAt: args.locationLastUpdatedAt,
       locationLastArea: args.locationLastArea,
+      backgroundLocationAutoDisabledAt: args.backgroundLocationAutoDisabledAt,
+      backgroundLocationAutoDisableReason:
+        args.backgroundLocationAutoDisableReason,
+      backgroundLocationBatteryImpactScore:
+        args.backgroundLocationBatteryImpactScore,
       createdAt: now,
       updatedAt: now,
     });
@@ -266,9 +328,17 @@ export const syncMyUserPreferences = mutation({
     autoSyncIntegrations: v.optional(v.boolean()),
     defaultMemoryMood: v.optional(v.string()),
     locationTrackingEnabled: v.optional(v.boolean()),
+    callLogsTrackingEnabled: v.optional(v.boolean()),
+    moodDetectionFaceRecognitionEnabled: v.optional(v.boolean()),
+    fitnessTrackingEnabled: v.optional(v.boolean()),
+    calendarNotificationsTrackingEnabled: v.optional(v.boolean()),
+    backgroundLocationTrackingEnabled: v.optional(v.boolean()),
     locationPermissionStatus: v.optional(locationPermissionStatusValidator),
     locationLastUpdatedAt: v.optional(v.number()),
     locationLastArea: v.optional(v.string()),
+    backgroundLocationAutoDisabledAt: v.optional(v.number()),
+    backgroundLocationAutoDisableReason: v.optional(v.string()),
+    backgroundLocationBatteryImpactScore: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
@@ -325,6 +395,26 @@ export const syncMyUserPreferences = mutation({
           args.locationTrackingEnabled ??
           existing.locationTrackingEnabled ??
           defaultPreferenceSettings.locationTrackingEnabled,
+        callLogsTrackingEnabled:
+          args.callLogsTrackingEnabled ??
+          existing.callLogsTrackingEnabled ??
+          defaultPreferenceSettings.callLogsTrackingEnabled,
+        moodDetectionFaceRecognitionEnabled:
+          args.moodDetectionFaceRecognitionEnabled ??
+          existing.moodDetectionFaceRecognitionEnabled ??
+          defaultPreferenceSettings.moodDetectionFaceRecognitionEnabled,
+        fitnessTrackingEnabled:
+          args.fitnessTrackingEnabled ??
+          existing.fitnessTrackingEnabled ??
+          defaultPreferenceSettings.fitnessTrackingEnabled,
+        calendarNotificationsTrackingEnabled:
+          args.calendarNotificationsTrackingEnabled ??
+          existing.calendarNotificationsTrackingEnabled ??
+          defaultPreferenceSettings.calendarNotificationsTrackingEnabled,
+        backgroundLocationTrackingEnabled:
+          args.backgroundLocationTrackingEnabled ??
+          existing.backgroundLocationTrackingEnabled ??
+          defaultPreferenceSettings.backgroundLocationTrackingEnabled,
         locationPermissionStatus:
           args.locationPermissionStatus ??
           existing.locationPermissionStatus ??
@@ -332,6 +422,15 @@ export const syncMyUserPreferences = mutation({
         locationLastUpdatedAt:
           args.locationLastUpdatedAt ?? existing.locationLastUpdatedAt,
         locationLastArea: args.locationLastArea ?? existing.locationLastArea,
+        backgroundLocationAutoDisabledAt:
+          args.backgroundLocationAutoDisabledAt ??
+          existing.backgroundLocationAutoDisabledAt,
+        backgroundLocationAutoDisableReason:
+          args.backgroundLocationAutoDisableReason ??
+          existing.backgroundLocationAutoDisableReason,
+        backgroundLocationBatteryImpactScore:
+          args.backgroundLocationBatteryImpactScore ??
+          existing.backgroundLocationBatteryImpactScore,
         updatedAt: now,
       });
 
@@ -369,11 +468,31 @@ export const syncMyUserPreferences = mutation({
       locationTrackingEnabled:
         args.locationTrackingEnabled ??
         defaultPreferenceSettings.locationTrackingEnabled,
+      callLogsTrackingEnabled:
+        args.callLogsTrackingEnabled ??
+        defaultPreferenceSettings.callLogsTrackingEnabled,
+      moodDetectionFaceRecognitionEnabled:
+        args.moodDetectionFaceRecognitionEnabled ??
+        defaultPreferenceSettings.moodDetectionFaceRecognitionEnabled,
+      fitnessTrackingEnabled:
+        args.fitnessTrackingEnabled ??
+        defaultPreferenceSettings.fitnessTrackingEnabled,
+      calendarNotificationsTrackingEnabled:
+        args.calendarNotificationsTrackingEnabled ??
+        defaultPreferenceSettings.calendarNotificationsTrackingEnabled,
+      backgroundLocationTrackingEnabled:
+        args.backgroundLocationTrackingEnabled ??
+        defaultPreferenceSettings.backgroundLocationTrackingEnabled,
       locationPermissionStatus:
         args.locationPermissionStatus ??
         defaultPreferenceSettings.locationPermissionStatus,
       locationLastUpdatedAt: args.locationLastUpdatedAt,
       locationLastArea: args.locationLastArea,
+      backgroundLocationAutoDisabledAt: args.backgroundLocationAutoDisabledAt,
+      backgroundLocationAutoDisableReason:
+        args.backgroundLocationAutoDisableReason,
+      backgroundLocationBatteryImpactScore:
+        args.backgroundLocationBatteryImpactScore,
       createdAt: now,
       updatedAt: now,
     });
@@ -389,9 +508,17 @@ export const syncMyUserPreferences = mutation({
 export const updateMyLocationTrackingState = mutation({
   args: {
     locationTrackingEnabled: v.optional(v.boolean()),
+    callLogsTrackingEnabled: v.optional(v.boolean()),
+    moodDetectionFaceRecognitionEnabled: v.optional(v.boolean()),
+    fitnessTrackingEnabled: v.optional(v.boolean()),
+    calendarNotificationsTrackingEnabled: v.optional(v.boolean()),
+    backgroundLocationTrackingEnabled: v.optional(v.boolean()),
     locationPermissionStatus: v.optional(locationPermissionStatusValidator),
     locationLastUpdatedAt: v.optional(v.number()),
     locationLastArea: v.optional(v.string()),
+    backgroundLocationAutoDisabledAt: v.optional(v.number()),
+    backgroundLocationAutoDisableReason: v.optional(v.string()),
+    backgroundLocationBatteryImpactScore: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
@@ -406,11 +533,33 @@ export const updateMyLocationTrackingState = mutation({
     await ctx.db.patch(existing._id, {
       locationTrackingEnabled:
         args.locationTrackingEnabled ?? existing.locationTrackingEnabled,
+      callLogsTrackingEnabled:
+        args.callLogsTrackingEnabled ?? existing.callLogsTrackingEnabled,
+      moodDetectionFaceRecognitionEnabled:
+        args.moodDetectionFaceRecognitionEnabled ??
+        existing.moodDetectionFaceRecognitionEnabled,
+      fitnessTrackingEnabled:
+        args.fitnessTrackingEnabled ?? existing.fitnessTrackingEnabled,
+      calendarNotificationsTrackingEnabled:
+        args.calendarNotificationsTrackingEnabled ??
+        existing.calendarNotificationsTrackingEnabled,
+      backgroundLocationTrackingEnabled:
+        args.backgroundLocationTrackingEnabled ??
+        existing.backgroundLocationTrackingEnabled,
       locationPermissionStatus:
         args.locationPermissionStatus ?? existing.locationPermissionStatus,
       locationLastUpdatedAt:
         args.locationLastUpdatedAt ?? existing.locationLastUpdatedAt,
       locationLastArea: args.locationLastArea ?? existing.locationLastArea,
+      backgroundLocationAutoDisabledAt:
+        args.backgroundLocationAutoDisabledAt ??
+        existing.backgroundLocationAutoDisabledAt,
+      backgroundLocationAutoDisableReason:
+        args.backgroundLocationAutoDisableReason ??
+        existing.backgroundLocationAutoDisableReason,
+      backgroundLocationBatteryImpactScore:
+        args.backgroundLocationBatteryImpactScore ??
+        existing.backgroundLocationBatteryImpactScore,
       updatedAt: Date.now(),
     });
 

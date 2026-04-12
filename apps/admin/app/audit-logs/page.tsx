@@ -1,6 +1,7 @@
 "use client";
 
 import AdminGuard from "@/components/admin-guard";
+import { toEntityId } from "@/lib/admin-ids";
 import { api } from "@repo/backend/convex";
 import { makeFunctionReference } from "convex/server";
 import { useConvexAuth, usePaginatedQuery, useQuery } from "convex/react";
@@ -9,6 +10,9 @@ import { useMemo, useState } from "react";
 export default function AuditLogsPage() {
   const listAuditLogsPaginatedRef = makeFunctionReference<"query">(
     "admin:listAuditLogsPaginated",
+  );
+  const listUsersByIdsRef = makeFunctionReference<"query">(
+    "admin:listUsersByIds",
   );
   const { isAuthenticated } = useConvexAuth();
   const [userFilter, setUserFilter] = useState<string>("all");
@@ -43,12 +47,20 @@ export default function AuditLogsPage() {
       : "skip",
     { initialNumItems: 50 },
   );
-  const users = useQuery(api.admin.listAllUsers, isAdmin ? {} : "skip");
 
-  const userOptions = useMemo(() => {
+  const actorUserIds = useMemo(() => {
     if (!logs) return [];
     return [...new Set(logs.map((row) => String(row.actorUserId)))].sort();
   }, [logs]);
+
+  const users = useQuery(
+    listUsersByIdsRef,
+    isAdmin
+      ? {
+          userIds: actorUserIds.map((id) => toEntityId<"user">(id)),
+        }
+      : "skip",
+  ) as Array<{ _id: string; email: string; clerkUserId: string }> | undefined;
 
   const actionOptions = useMemo(() => {
     if (!logs) return [];
@@ -92,7 +104,7 @@ export default function AuditLogsPage() {
                 onChange={(event) => setUserFilter(event.target.value)}
               >
                 <option value="all">All actors</option>
-                {userOptions.map((id) => (
+                {actorUserIds.map((id) => (
                   <option key={id} value={id}>
                     {userById.get(id)?.email || id}
                   </option>

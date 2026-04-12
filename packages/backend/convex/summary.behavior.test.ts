@@ -184,6 +184,36 @@ describe("summary flow behavior", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("sanitizes OpenAI authentication failures without leaking key details", async () => {
+    const leakedKey = "sk-test-leaked-key-1234567890";
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            message: `Incorrect API key provided: ${leakedKey}`,
+          },
+        }),
+        {
+          status: 401,
+          statusText: "Unauthorized",
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      await generateSummaryWithOpenAi("2026-03-30", "[]");
+      throw new Error("Expected generateSummaryWithOpenAi to reject");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      const message = (error as Error).message;
+      expect(message).toBe("OpenAI authentication failed (401)");
+      expect(message).not.toContain(leakedKey);
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("fails deterministically when model returns malformed JSON content", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

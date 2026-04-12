@@ -8,17 +8,63 @@ function safeMessage(value: string | null): string {
   return value;
 }
 
+function isAllowedMobileReturnProtocol(protocol: string): boolean {
+  if (protocol === "mobile:" || protocol === "exp:") {
+    return true;
+  }
+
+  return protocol.startsWith("exp+") && protocol.endsWith(":");
+}
+
+function resolveMobileReturnUrl(candidate: string | null): string | null {
+  if (!candidate) return null;
+
+  try {
+    const url = new URL(candidate);
+    if (!isAllowedMobileReturnProtocol(url.protocol.toLowerCase())) {
+      return null;
+    }
+
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function buildMobileDeepLink(
+  baseReturnUrl: string | null,
+  provider: string,
+  status: string,
+  message: string,
+): string {
+  const fallback = `mobile://oauth-complete?integrationProvider=${encodeURIComponent(provider)}&integrationStatus=${encodeURIComponent(status)}&integrationMessage=${encodeURIComponent(message)}`;
+
+  if (!baseReturnUrl) {
+    return fallback;
+  }
+
+  try {
+    const url = new URL(baseReturnUrl);
+    url.searchParams.set("integrationProvider", provider);
+    url.searchParams.set("integrationStatus", status);
+    url.searchParams.set("integrationMessage", message);
+    return url.toString();
+  } catch {
+    return fallback;
+  }
+}
+
 function OAuthCompleteContent() {
   const searchParams = useSearchParams();
   const status = searchParams.get("integrationStatus") ?? "success";
   const message = safeMessage(searchParams.get("integrationMessage"));
   const provider = searchParams.get("integrationProvider") ?? "provider";
   const mode = searchParams.get("mode") ?? "web";
+  const returnUrl = resolveMobileReturnUrl(searchParams.get("returnUrl"));
+  const schemeUrl = buildMobileDeepLink(returnUrl, provider, status, message);
 
   useEffect(() => {
     if (mode !== "mobile") return;
-
-    const schemeUrl = `mobile://oauth-complete?integrationProvider=${encodeURIComponent(provider)}&integrationStatus=${encodeURIComponent(status)}&integrationMessage=${encodeURIComponent(message)}`;
 
     const attemptOpen = setTimeout(() => {
       window.location.href = schemeUrl;
@@ -36,7 +82,7 @@ function OAuthCompleteContent() {
       clearTimeout(attemptOpen);
       clearTimeout(attemptClose);
     };
-  }, [message, mode, provider, status]);
+  }, [mode, schemeUrl]);
 
   const isSuccess = status === "success";
 
@@ -49,10 +95,18 @@ function OAuthCompleteContent() {
         <p className="text-sm text-muted-foreground">{message}</p>
 
         {mode === "mobile" ? (
-          <p className="text-xs text-muted-foreground">
-            Returning to app… If nothing happens, close this browser and return
-            to DayLog.
-          </p>
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Returning to app… If nothing happens automatically, tap the button
+              below.
+            </p>
+            <a
+              href={schemeUrl}
+              className="inline-flex items-center justify-center rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground"
+            >
+              Open DayLog App
+            </a>
+          </div>
         ) : (
           <a
             href="/dashboard/settings"

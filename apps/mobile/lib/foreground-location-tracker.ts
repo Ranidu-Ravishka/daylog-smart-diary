@@ -1,4 +1,9 @@
 import * as Location from "expo-location";
+import {
+  buildLocationContextFromPoints,
+  type LocationContextPayload,
+  type LocationTrackPoint,
+} from "./location-stay-points";
 
 export type LocationPermissionState = "unknown" | "granted" | "denied";
 
@@ -6,6 +11,7 @@ export type ForegroundLocationUploadPayload = {
   dayKey: string;
   summary: string;
   signals: string[];
+  context?: LocationContextPayload;
   observedAt: number;
   areaLabel: string;
 };
@@ -27,6 +33,7 @@ const TRACKING_TIME_INTERVAL_MS = 2 * 60 * 1000;
 const TRACKING_DISTANCE_INTERVAL_METERS = 200;
 const MAX_ACCEPTABLE_ACCURACY_METERS = 2000;
 const MIN_UPLOAD_INTERVAL_MS = 10 * 60 * 1000;
+const MAX_TRACK_POINT_AGE_MS = 8 * 60 * 60 * 1000;
 
 function getLocalDayKey(timestampMs: number): string {
   const date = new Date(timestampMs);
@@ -54,12 +61,28 @@ function buildSignals(areaLabel: string, observedAt: number): string[] {
   ];
 }
 
+function dedupeSignals(signals: string[]): string[] {
+  return Array.from(
+    new Set(signals.map((signal) => signal.trim()).filter(Boolean)),
+  ).slice(0, 12);
+}
+
+function pruneOldTrackPoints(
+  points: LocationTrackPoint[],
+  nowMs: number,
+): LocationTrackPoint[] {
+  return points.filter(
+    (point) => nowMs - point.timestampMs <= MAX_TRACK_POINT_AGE_MS,
+  );
+}
+
 export async function startForegroundLocationTracker(
   options: StartForegroundLocationTrackerOptions,
 ): Promise<() => void> {
   let lastUploadedAt = 0;
   let lastUploadedArea = "";
   let stopped = false;
+  let recentTrackPoints: LocationTrackPoint[] = [];
 
   const emitStatus = (status: TrackerStatusUpdate) => {
     options.onStatusUpdate?.(status);
@@ -115,6 +138,21 @@ export async function startForegroundLocationTracker(
           }
 
           const areaLabel = getApproxAreaLabel(latitude, longitude);
+
+          recentTrackPoints = pruneOldTrackPoints(
+            recentTrackPoints,
+            observedAt,
+          );
+          recentTrackPoints.push({
+            latitude,
+            longitude,
+            timestampMs: observedAt,
+            accuracyMeters: typeof accuracy === "number" ? accuracy : undefined,
+          });
+
+          const locationContext =
+            buildLocationContextFromPoints(recentTrackPoints);
+
           const shouldThrottleUpload =
             observedAt - lastUploadedAt < MIN_UPLOAD_INTERVAL_MS &&
             areaLabel === lastUploadedArea;
@@ -126,8 +164,14 @@ export async function startForegroundLocationTracker(
           try {
             await options.onUpload({
               dayKey: getLocalDayKey(observedAt),
-              summary: `Foreground location update near ${areaLabel}.`,
-              signals: buildSignals(areaLabel, observedAt),
+              summary:
+                locationContext.summary ||
+                `Foreground location update near ${areaLabel}.`,
+              signals: dedupeSignals([
+                ...buildSignals(areaLabel, observedAt),
+                ...locationContext.signals,
+              ]),
+              context: locationContext.context,
               observedAt,
               areaLabel,
             });

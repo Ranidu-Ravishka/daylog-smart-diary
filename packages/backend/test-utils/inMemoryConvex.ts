@@ -20,6 +20,7 @@ type TableName =
   | "memoryMedia"
   | "days"
   | "summaryGenerationQuotas"
+  | "exportJobs"
   | "daySummaries"
   | "auditLogs"
   | "integrations"
@@ -69,6 +70,11 @@ const INDEX_FIELDS: Record<TableName, Record<string, string[]>> = {
   },
   summaryGenerationQuotas: {
     by_user_day: ["userId", "quotaDayKey"],
+  },
+  exportJobs: {
+    by_user_requestedAt: ["userId", "requestedAt"],
+    by_requestedAt: ["requestedAt"],
+    by_status_requestedAt: ["status", "requestedAt"],
   },
   daySummaries: {
     by_user_day: ["userId", "dayKey"],
@@ -362,6 +368,7 @@ export class InMemoryDb {
       memoryMedia: [...(seed?.memoryMedia ?? [])],
       days: [...(seed?.days ?? [])],
       summaryGenerationQuotas: [...(seed?.summaryGenerationQuotas ?? [])],
+      exportJobs: [...(seed?.exportJobs ?? [])],
       daySummaries: [...(seed?.daySummaries ?? [])],
       auditLogs: [...(seed?.auditLogs ?? [])],
       integrations: [...(seed?.integrations ?? [])],

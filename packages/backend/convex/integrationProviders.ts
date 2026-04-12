@@ -5,7 +5,12 @@ const CONNECTABLE_INTEGRATION_PROVIDERS = [
   "apple_health",
 ] as const;
 
-const CONTEXTUAL_DAILY_DATA_PROVIDERS = ["location"] as const;
+const CONTEXTUAL_DAILY_DATA_PROVIDERS = [
+  "location",
+  "fitness",
+  "calendar",
+  "activity_summary",
+] as const;
 
 const DAILY_DATA_PROVIDERS = [
   ...CONNECTABLE_INTEGRATION_PROVIDERS,

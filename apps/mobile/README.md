@@ -6,8 +6,8 @@ Expo + React Native client for DayLog.
 
 - Mobile supports memory capture, mood tagging, day-detail review, integration connect/sync, and daily summary generation from the Memory tab.
 - Connected data providers shown in mobile are: Google Calendar, Google Fit, Spotify, and Apple Health uploads.
-- Mobile supports optional foreground location tracking (coarse location, only while the app is open).
-- Background location tracking and call-log collection are not implemented in the current app.
+- Mobile supports optional foreground location tracking and controlled background location tracking (both coarse, privacy-gated).
+- Call-log collection remains permission-gated and platform-limited.
 
 ## Foreground location MVP setup (mobile)
 
@@ -25,9 +25,39 @@ pnpm --filter mobile add expo-location
 
 Behavior and privacy limits:
 
-- Collection is foreground-only (no background tracking).
+- Foreground tracker collects only while the app is open.
+- Background tracker is separately opt-in and runtime-gated.
 - Stored signal is coarse approximate area (`lat,lng` rounded), not high-frequency raw traces.
-- Tracking stops when permission is denied or toggle is turned off.
+- Tracking stops when permission is denied, auto-disabled for battery/rate policy, or toggle is turned off.
+
+## Controlled background location tracking
+
+Background tracking is runtime-gated and opt-in only.
+
+- Requires explicit consent in Profile -> Life Context Tracking.
+- Requires foreground + background location OS permissions.
+- Uses batched coarse points with stay-point/duration context (not route-level traces).
+- Tracks battery impact telemetry and auto-disables when policy thresholds are exceeded.
+
+## Android communication summary setup
+
+Communication summary uses Android-only aggregate call activity and is unavailable on iOS.
+
+- Add native dependency in `apps/mobile`:
+
+```bash
+pnpm --filter mobile add react-native-call-log
+```
+
+- Build and run an Android development build (not Expo Go).
+- In app: Profile -> Life Context Tracking -> Communication Summary.
+- Grant call activity/read-call-log permission when prompted.
+
+Behavior and privacy limits:
+
+- Only day-level aggregate counts/duration are used.
+- No phone numbers, contact names, or call transcripts are stored.
+- If the native module is unavailable in the current build, the toggle remains unavailable.
 
 ## Apple Health real-device sync setup (iOS)
 

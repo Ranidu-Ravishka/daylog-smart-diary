@@ -22,10 +22,15 @@ describe("assertIntegrationProvider", () => {
 describe("assertDailyDataProvider", () => {
   it("accepts contextual daily-data providers", () => {
     expect(assertDailyDataProvider(" location ")).toBe("location");
+    expect(assertDailyDataProvider("fitness")).toBe("fitness");
+    expect(assertDailyDataProvider("calendar")).toBe("calendar");
+    expect(assertDailyDataProvider("activity_summary")).toBe(
+      "activity_summary",
+    );
   });
 
   it("rejects unknown daily-data providers", () => {
-    expect(() => assertDailyDataProvider("calendar")).toThrow(
+    expect(() => assertDailyDataProvider("unknown_provider")).toThrow(
       /Unsupported daily data provider/,
     );
   });

@@ -4,6 +4,36 @@ import { requireUser, requireOwnership } from "./authz";
 import { validateDayKey, clampLimit } from "./validators";
 import type { Id } from "./_generated/dataModel";
 import { applyDashboardMetricsDelta } from "./dashboardMetrics";
+import { getPlanLimitsForTier, normalizeUserPlanTier } from "./planLimits";
+
+const IMAGE_CONTENT_TYPE_PREFIX = "image/";
+const VIDEO_CONTENT_TYPE_PREFIX = "video/";
+
+function bytesToMbLabel(bytes: number): string {
+  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10}MB`;
+}
+
+function assertMemoryTextLimits(args: {
+  title: string;
+  description: string | undefined;
+  planTier: string | undefined;
+}) {
+  const planTier = normalizeUserPlanTier(args.planTier);
+  const limits = getPlanLimitsForTier(planTier).memory;
+
+  if (args.title.length > limits.maxTitleLength) {
+    throw new Error(
+      `Plan limit reached: title supports up to ${limits.maxTitleLength} characters on ${planTier} plan.`,
+    );
+  }
+
+  const descriptionLength = args.description?.length ?? 0;
+  if (descriptionLength > limits.maxDescriptionLength) {
+    throw new Error(
+      `Plan limit reached: description supports up to ${limits.maxDescriptionLength} characters on ${planTier} plan.`,
+    );
+  }
+}
 
 // ── Generate an upload URL for memory media ─────────────────
 export const generateMemoryMediaUploadUrl = mutation({
@@ -28,6 +58,11 @@ export const createMemory = mutation({
     const user = await requireUser(ctx);
 
     validateDayKey(args.dayKey);
+    assertMemoryTextLimits({
+      title: args.title,
+      description: args.description,
+      planTier: user.planTier,
+    });
 
     const id = await ctx.db.insert("memories", {
       userId: user._id,
@@ -94,6 +129,24 @@ export const listRecentMemories = query({
   },
 });
 
+// ── Read current user's memory plan limits ─────────────────
+export const getMyMemoryPlanLimits = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await requireUser(ctx);
+    const planTier = normalizeUserPlanTier(user.planTier);
+    const limits = getPlanLimitsForTier(planTier).memory;
+
+    return {
+      planTier,
+      maxTitleLength: limits.maxTitleLength,
+      maxDescriptionLength: limits.maxDescriptionLength,
+      maxMediaPerMemory: limits.maxMediaPerMemory,
+      maxMediaBytesPerFile: limits.maxMediaBytesPerFile,
+    };
+  },
+});
+
 // ── Update a memory ─────────────────────────────────────────
 export const updateMemory = mutation({
   args: {
@@ -114,12 +167,21 @@ export const updateMemory = mutation({
 
     requireOwnership(user, memory.userId);
 
+    assertMemoryTextLimits({
+      title: args.title ?? memory.title,
+      description: args.description ?? memory.description,
+      planTier: user.planTier,
+    });
+
     const updates: Record<string, unknown> = {};
     if (args.title !== undefined) updates.title = args.title;
     if (args.description !== undefined) updates.description = args.description;
     if (args.mood !== undefined) updates.mood = args.mood;
     if (args.happenedAt !== undefined) updates.happenedAt = args.happenedAt;
-    if (args.dayKey !== undefined) updates.dayKey = args.dayKey;
+    if (args.dayKey !== undefined) {
+      validateDayKey(args.dayKey);
+      updates.dayKey = args.dayKey;
+    }
 
     await ctx.db.patch(args.memoryId, updates);
     return await ctx.db.get(args.memoryId);
@@ -183,6 +245,58 @@ export const addMemoryMedia = mutation({
 
     requireOwnership(user, memory.userId);
 
+    const planTier = normalizeUserPlanTier(user.planTier);
+    const limits = getPlanLimitsForTier(planTier).memory;
+
+    const existingMediaCount = (
+      await ctx.db
+        .query("memoryMedia")
+        .withIndex("by_memory", (q) => q.eq("memoryId", args.memoryId))
+        .take(limits.maxMediaPerMemory + 1)
+    ).length;
+
+    if (existingMediaCount >= limits.maxMediaPerMemory) {
+      throw new Error(
+        `Plan limit reached: up to ${limits.maxMediaPerMemory} media item(s) per memory on ${planTier} plan.`,
+      );
+    }
+
+    const metadata = await ctx.storage.getMetadata(args.storageId as any);
+    if (!metadata) {
+      throw new Error(
+        "Uploaded media file was not found. Please upload again.",
+      );
+    }
+
+    if (metadata.size > limits.maxMediaBytesPerFile) {
+      try {
+        await ctx.storage.delete(args.storageId as any);
+      } catch {
+        // Ignore cleanup failures for oversized uploads.
+      }
+
+      throw new Error(
+        `Plan limit reached: max file size is ${bytesToMbLabel(limits.maxMediaBytesPerFile)} on ${planTier} plan.`,
+      );
+    }
+
+    const contentType = metadata.contentType?.toLowerCase();
+    if (
+      args.type === "image" &&
+      contentType &&
+      !contentType.startsWith(IMAGE_CONTENT_TYPE_PREFIX)
+    ) {
+      throw new Error("Invalid media type: expected an image upload.");
+    }
+
+    if (
+      args.type === "video" &&
+      contentType &&
+      !contentType.startsWith(VIDEO_CONTENT_TYPE_PREFIX)
+    ) {
+      throw new Error("Invalid media type: expected a video upload.");
+    }
+
     const id = await ctx.db.insert("memoryMedia", {
       memoryId: args.memoryId,
       userId: user._id,
@@ -235,30 +349,68 @@ export const listMemoryMediaThumbnailsForMemories = query({
       .map((id) => id as Id<"memories">)
       .slice(0, 100);
 
-    const results: { memoryId: string; thumbnailUrl: string | null }[] = [];
-
-    for (const memoryId of uniqueIds) {
-      const memory = await ctx.db.get(memoryId);
-      if (!memory) continue;
-      if (String(memory.userId) !== String(user._id)) continue;
-
-      const media = await ctx.db
-        .query("memoryMedia")
-        .withIndex("by_memory", (q) => q.eq("memoryId", memory._id))
-        .collect();
-
-      const firstImage = media.find((item) => item.type === "image");
-      const thumbnailUrl = firstImage
-        ? await ctx.storage.getUrl(firstImage.storageId as any)
-        : null;
-
-      results.push({
-        memoryId: String(memoryId),
-        thumbnailUrl,
-      });
+    if (uniqueIds.length === 0) {
+      return [];
     }
 
-    return results;
+    const requestedMemoryIds = new Set(uniqueIds.map((id) => String(id)));
+    const firstImageStorageIdByMemoryId = new Map<string, string>();
+    let cursor: string | null = null;
+
+    while (firstImageStorageIdByMemoryId.size < requestedMemoryIds.size) {
+      const page = await ctx.db
+        .query("memoryMedia")
+        .withIndex("by_user", (q) => q.eq("userId", user._id))
+        .paginate({
+          numItems: 256,
+          cursor,
+        });
+
+      for (const media of page.page) {
+        if (media.type !== "image") continue;
+
+        const memoryId = String(media.memoryId);
+        if (!requestedMemoryIds.has(memoryId)) continue;
+        if (firstImageStorageIdByMemoryId.has(memoryId)) continue;
+
+        firstImageStorageIdByMemoryId.set(memoryId, media.storageId);
+      }
+
+      if (page.isDone || !page.continueCursor) {
+        break;
+      }
+
+      cursor = page.continueCursor;
+    }
+
+    const uniqueStorageIds = Array.from(
+      new Set(firstImageStorageIdByMemoryId.values()),
+    );
+
+    const storageIdToUrlEntries = await Promise.all(
+      uniqueStorageIds.map(
+        async (storageId): Promise<[string, string | null]> => [
+          storageId,
+          await ctx.storage.getUrl(storageId as any),
+        ],
+      ),
+    );
+
+    const storageIdToUrl = new Map<string, string | null>(
+      storageIdToUrlEntries,
+    );
+
+    return uniqueIds.map((memoryId) => {
+      const id = String(memoryId);
+      const storageId = firstImageStorageIdByMemoryId.get(id);
+
+      return {
+        memoryId: id,
+        thumbnailUrl: storageId
+          ? (storageIdToUrl.get(storageId) ?? null)
+          : null,
+      };
+    });
   },
 });
 

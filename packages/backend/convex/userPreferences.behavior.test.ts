@@ -167,11 +167,29 @@ describe("user preferences behavior", () => {
     const updateMyLocationTrackingState = handler<
       {
         locationTrackingEnabled?: boolean;
+        callLogsTrackingEnabled?: boolean;
+        moodDetectionFaceRecognitionEnabled?: boolean;
+        fitnessTrackingEnabled?: boolean;
+        calendarNotificationsTrackingEnabled?: boolean;
+        backgroundLocationTrackingEnabled?: boolean;
         locationPermissionStatus?: "unknown" | "granted" | "denied";
         locationLastUpdatedAt?: number;
         locationLastArea?: string;
+        backgroundLocationAutoDisabledAt?: number;
+        backgroundLocationAutoDisableReason?: string;
+        backgroundLocationBatteryImpactScore?: number;
       },
-      { locationTrackingEnabled?: boolean; locationLastArea?: string } | null
+      {
+        locationTrackingEnabled?: boolean;
+        callLogsTrackingEnabled?: boolean;
+        moodDetectionFaceRecognitionEnabled?: boolean;
+        fitnessTrackingEnabled?: boolean;
+        calendarNotificationsTrackingEnabled?: boolean;
+        backgroundLocationTrackingEnabled?: boolean;
+        locationLastArea?: string;
+        backgroundLocationAutoDisableReason?: string;
+        backgroundLocationBatteryImpactScore?: number;
+      } | null
     >(preferencesModule.updateMyLocationTrackingState);
 
     const noPreference = await updateMyLocationTrackingState(
@@ -191,13 +209,31 @@ describe("user preferences behavior", () => {
       createAuthCtx(db, "clerk_member_001"),
       {
         locationTrackingEnabled: true,
+        callLogsTrackingEnabled: true,
+        moodDetectionFaceRecognitionEnabled: true,
+        fitnessTrackingEnabled: true,
+        calendarNotificationsTrackingEnabled: true,
+        backgroundLocationTrackingEnabled: true,
         locationPermissionStatus: "granted",
         locationLastUpdatedAt: 123,
         locationLastArea: "Colombo",
+        backgroundLocationAutoDisabledAt: 456,
+        backgroundLocationAutoDisableReason:
+          "Auto-disabled due to battery threshold",
+        backgroundLocationBatteryImpactScore: 8.5,
       },
     );
 
     expect(updated?.locationTrackingEnabled).toBe(true);
+    expect(updated?.callLogsTrackingEnabled).toBe(true);
+    expect(updated?.moodDetectionFaceRecognitionEnabled).toBe(true);
+    expect(updated?.fitnessTrackingEnabled).toBe(true);
+    expect(updated?.calendarNotificationsTrackingEnabled).toBe(true);
+    expect(updated?.backgroundLocationTrackingEnabled).toBe(true);
     expect(updated?.locationLastArea).toBe("Colombo");
+    expect(updated?.backgroundLocationAutoDisableReason).toBe(
+      "Auto-disabled due to battery threshold",
+    );
+    expect(updated?.backgroundLocationBatteryImpactScore).toBe(8.5);
   });
 });

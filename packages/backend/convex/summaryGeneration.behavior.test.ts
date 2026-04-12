@@ -198,7 +198,13 @@ describe("summary generation behavior", () => {
   it("rejects generation when no data is available and logs model failures", async () => {
     const generateSummaryForDay = handler<
       { dayKey: string },
-      { success: boolean }
+      {
+        success: boolean;
+        summaryId?: string;
+        generatedAt?: number;
+        errorCode?: string;
+        message?: string;
+      }
     >(summaryGenerationModule.generateSummaryForDay);
 
     const noDataRunQuery = vi
@@ -215,9 +221,12 @@ describe("summary generation behavior", () => {
         },
         { dayKey: "2026-04-02" },
       ),
-    ).rejects.toThrow(
-      "No memories, day metadata, or integration sync data found",
-    );
+    ).resolves.toEqual({
+      success: false,
+      errorCode: "no_input_data",
+      message:
+        "Add at least one memory, day note/rating/tag, or synced integration data before generating a summary.",
+    });
 
     const fetchMock = vi.fn().mockResolvedValue(
       new Response("bad request", {
@@ -247,7 +256,11 @@ describe("summary generation behavior", () => {
         },
         { dayKey: "2026-04-02" },
       ),
-    ).rejects.toThrow("OpenAI request failed (400)");
+    ).resolves.toEqual({
+      success: false,
+      errorCode: "model_generation_failed",
+      message: "OpenAI request failed (400)",
+    });
 
     expect(runMutation).toHaveBeenCalledTimes(2);
   });

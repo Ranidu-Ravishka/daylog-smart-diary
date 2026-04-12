@@ -8,6 +8,10 @@ import {
   MEMORY_MOOD_OPTIONS,
   SETTINGS_DEFAULTS,
 } from "@repo/ui/lib/constants";
+import {
+  getDayKeyForTimestamp,
+  getResolvedTimeZone,
+} from "@repo/ui/lib/day-window";
 import type { GenericId } from "convex/values";
 import { useUser } from "@clerk/nextjs";
 import { useState, useEffect } from "react";
@@ -93,11 +97,6 @@ type IntegrationSyncRunDoc = {
   lastError?: string;
 };
 
-function getTodayDayKey(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-}
-
 function formatDateTime(timestamp?: number): string {
   if (!timestamp) return "Never";
   return new Date(timestamp).toLocaleString();
@@ -116,7 +115,8 @@ export default function SettingsPage() {
   const searchParams = useSearchParams();
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
   const { user } = useUser();
-  const todayDayKey = getTodayDayKey();
+  const userTimeZone = getResolvedTimeZone();
+  const todayDayKey = getDayKeyForTimestamp(Date.now(), userTimeZone);
 
   const preferences = useQuery(
     api.userPreferences.getMyUserPreferences,
@@ -395,6 +395,7 @@ export default function SettingsPage() {
       const result = await syncMyIntegrationForDay({
         provider,
         dayKey: todayDayKey,
+        timeZone: userTimeZone,
       });
 
       if (result?.idempotent) {

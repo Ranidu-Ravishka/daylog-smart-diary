@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { toastError, toastSuccess } from "@/lib/toast";
 
 export default function AccountPage() {
   const { user } = useUser();
@@ -27,8 +28,10 @@ export default function AccountPage() {
     try {
       await user?.delete();
       await signOut();
+      toastSuccess("Account deleted successfully.");
     } catch (err) {
       console.error("Failed to delete account:", err);
+      toastError("Failed to delete account. Please try again.");
       setIsDeleting(false);
     }
   };

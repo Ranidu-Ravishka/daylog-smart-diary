@@ -15,6 +15,35 @@ export const OAUTH_PROVIDERS: OAuthProvider[] = [
   "spotify",
 ];
 
+function isPlaceholderCredential(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return true;
+
+  if (
+    normalized === "changeme" ||
+    normalized === "replace-me" ||
+    normalized === "replace_this" ||
+    normalized === "replace-this"
+  ) {
+    return true;
+  }
+
+  return (
+    normalized.startsWith("your_") ||
+    normalized.startsWith("your-") ||
+    normalized.includes("placeholder") ||
+    normalized.includes("example") ||
+    normalized.includes("<")
+  );
+}
+
+function readOAuthCredential(name: string): string {
+  const value = process.env[name]?.trim() ?? "";
+  if (!value) return "";
+  if (isPlaceholderCredential(value)) return "";
+  return value;
+}
+
 export function isOAuthProvider(provider: string): provider is OAuthProvider {
   return OAUTH_PROVIDERS.includes(provider as OAuthProvider);
 }
@@ -24,8 +53,8 @@ export function getOAuthProviderConfig(
 ): OAuthProviderConfig {
   switch (provider) {
     case "google_calendar": {
-      const clientId = process.env.GOOGLE_CLIENT_ID ?? "";
-      const clientSecret = process.env.GOOGLE_CLIENT_SECRET ?? "";
+      const clientId = readOAuthCredential("GOOGLE_CLIENT_ID");
+      const clientSecret = readOAuthCredential("GOOGLE_CLIENT_SECRET");
       return {
         authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
         tokenUrl: "https://oauth2.googleapis.com/token",
@@ -35,8 +64,8 @@ export function getOAuthProviderConfig(
       };
     }
     case "google_fit": {
-      const clientId = process.env.GOOGLE_CLIENT_ID ?? "";
-      const clientSecret = process.env.GOOGLE_CLIENT_SECRET ?? "";
+      const clientId = readOAuthCredential("GOOGLE_CLIENT_ID");
+      const clientSecret = readOAuthCredential("GOOGLE_CLIENT_SECRET");
       return {
         authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
         tokenUrl: "https://oauth2.googleapis.com/token",
@@ -49,8 +78,8 @@ export function getOAuthProviderConfig(
       };
     }
     case "spotify": {
-      const clientId = process.env.SPOTIFY_CLIENT_ID ?? "";
-      const clientSecret = process.env.SPOTIFY_CLIENT_SECRET ?? "";
+      const clientId = readOAuthCredential("SPOTIFY_CLIENT_ID");
+      const clientSecret = readOAuthCredential("SPOTIFY_CLIENT_SECRET");
       return {
         authorizationUrl: "https://accounts.spotify.com/authorize",
         tokenUrl: "https://accounts.spotify.com/api/token",

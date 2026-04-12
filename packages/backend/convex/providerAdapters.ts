@@ -3,6 +3,7 @@ import {
   type IntegrationProvider,
   sanitizeProviderInput,
 } from "./integrationProviders";
+import { getDayWindow } from "../../ui/lib/day-window";
 
 export type ProviderAdapter<Input, Output> = {
   id: string;
@@ -89,10 +90,49 @@ type IntegrationDailySyncMetrics = {
   spendingTotal?: number;
 };
 
+type NormalizedIntegrationDailyContext = {
+  schemaVersion?: number;
+  location?: {
+    mode: "foreground" | "background_controlled";
+    totalTrackedMinutes?: number;
+    totalDistanceMeters?: number;
+    stayPoints?: Array<{
+      label: string;
+      startedAt: number;
+      endedAt: number;
+      durationMinutes: number;
+      latitude?: number;
+      longitude?: number;
+      radiusMeters?: number;
+    }>;
+  };
+  fitness?: {
+    steps?: number;
+    distanceMeters?: number;
+    activeMinutes?: number;
+    idleMinutes?: number;
+    source?: string;
+  };
+  calendar?: {
+    meetingsCount?: number;
+    busyMinutes?: number;
+    remindersCount?: number;
+    eventTitles?: string[];
+  };
+  activitySummary?: {
+    callsCount?: number;
+    callDurationMinutes?: number;
+    mood?: string;
+    moodConfidence?: number;
+    activityLevel?: "active" | "mixed" | "idle";
+  };
+};
+
 export type NormalizedIntegrationDailySync = {
   metrics?: IntegrationDailySyncMetrics;
   summary?: string;
   signals?: string[];
+  context?: NormalizedIntegrationDailyContext;
 };
 
 type ProviderRequestJson = <T>(
@@ -105,6 +145,7 @@ type ProviderRequestJson = <T>(
 type IntegrationSyncAdapterInput = {
   accessToken: string;
   dayKey: string;
+  timeZone: string;
   syncStartedAt: number;
   requestJson: ProviderRequestJson;
 };
@@ -114,10 +155,12 @@ type IntegrationSyncAdapter = ProviderAdapter<
   NormalizedIntegrationDailySync
 >;
 
-function getUtcDayRange(dayKey: string) {
-  const start = new Date(`${dayKey}T00:00:00.000Z`).getTime();
-  const end = new Date(`${dayKey}T23:59:59.999Z`).getTime();
-  return { start, end };
+function getProviderDayRange(dayKey: string, timeZone: string) {
+  const window = getDayWindow(dayKey, timeZone);
+  return {
+    start: window.startMs,
+    end: window.endMs,
+  };
 }
 
 function sanitizeSignals(signals: string[] | undefined) {
@@ -129,8 +172,14 @@ function sanitizeSignals(signals: string[] | undefined) {
 
 const googleCalendarAdapter: IntegrationSyncAdapter = {
   id: "google_calendar",
-  execute: async ({ accessToken, dayKey, syncStartedAt, requestJson }) => {
-    const { start, end } = getUtcDayRange(dayKey);
+  execute: async ({
+    accessToken,
+    dayKey,
+    timeZone,
+    syncStartedAt,
+    requestJson,
+  }) => {
+    const { start, end } = getProviderDayRange(dayKey, timeZone);
 
     const result = await requestJson<{
       items?: Array<{
@@ -183,14 +232,28 @@ const googleCalendarAdapter: IntegrationSyncAdapter = {
         busyMinutes > 0 ? `${busyMinutes} busy minutes` : "No timed events",
         ...topEventTitles,
       ]),
+      context: {
+        schemaVersion: 1,
+        calendar: {
+          meetingsCount: events.length > 0 ? events.length : undefined,
+          busyMinutes: busyMinutes > 0 ? busyMinutes : undefined,
+          eventTitles: topEventTitles,
+        },
+      },
     };
   },
 };
 
 const spotifyAdapter: IntegrationSyncAdapter = {
   id: "spotify",
-  execute: async ({ accessToken, dayKey, syncStartedAt, requestJson }) => {
-    const { start, end } = getUtcDayRange(dayKey);
+  execute: async ({
+    accessToken,
+    dayKey,
+    timeZone,
+    syncStartedAt,
+    requestJson,
+  }) => {
+    const { start, end } = getProviderDayRange(dayKey, timeZone);
 
     const result = await requestJson<{
       items?: Array<{
@@ -245,8 +308,14 @@ const spotifyAdapter: IntegrationSyncAdapter = {
 
 const googleFitAdapter: IntegrationSyncAdapter = {
   id: "google_fit",
-  execute: async ({ accessToken, dayKey, syncStartedAt, requestJson }) => {
-    const { start, end } = getUtcDayRange(dayKey);
+  execute: async ({
+    accessToken,
+    dayKey,
+    timeZone,
+    syncStartedAt,
+    requestJson,
+  }) => {
+    const { start, end } = getProviderDayRange(dayKey, timeZone);
 
     const aggregateResponse = await requestJson<{
       bucket?: Array<{
@@ -313,6 +382,13 @@ const googleFitAdapter: IntegrationSyncAdapter = {
           ? `${sleepMinutes} sleep minutes`
           : "No sleep segments",
       ]),
+      context: {
+        schemaVersion: 1,
+        fitness: {
+          steps: steps > 0 ? steps : undefined,
+          source: "google_fit",
+        },
+      },
     };
   },
 };
@@ -368,6 +444,22 @@ type SummaryModelAdapter = ProviderAdapter<
 
 function isRetryableSummaryStatus(status: number): boolean {
   return status === 429 || status >= 500;
+}
+
+function getSafeOpenAiErrorMessage(status: number): string {
+  if (status === 401 || status === 403) {
+    return `OpenAI authentication failed (${status})`;
+  }
+
+  if (status === 429) {
+    return "OpenAI rate limit reached (429). Please try again shortly.";
+  }
+
+  if (status >= 500) {
+    return `OpenAI service is temporarily unavailable (${status}). Please try again shortly.`;
+  }
+
+  return `OpenAI request failed (${status})`;
 }
 
 function clampHighlights(highlights: unknown): string[] {
@@ -499,13 +591,20 @@ const openAiSummaryAdapter: SummaryModelAdapter = {
 
         if (!response.ok) {
           const status = response.status;
-          const bodyText = await response.text();
+
+          // Drain the response body without propagating provider payloads to callers.
+          try {
+            await response.text();
+          } catch {
+            // Ignore body read failures; the status code is enough for safe handling.
+          }
+
           throw new ProviderAdapterError({
             provider: "openai",
             operation: "summary_generation",
             statusCode: status,
             retryable: isRetryableSummaryStatus(status),
-            message: `OpenAI request failed (${status}): ${bodyText.slice(0, 300)}`,
+            message: getSafeOpenAiErrorMessage(status),
           });
         }
 

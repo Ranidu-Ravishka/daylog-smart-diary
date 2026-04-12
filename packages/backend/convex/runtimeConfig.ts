@@ -6,14 +6,28 @@ const RETENTION_DAY_SUMMARIES_DAYS_ENV = "RETENTION_DAY_SUMMARIES_DAYS";
 const RETENTION_INTEGRATION_DATA_DAYS_ENV = "RETENTION_INTEGRATION_DATA_DAYS";
 const RETENTION_LOCATION_SIGNALS_DAYS_ENV = "RETENTION_LOCATION_SIGNALS_DAYS";
 const RETENTION_SUMMARY_EVENTS_DAYS_ENV = "RETENTION_SUMMARY_EVENTS_DAYS";
+const RETENTION_EXPORT_JOBS_DAYS_ENV = "RETENTION_EXPORT_JOBS_DAYS";
 const RETENTION_DELETE_BATCH_SIZE_ENV = "RETENTION_DELETE_BATCH_SIZE";
 const SUMMARY_LOW_QUALITY_THRESHOLD_ENV = "SUMMARY_LOW_QUALITY_THRESHOLD";
+const ENABLE_BACKGROUND_LOCATION_TRACKING_ENV =
+  "ENABLE_BACKGROUND_LOCATION_TRACKING";
+const BACKGROUND_LOCATION_BATCH_MAX_POINTS_ENV =
+  "BACKGROUND_LOCATION_BATCH_MAX_POINTS";
+const BG_LOC_MAX_UPDATES_PER_HOUR_ENV = "BG_LOC_MAX_UPDATES_PER_HOUR";
+const BG_LOC_BATCH_FLUSH_INTERVAL_MIN_ENV = "BG_LOC_BATCH_FLUSH_INTERVAL_MIN";
+const BG_LOC_MAX_BATTERY_DRAIN_PCT_PER_HR_ENV =
+  "BG_LOC_MAX_BATTERY_DRAIN_PCT_PER_HR";
 
 type NumericConfig = {
   envName: string;
   fallback: number;
   min: number;
   max: number;
+};
+
+type BooleanConfig = {
+  envName: string;
+  fallback: boolean;
 };
 
 function parseBoundedInt(config: NumericConfig): number {
@@ -46,6 +60,24 @@ function parseBoundedNumber(config: NumericConfig): number {
   return parsed;
 }
 
+function parseBoolean(config: BooleanConfig): boolean {
+  const raw = process.env[config.envName]?.trim().toLowerCase();
+  if (!raw) return config.fallback;
+
+  if (raw === "1" || raw === "true" || raw === "yes" || raw === "on") {
+    return true;
+  }
+
+  if (raw === "0" || raw === "false" || raw === "no" || raw === "off") {
+    return false;
+  }
+
+  console.warn(
+    `[config] Invalid ${config.envName}='${raw}'. Falling back to ${String(config.fallback)}.`,
+  );
+  return config.fallback;
+}
+
 export function getSummaryDailyGenerationLimit(): number {
   const raw = process.env[SUMMARY_DAILY_GENERATION_LIMIT_ENV]?.trim();
 
@@ -72,7 +104,8 @@ export type RetentionPolicyKey =
   | "daySummaries"
   | "integrationDailyData"
   | "locationSignals"
-  | "summaryGenerationEvents";
+  | "summaryGenerationEvents"
+  | "exportJobs";
 
 export function getRetentionPolicyDefaults(): Record<
   RetentionPolicyKey,
@@ -133,7 +166,21 @@ export function getRetentionPolicyDefaults(): Record<
       sensitive: false,
       enabled: true,
     },
+    exportJobs: {
+      retentionDays: parseBoundedInt({
+        envName: RETENTION_EXPORT_JOBS_DAYS_ENV,
+        fallback: 14,
+        min: 1,
+        max: 3650,
+      }),
+      sensitive: true,
+      enabled: true,
+    },
   };
+}
+
+export function getExportJobRetentionDays(): number {
+  return getRetentionPolicyDefaults().exportJobs.retentionDays;
 }
 
 export function getRetentionDeleteBatchSize(): number {
@@ -151,5 +198,48 @@ export function getSummaryLowQualityThreshold(): number {
     fallback: 0.55,
     min: 0,
     max: 1,
+  });
+}
+
+export function getEnableBackgroundLocationTracking(): boolean {
+  return parseBoolean({
+    envName: ENABLE_BACKGROUND_LOCATION_TRACKING_ENV,
+    fallback: false,
+  });
+}
+
+export function getBackgroundLocationBatchMaxPoints(): number {
+  return parseBoundedInt({
+    envName: BACKGROUND_LOCATION_BATCH_MAX_POINTS_ENV,
+    fallback: 32,
+    min: 8,
+    max: 500,
+  });
+}
+
+export function getBackgroundLocationMaxUpdatesPerHour(): number {
+  return parseBoundedInt({
+    envName: BG_LOC_MAX_UPDATES_PER_HOUR_ENV,
+    fallback: 120,
+    min: 20,
+    max: 2000,
+  });
+}
+
+export function getBackgroundLocationBatchFlushIntervalMinutes(): number {
+  return parseBoundedInt({
+    envName: BG_LOC_BATCH_FLUSH_INTERVAL_MIN_ENV,
+    fallback: 15,
+    min: 5,
+    max: 240,
+  });
+}
+
+export function getBackgroundLocationMaxBatteryDrainPercentPerHour(): number {
+  return parseBoundedInt({
+    envName: BG_LOC_MAX_BATTERY_DRAIN_PCT_PER_HR_ENV,
+    fallback: 12,
+    min: 1,
+    max: 60,
   });
 }

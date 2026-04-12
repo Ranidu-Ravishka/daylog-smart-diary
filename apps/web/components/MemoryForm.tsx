@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
-import { useMutation } from "convex/react";
+import { makeFunctionReference } from "convex/server";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "@repo/backend/convex";
 import { MOOD_EMOJI, MOODS } from "@repo/ui/lib/constants";
 import type { Id } from "@repo/backend";
@@ -27,6 +28,22 @@ const ACCEPTED_IMAGE_TYPES = new Set([
   "image/heic",
   "image/heif",
 ]);
+
+const DEFAULT_MAX_MEDIA_PER_MEMORY = 8;
+const DEFAULT_MAX_MEDIA_BYTES_PER_FILE = 10 * 1024 * 1024;
+
+const myMemoryPlanLimitsRef = makeFunctionReference<"query">(
+  "memories:getMyMemoryPlanLimits",
+);
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024 * 1024) {
+    return `${Math.ceil(bytes / 1024)}KB`;
+  }
+
+  const mb = Math.round((bytes / (1024 * 1024)) * 10) / 10;
+  return `${mb}MB`;
+}
 
 type SelectedMediaFile = {
   id: string;
@@ -86,6 +103,18 @@ export function MemoryForm({
     api.memories.generateMemoryMediaUploadUrl,
   );
   const addMemoryMedia = useMutation(api.memories.addMemoryMedia);
+  const memoryPlanLimits = useQuery(myMemoryPlanLimitsRef, {}) as
+    | {
+        planTier: string;
+        maxMediaPerMemory: number;
+        maxMediaBytesPerFile: number;
+      }
+    | undefined;
+
+  const maxMediaPerMemory =
+    memoryPlanLimits?.maxMediaPerMemory ?? DEFAULT_MAX_MEDIA_PER_MEMORY;
+  const maxMediaBytesPerFile =
+    memoryPlanLimits?.maxMediaBytesPerFile ?? DEFAULT_MAX_MEDIA_BYTES_PER_FILE;
 
   useEffect(() => {
     const previewUrls = previewUrlsRef.current;
@@ -118,10 +147,26 @@ export function MemoryForm({
 
     const accepted: SelectedMediaFile[] = [];
     let skippedUnsupported = 0;
+    let skippedOversize = 0;
+    let skippedPlanLimit = 0;
+    const remainingSlots = Math.max(
+      maxMediaPerMemory - selectedFiles.length,
+      0,
+    );
 
     for (const file of files) {
+      if (accepted.length >= remainingSlots) {
+        skippedPlanLimit += 1;
+        continue;
+      }
+
       if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
         skippedUnsupported += 1;
+        continue;
+      }
+
+      if (file.size > maxMediaBytesPerFile) {
+        skippedOversize += 1;
         continue;
       }
 
@@ -143,6 +188,18 @@ export function MemoryForm({
     if (skippedUnsupported > 0) {
       toastError(
         `${skippedUnsupported} file(s) skipped. Supported types: JPG, PNG, WEBP, GIF, HEIC/HEIF.`,
+      );
+    }
+
+    if (skippedOversize > 0) {
+      toastError(
+        `${skippedOversize} file(s) skipped. Max size is ${formatFileSize(maxMediaBytesPerFile)} per file on your current plan.`,
+      );
+    }
+
+    if (skippedPlanLimit > 0) {
+      toastError(
+        `${skippedPlanLimit} file(s) skipped. Your current plan allows up to ${maxMediaPerMemory} media file(s) per memory.`,
       );
     }
 
@@ -387,6 +444,10 @@ export function MemoryForm({
                 disabled={isLoading}
               />
             </div>
+            <p className="text-xs text-muted-foreground">
+              Plan limits: up to {maxMediaPerMemory} file(s) per memory, max{" "}
+              {formatFileSize(maxMediaBytesPerFile)} per file.
+            </p>
             {selectedFileCount > 0 && (
               <div className="grid grid-cols-3 gap-2 pt-1">
                 {selectedFiles.map((selectedFile) => (
