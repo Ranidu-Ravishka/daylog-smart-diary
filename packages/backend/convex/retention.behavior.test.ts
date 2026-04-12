@@ -255,6 +255,7 @@ describe("retention behavior", () => {
           integrationDailyData: number;
           locationSignals: number;
           summaryGenerationEvents: number;
+          exportJobs: number;
         };
       }
     >(retentionModule.runRetentionCleanupNow);
@@ -273,6 +274,7 @@ describe("retention behavior", () => {
       integrationDailyData: 1,
       locationSignals: 1,
       summaryGenerationEvents: 1,
+      exportJobs: 0,
     });
 
     expect(db.getTable("memories").map((row) => row._id)).toEqual([

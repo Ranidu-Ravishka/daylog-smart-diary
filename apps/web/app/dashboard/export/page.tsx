@@ -1,7 +1,12 @@
 "use client";
 
-import { useConvex, useConvexAuth } from "convex/react";
-import { api } from "@repo/backend/convex";
+import { makeFunctionReference } from "convex/server";
+import {
+  useAction,
+  useConvex,
+  useConvexAuth,
+  usePaginatedQuery,
+} from "convex/react";
 import { useState } from "react";
 import { Download, Check, FileText, BookOpen, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,160 +15,137 @@ import { Label } from "@/components/ui/label";
 import { toastError, toastSuccess } from "@/lib/toast";
 
 type ExportFormat = "json" | "txt";
-type ExportDataset = "summaries" | "memories" | "days" | "integrationDailyData";
+type ExportJobStatus = "queued" | "running" | "ready" | "failed";
 
-type ExportPayload = {
+type PreparedExportArtifact = {
+  jobId: string;
+  status: ExportJobStatus;
+  requestedAt: number;
   exportedAt: number;
-  summaries: Array<{
-    dayKey: string;
-    story: string;
-    highlights: string[];
-    metrics?: {
-      steps?: number;
-      sleepMinutes?: number;
-      screenTimeMinutes?: number;
-      spendingTotal?: number;
-    };
-    sourcesUsed: string[];
-    generatedAt: number;
-  }>;
-  memories: Array<{
-    dayKey: string;
-    title: string;
-    description?: string;
-    mood?: string;
-    happenedAt: number;
-  }>;
-  days: Array<{
-    dayKey: string;
-    rating?: number;
-    manualNotes: string[];
-    peopleTags: string[];
-  }>;
-  integrationDailyData: Array<{
-    provider: string;
-    dayKey: string;
-    syncedAt: number;
-    summary?: string;
-    metrics?: {
-      steps?: number;
-      sleepMinutes?: number;
-      screenTimeMinutes?: number;
-      spendingTotal?: number;
-    };
-    signals?: string[];
-  }>;
+  completedAt: number;
+  expiresAt: number;
+  format: ExportFormat;
+  fileName: string;
+  storageId: string;
+  downloadUrl: string;
+  artifactMimeType: string;
+  artifactSizeBytes: number;
+  counts: {
+    summaries: number;
+    memories: number;
+    days: number;
+    integrationDailyData: number;
+  };
 };
 
-type ExportPageResponse<TItem> = {
-  exportedAt: number;
-  dataset: ExportDataset;
-  page: TItem[];
-  continueCursor: string | null;
-  isDone: boolean;
+type ExportJobListRow = {
+  jobId: string;
+  status: ExportJobStatus;
+  format: ExportFormat;
+  includeLocationSignals: boolean;
+  requestedAt: number;
+  startedAt?: number;
+  completedAt?: number;
+  failedAt?: number;
+  updatedAt: number;
+  error?: string;
+  expiresAt: number;
+  counts: {
+    summaries: number;
+    memories: number;
+    days: number;
+    integrationDailyData: number;
+  } | null;
+  fileName: string | null;
+  artifactMimeType: string | null;
+  artifactSizeBytes: number | null;
+  downloadUrl: string | null;
 };
 
-function toTextExport(data: ExportPayload) {
-  const parts: string[] = [];
-  parts.push(`DayLog Export`);
-  parts.push(`Exported at: ${new Date(data.exportedAt).toISOString()}`);
-  parts.push("");
+type ExportJobDownload = {
+  jobId: string;
+  status: ExportJobStatus;
+  format: ExportFormat;
+  fileName: string | null;
+  artifactMimeType: string | null;
+  artifactSizeBytes: number | null;
+  downloadUrl: string;
+  expiresAt: number;
+};
 
-  parts.push("=== Days ===");
-  for (const day of data.days) {
-    parts.push(`- ${day.dayKey}`);
-    parts.push(`  Rating: ${day.rating ?? "—"}`);
-    parts.push(`  Notes: ${day.manualNotes.length}`);
-    parts.push(`  People tags: ${day.peopleTags.length}`);
+const prepareMyDiaryExportArtifactRef = makeFunctionReference<"action">(
+  "summaries:prepareMyDiaryExportArtifact",
+);
+const listMyExportJobsPaginatedRef = makeFunctionReference<"query">(
+  "summaries:listMyExportJobsPaginated",
+);
+const getMyExportJobDownloadUrlRef = makeFunctionReference<"query">(
+  "summaries:getMyExportJobDownloadUrl",
+);
+
+function formatDateTime(value?: number): string {
+  if (!value) return "-";
+  return new Date(value).toLocaleString();
+}
+
+function formatBytes(bytes: number | null): string {
+  if (bytes === null || bytes < 0) return "-";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round((bytes / 1024) * 10) / 10} KB`;
+  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`;
+}
+
+function statusBadgeClass(status: ExportJobStatus): string {
+  if (status === "ready") {
+    return "bg-emerald-100 text-emerald-800 border-emerald-200";
   }
-  parts.push("");
-
-  parts.push("=== Memories ===");
-  for (const memory of data.memories) {
-    parts.push(`- [${memory.dayKey}] ${memory.title}`);
-    parts.push(`  Mood: ${memory.mood ?? "—"}`);
-    parts.push(`  Time: ${new Date(memory.happenedAt).toISOString()}`);
-    if (memory.description?.trim()) {
-      parts.push(`  Description: ${memory.description.trim()}`);
-    }
+  if (status === "failed") {
+    return "bg-red-100 text-red-800 border-red-200";
   }
-  parts.push("");
-
-  parts.push("=== Summaries ===");
-  for (const summary of data.summaries) {
-    parts.push(`- [${summary.dayKey}]`);
-    parts.push(`  Story: ${summary.story}`);
-    if (summary.highlights.length > 0) {
-      parts.push(`  Highlights: ${summary.highlights.join(" | ")}`);
-    }
-    if (summary.metrics) {
-      const metricLines = [
-        summary.metrics.steps ? `steps=${summary.metrics.steps}` : null,
-        summary.metrics.sleepMinutes
-          ? `sleepMinutes=${summary.metrics.sleepMinutes}`
-          : null,
-        summary.metrics.screenTimeMinutes
-          ? `screenTimeMinutes=${summary.metrics.screenTimeMinutes}`
-          : null,
-        summary.metrics.spendingTotal !== undefined
-          ? `spendingTotal=${summary.metrics.spendingTotal}`
-          : null,
-      ].filter(Boolean);
-      if (metricLines.length > 0) {
-        parts.push(`  Metrics: ${metricLines.join(", ")}`);
-      }
-    }
-  }
-  parts.push("");
-
-  parts.push("=== Integration Daily Data ===");
-  for (const item of data.integrationDailyData) {
-    parts.push(`- [${item.dayKey}] ${item.provider}`);
-    if (item.summary) parts.push(`  Summary: ${item.summary}`);
-    if ((item.signals?.length ?? 0) > 0) {
-      parts.push(`  Signals: ${(item.signals ?? []).join(" | ")}`);
-    }
+  if (status === "running") {
+    return "bg-blue-100 text-blue-800 border-blue-200";
   }
 
-  return parts.join("\n");
+  return "bg-amber-100 text-amber-800 border-amber-200";
+}
+
+function triggerBrowserDownload(url: string, fileName?: string | null) {
+  const link = document.createElement("a");
+  link.href = url;
+  if (fileName && fileName.trim()) {
+    link.download = fileName;
+  }
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 
 export default function ExportPage() {
+  const prepareMyDiaryExportArtifact = useAction(
+    prepareMyDiaryExportArtifactRef,
+  );
   const convex = useConvex();
   const { isAuthenticated } = useConvexAuth();
   const [isExporting, setIsExporting] = useState(false);
   const [exported, setExported] = useState(false);
+  const [downloadingJobId, setDownloadingJobId] = useState<string | null>(null);
   const [format, setFormat] = useState<ExportFormat>("json");
   const [includeLocationSignals, setIncludeLocationSignals] = useState(false);
-  const [preparedExport, setPreparedExport] = useState<ExportPayload | null>(
-    null,
+  const [preparedExport, setPreparedExport] =
+    useState<PreparedExportArtifact | null>(null);
+
+  const {
+    results: exportJobResults,
+    status: exportJobsStatus,
+    loadMore: loadMoreExportJobs,
+  } = usePaginatedQuery(
+    listMyExportJobsPaginatedRef,
+    isAuthenticated ? {} : "skip",
+    { initialNumItems: 10 },
   );
+  const exportJobs = exportJobResults as ExportJobListRow[];
 
-  const fetchDatasetPages = async <TItem,>(
-    dataset: ExportDataset,
-  ): Promise<TItem[]> => {
-    const rows: TItem[] = [];
-    let cursor: string | undefined;
-
-    while (true) {
-      const response = (await convex.query(api.summaries.exportMyDiaryData, {
-        dataset,
-        cursor,
-        pageSize: 250,
-        includeLocationSignals,
-      })) as ExportPageResponse<TItem>;
-
-      rows.push(...response.page);
-
-      if (response.isDone || !response.continueCursor) {
-        break;
-      }
-
-      cursor = response.continueCursor;
-    }
-
-    return rows;
-  };
+  const latestReadyJob = exportJobs.find((job) => job.status === "ready");
 
   const handleExport = async () => {
     if (!isAuthenticated) {
@@ -174,54 +156,16 @@ export default function ExportPage() {
     setIsExporting(true);
 
     try {
-      const summaries =
-        await fetchDatasetPages<ExportPayload["summaries"][number]>(
-          "summaries",
-        );
-      const memories =
-        await fetchDatasetPages<ExportPayload["memories"][number]>("memories");
-      const days =
-        await fetchDatasetPages<ExportPayload["days"][number]>("days");
-      const integrationDailyData = await fetchDatasetPages<
-        ExportPayload["integrationDailyData"][number]
-      >("integrationDailyData");
+      const exportArtifact = (await prepareMyDiaryExportArtifact({
+        format,
+        includeLocationSignals,
+      })) as PreparedExportArtifact;
 
-      const exportData: ExportPayload = {
-        exportedAt: Date.now(),
-        summaries,
-        memories,
-        days,
-        integrationDailyData,
-      };
-
-      setPreparedExport(exportData);
-
-      const datePart = new Date().toISOString().split("T")[0];
-      const fileName = `daylog-export-${datePart}.${format}`;
-
-      const payload =
-        format === "json"
-          ? JSON.stringify(
-              {
-                ...exportData,
-                exportedAt: new Date(exportData.exportedAt).toISOString(),
-              },
-              null,
-              2,
-            )
-          : toTextExport(exportData);
-
-      const blob = new Blob([payload], {
-        type: format === "json" ? "application/json" : "text/plain",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      setPreparedExport(exportArtifact);
+      triggerBrowserDownload(
+        exportArtifact.downloadUrl,
+        exportArtifact.fileName,
+      );
 
       setExported(true);
       toastSuccess("Data export downloaded.");
@@ -234,10 +178,33 @@ export default function ExportPage() {
     }
   };
 
-  const totalSummaries = preparedExport?.summaries.length ?? 0;
-  const totalMemories = preparedExport?.memories.length ?? 0;
-  const totalDays = preparedExport?.days.length ?? 0;
-  const totalIntegrationRows = preparedExport?.integrationDailyData.length ?? 0;
+  const handleDownloadPreviousExport = async (jobId: string) => {
+    setDownloadingJobId(jobId);
+    try {
+      const payload = (await convex.query(getMyExportJobDownloadUrlRef, {
+        jobId,
+      })) as ExportJobDownload;
+
+      triggerBrowserDownload(payload.downloadUrl, payload.fileName);
+      toastSuccess("Export downloaded.");
+    } catch (error) {
+      console.error("Failed to download historical export", error);
+      toastError("Unable to download this export right now.");
+    } finally {
+      setDownloadingJobId(null);
+    }
+  };
+
+  const totalSummaries =
+    preparedExport?.counts.summaries ?? latestReadyJob?.counts?.summaries ?? 0;
+  const totalMemories =
+    preparedExport?.counts.memories ?? latestReadyJob?.counts?.memories ?? 0;
+  const totalDays =
+    preparedExport?.counts.days ?? latestReadyJob?.counts?.days ?? 0;
+  const totalIntegrationRows =
+    preparedExport?.counts.integrationDailyData ??
+    latestReadyJob?.counts?.integrationDailyData ??
+    0;
 
   return (
     <div className="max-w-xl">
@@ -246,7 +213,6 @@ export default function ExportPage() {
         Download a copy of your personal data in JSON or plain text.
       </p>
 
-      {/* ── Overview ──────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-3 mb-6">
         <Card>
           <CardContent className="p-5 flex items-center gap-3">
@@ -287,7 +253,6 @@ export default function ExportPage() {
         </Card>
       </div>
 
-      {/* ── What's included ───────────────────────────── */}
       <Card className="mb-8">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">What&apos;s included</CardTitle>
@@ -301,9 +266,9 @@ export default function ExportPage() {
               "Integration sync summaries and daily signals",
               "Timestamps for all entries",
               "Exported in JSON or plain text",
-            ].map((item, i) => (
+            ].map((item, index) => (
               <li
-                key={i}
+                key={index}
                 className="flex items-start gap-2.5 text-sm text-muted-foreground"
               >
                 <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -364,15 +329,97 @@ export default function ExportPage() {
         </CardContent>
       </Card>
 
-      {/* ── Download ──────────────────────────────────── */}
       <Button onClick={() => void handleExport()} disabled={isExporting}>
         <Download className="h-4 w-4" />
         {isExporting
-          ? "Preparing…"
+          ? "Preparing..."
           : exported
             ? "Downloaded"
             : "Download my data"}
       </Button>
+
+      <Card className="mt-8">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">Recent exports</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {exportJobs.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              No export jobs yet. Create your first export above.
+            </p>
+          )}
+
+          {exportJobs.map((job) => (
+            <div
+              key={job.jobId}
+              className="rounded-md border p-3 flex flex-col gap-2"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">
+                    {job.fileName ?? `Export ${job.format.toUpperCase()}`}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Requested: {formatDateTime(job.requestedAt)}
+                  </p>
+                </div>
+                <span
+                  className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${statusBadgeClass(
+                    job.status,
+                  )}`}
+                >
+                  {job.status}
+                </span>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                Format: {job.format.toUpperCase()} | Size:{" "}
+                {formatBytes(job.artifactSizeBytes)} | Expires:{" "}
+                {formatDateTime(job.expiresAt)}
+              </p>
+
+              {job.counts && (
+                <p className="text-xs text-muted-foreground">
+                  Summaries {job.counts.summaries} | Memories{" "}
+                  {job.counts.memories} | Days {job.counts.days} | Integrations{" "}
+                  {job.counts.integrationDailyData}
+                </p>
+              )}
+
+              {job.status === "failed" && job.error && (
+                <p className="text-xs text-red-600">{job.error}</p>
+              )}
+
+              {job.status === "ready" && (
+                <div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={downloadingJobId === job.jobId}
+                    onClick={() => void handleDownloadPreviousExport(job.jobId)}
+                  >
+                    {downloadingJobId === job.jobId
+                      ? "Downloading..."
+                      : "Download again"}
+                  </Button>
+                </div>
+              )}
+            </div>
+          ))}
+
+          {exportJobsStatus === "CanLoadMore" && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => loadMoreExportJobs(10)}
+            >
+              Load more exports
+            </Button>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

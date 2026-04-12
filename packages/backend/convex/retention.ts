@@ -17,6 +17,7 @@ const POLICY_KEYS: RetentionPolicyKey[] = [
   "integrationDailyData",
   "locationSignals",
   "summaryGenerationEvents",
+  "exportJobs",
 ];
 
 type EffectiveRetentionPolicy = {
@@ -34,6 +35,7 @@ type RetentionDeleteCounts = {
   integrationDailyData: number;
   locationSignals: number;
   summaryGenerationEvents: number;
+  exportJobs: number;
 };
 
 type CleanupExecutionArgs = {
@@ -250,6 +252,35 @@ async function purgeSummaryGenerationEvents(
   return staleEvents.length;
 }
 
+async function purgeExportJobs(
+  ctx: Pick<MutationCtx, "db" | "storage">,
+  cutoff: number,
+  maxDeletes: number,
+  dryRun: boolean,
+): Promise<number> {
+  const staleJobs = await (ctx.db as any)
+    .query("exportJobs")
+    .withIndex("by_requestedAt", (q: any) => q.lt("requestedAt", cutoff))
+    .order("asc")
+    .take(maxDeletes);
+
+  if (dryRun) return staleJobs.length;
+
+  for (const job of staleJobs) {
+    if (typeof job.artifactStorageId === "string" && job.artifactStorageId) {
+      try {
+        await ctx.storage.delete(job.artifactStorageId);
+      } catch {
+        // Ignore missing or already-deleted artifacts.
+      }
+    }
+
+    await (ctx.db as any).delete(job._id);
+  }
+
+  return staleJobs.length;
+}
+
 async function runRetentionCleanupInternal(
   ctx: MutationCtx,
   args: CleanupExecutionArgs,
@@ -263,6 +294,7 @@ async function runRetentionCleanupInternal(
     integrationDailyData: 0,
     locationSignals: 0,
     summaryGenerationEvents: 0,
+    exportJobs: 0,
   };
 
   try {
@@ -322,6 +354,15 @@ async function runRetentionCleanupInternal(
           args.maxDeletesPerPolicy,
           args.dryRun,
         );
+    }
+
+    if (effectivePolicies.exportJobs.enabled) {
+      deletedCounts.exportJobs = await purgeExportJobs(
+        ctx,
+        retentionCutoff(startedAt, effectivePolicies.exportJobs.retentionDays),
+        args.maxDeletesPerPolicy,
+        args.dryRun,
+      );
     }
 
     const finishedAt = Date.now();

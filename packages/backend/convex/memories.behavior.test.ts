@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Id } from "./_generated/dataModel";
 import { createAuthCtx, createInMemoryDb } from "../test-utils/inMemoryConvex";
 import * as memoriesModule from "./memories";
+import { getPlanLimitsForTier } from "./planLimits";
 
 type ConvexHandler<TArgs, TResult> = {
   _handler: (ctx: unknown, args: TArgs) => Promise<TResult>;
@@ -46,6 +47,12 @@ function createMemoryCtx(
     getUrl: vi.fn(
       async (storageId: string) => `https://cdn.example.com/${storageId}`,
     ),
+    getMetadata: vi.fn(async (storageId: string) => ({
+      storageId,
+      sha256: "abc123",
+      size: 500_000,
+      contentType: "image/jpeg",
+    })),
   };
 
   return {
@@ -237,5 +244,142 @@ describe("memories behavior", () => {
         dayKey: "2026-13-40",
       }),
     ).rejects.toThrow("Invalid dayKey");
+  });
+
+  it("enforces memory text limits by plan tier", async () => {
+    const db = createInMemoryDb({
+      user: [
+        {
+          _id: USER_ID,
+          _creationTime: 1,
+          clerkUserId: "clerk_member_001",
+          email: "member@example.com",
+          isAdmin: false,
+          planTier: "free",
+        },
+      ],
+    });
+
+    const createMemory = handler<
+      {
+        title: string;
+        description?: string;
+        mood?: string;
+        happenedAt: number;
+        dayKey: string;
+      },
+      { _id: Id<"memories">; title: string } | null
+    >(memoriesModule.createMemory);
+
+    const freeLimits = getPlanLimitsForTier("free").memory;
+    const overlongTitle = "x".repeat(freeLimits.maxTitleLength + 1);
+
+    await expect(
+      createMemory(createMemoryCtx(db, "clerk_member_001"), {
+        title: overlongTitle,
+        happenedAt: 100,
+        dayKey: "2026-04-02",
+      }),
+    ).rejects.toThrow("Plan limit reached: title supports up to");
+  });
+
+  it("enforces media count and file-size limits by plan tier", async () => {
+    const db = createInMemoryDb({
+      user: [
+        {
+          _id: USER_ID,
+          _creationTime: 1,
+          clerkUserId: "clerk_member_001",
+          email: "member@example.com",
+          isAdmin: false,
+          planTier: "free",
+        },
+      ],
+    });
+
+    const createMemory = handler<
+      {
+        title: string;
+        description?: string;
+        mood?: string;
+        happenedAt: number;
+        dayKey: string;
+      },
+      { _id: Id<"memories">; title: string } | null
+    >(memoriesModule.createMemory);
+
+    const addMemoryMedia = handler<
+      {
+        memoryId: Id<"memories">;
+        storageId: string;
+        type: "image" | "video";
+        width?: number;
+        height?: number;
+      },
+      { _id: Id<"memoryMedia">; type: string } | null
+    >(memoriesModule.addMemoryMedia);
+
+    const ctx = createMemoryCtx(db, "clerk_member_001");
+    const created = await createMemory(ctx, {
+      title: "Media limit test",
+      happenedAt: 100,
+      dayKey: "2026-04-02",
+    });
+    const memoryId = created?._id as Id<"memories">;
+
+    const freeLimits = getPlanLimitsForTier("free").memory;
+
+    for (let index = 0; index < freeLimits.maxMediaPerMemory; index += 1) {
+      await addMemoryMedia(ctx, {
+        memoryId,
+        storageId: `storage_img_${index}`,
+        type: "image",
+      });
+    }
+
+    await expect(
+      addMemoryMedia(ctx, {
+        memoryId,
+        storageId: "storage_img_over_limit",
+        type: "image",
+      }),
+    ).rejects.toThrow("Plan limit reached: up to");
+
+    const dbForSize = createInMemoryDb({
+      user: [
+        {
+          _id: USER_ID,
+          _creationTime: 1,
+          clerkUserId: "clerk_member_001",
+          email: "member@example.com",
+          isAdmin: false,
+          planTier: "free",
+        },
+      ],
+    });
+
+    const sizeCtx = createMemoryCtx(dbForSize, "clerk_member_001");
+    sizeCtx.storage.getMetadata = vi.fn(async (storageId: string) => ({
+      storageId,
+      sha256: "abc123",
+      size: freeLimits.maxMediaBytesPerFile + 1,
+      contentType: "image/jpeg",
+    }));
+
+    const createdForSize = await createMemory(sizeCtx, {
+      title: "Oversize media",
+      happenedAt: 100,
+      dayKey: "2026-04-02",
+    });
+
+    await expect(
+      addMemoryMedia(sizeCtx, {
+        memoryId: createdForSize?._id as Id<"memories">,
+        storageId: "storage_img_large",
+        type: "image",
+      }),
+    ).rejects.toThrow("Plan limit reached: max file size is");
+
+    expect(sizeCtx.storage.delete).toHaveBeenCalledWith("storage_img_large");
   });
 });

@@ -119,6 +119,14 @@ export default defineSchema(
       firstName: v.optional(v.string()),
       lastName: v.optional(v.string()),
       imageUrl: v.optional(v.string()),
+      planTier: v.optional(
+        v.union(
+          v.literal("free"),
+          v.literal("pro"),
+          v.literal("team"),
+          v.literal("enterprise"),
+        ),
+      ),
       isAdmin: v.optional(v.boolean()),
     })
       .index("by_clerkUserId", ["clerkUserId"])
@@ -233,6 +241,41 @@ export default defineSchema(
       used: v.number(),
       updatedAt: v.number(),
     }).index("by_user_day", ["userId", "quotaDayKey"]),
+
+    // ── Export jobs (history + artifact lifecycle) ──────────
+    exportJobs: defineTable({
+      userId: v.id("user"),
+      status: v.union(
+        v.literal("queued"),
+        v.literal("running"),
+        v.literal("ready"),
+        v.literal("failed"),
+      ),
+      format: v.union(v.literal("json"), v.literal("txt")),
+      includeLocationSignals: v.boolean(),
+      requestedAt: v.number(),
+      startedAt: v.optional(v.number()),
+      completedAt: v.optional(v.number()),
+      failedAt: v.optional(v.number()),
+      updatedAt: v.number(),
+      error: v.optional(v.string()),
+      artifactStorageId: v.optional(v.string()),
+      artifactFileName: v.optional(v.string()),
+      artifactMimeType: v.optional(v.string()),
+      artifactSizeBytes: v.optional(v.number()),
+      expiresAt: v.number(),
+      counts: v.optional(
+        v.object({
+          summaries: v.number(),
+          memories: v.number(),
+          days: v.number(),
+          integrationDailyData: v.number(),
+        }),
+      ),
+    })
+      .index("by_user_requestedAt", ["userId", "requestedAt"])
+      .index("by_requestedAt", ["requestedAt"])
+      .index("by_status_requestedAt", ["status", "requestedAt"]),
 
     // ── Admin dashboard materialized global counters ───────
     adminDashboardMetrics: defineTable({
@@ -396,6 +439,7 @@ export default defineSchema(
         integrationDailyData: v.number(),
         locationSignals: v.number(),
         summaryGenerationEvents: v.number(),
+        exportJobs: v.number(),
       }),
       error: v.optional(v.string()),
       actorUserId: v.optional(v.id("user")),

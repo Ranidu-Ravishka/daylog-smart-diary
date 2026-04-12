@@ -161,6 +161,29 @@ export const listAllUsers = query({
   },
 });
 
+export const listUsersByIds = query({
+  args: {
+    userIds: v.array(v.id("user")),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+
+    const uniqueUserIds = Array.from(
+      new Set(args.userIds.map((userId) => String(userId))),
+    )
+      .slice(0, 200)
+      .map((userId) => userId as Id<"user">);
+
+    const users = await Promise.all(
+      uniqueUserIds.map(async (userId) => await ctx.db.get(userId)),
+    );
+
+    return users.filter(
+      (user): user is NonNullable<typeof user> => user !== null,
+    );
+  },
+});
+
 export const listUsersPaginated = query({
   args: {
     paginationOpts: paginationOptsValidator,

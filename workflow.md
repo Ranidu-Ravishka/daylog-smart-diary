@@ -1,318 +1,398 @@
-# DayLog Engineering Workflow
+# DayLog Production Engineering Workflow
 
-Last updated: 2026-04-06
+Last updated: 2026-04-08
 
 ## 1) Purpose
 
-This document is the operational workflow standard for shipping code in DayLog.
-It defines how we branch, commit, review, validate, release, and declare work complete.
+This document is the mandatory engineering workflow for DayLog.
+It defines how we design, build, review, validate, release, and operate changes across:
 
-Use this file as the default process reference for all contributors.
+- web app (`apps/web`)
+- admin app (`apps/admin`)
+- mobile app (`apps/mobile`)
+- backend (`packages/backend`)
 
-## 2) Repository Model
+This workflow is strict by default. Any exception must be documented and approved.
 
-- Monorepo: pnpm + turbo
-- Applications:
-  - apps/web (Next.js)
-  - apps/admin (Next.js)
-  - apps/mobile (Expo)
-- Shared backend:
-  - packages/backend (Convex)
+## 2) Operating Principles
 
-All production changes must keep contracts compatible across web, admin, mobile, and backend.
+1. `main` is always releasable.
+2. Prefer small, reversible changes over large batch changes.
+3. Every production-affecting change must be backed by automated evidence.
+4. Security, privacy, and data integrity are non-negotiable.
+5. Cross-surface compatibility is required for shared contracts.
 
-## 3) Branch Strategy
+## 3) Repository Boundaries
 
-### 3.1 Protected branches
+Monorepo stack:
 
-- main:
-  - Always releasable
-  - Protected in GitHub
-  - Direct pushes are not allowed
+- package manager: pnpm workspaces
+- task orchestration: turbo
+- backend: Convex
+- auth: Clerk
+- summaries: OpenAI-backed generation
 
-### 3.2 Working branches
+A change in one surface can impact all others. Treat shared contracts as production APIs.
 
-- feature/area-short-description
-  - Example: feature/mobile-location-retry
-- fix/area-short-description
-  - Example: fix/web-export-timeout
-- hotfix/area-short-description
-  - Example: hotfix/backend-webhook-401
-- chore/area-short-description
-  - Example: chore/docs-security-rotation
+## 4) Roles and Accountability
 
-### 3.3 Branch lifecycle rules
+- Author:
+  - Owns design, implementation, testing evidence, and rollout notes.
+- Reviewer:
+  - Owns risk-based review quality (correctness, security, regressions).
+- Release Driver:
+  - Owns go/no-go, deployment coordination, rollback readiness.
+- Incident Commander (when needed):
+  - Owns hotfix path and post-incident follow-through.
 
-- Rebase or merge main into your branch before final review if branch is stale.
-- Keep PR scope narrow and coherent.
-- Large initiatives must be split into milestone PRs with safe intermediate states.
+## 5) Change Risk Levels
 
-## 4) Commit Conventions
+Classify each PR before coding. Use highest applicable level.
 
-Use Conventional Commit style:
-
-- feat: new user-facing or platform capability
-- fix: bug fix or regression fix
-- perf: performance optimization
-- refactor: internal restructure without behavior change
-- test: test additions/updates
-- docs: documentation only
-- chore: tooling/infra/non-product maintenance
+### R0 - Low Risk
 
 Examples:
 
-- feat(web): add retry state for summary generation
-- fix(backend): validate dayKey in updateMemory mutation
-- perf(admin): replace table scan with paginated count
+- docs-only
+- copy updates without behavior changes
+- comments/refactors with no runtime impact
 
-Rules:
+Minimum gates:
 
-- Subject line: imperative, concise, scoped.
-- Body: include why, risk, and migration notes (if relevant).
-- Breaking changes must include explicit BREAKING CHANGE details.
+- lint
+- typecheck
+- one reviewer
 
-## 5) Pull Request Standards
+### R1 - Standard Product Risk
+
+Examples:
+
+- single-surface UX or logic changes
+- non-sensitive settings updates
+- isolated backend logic with bounded blast radius
+
+Minimum gates:
+
+- full local checklist
+- CI green
+- one reviewer
+
+### R2 - High Cross-Surface Risk
+
+Examples:
+
+- shared API contract changes
+- schema/index updates
+- integration sync flow changes
+- auth/session boundary changes
+- admin governance and data operations
+
+Minimum gates:
+
+- full local checklist
+- CI green
+- migration/rollback note
+- two reviewers when available
+
+### R3 - Critical Risk
+
+Examples:
+
+- sensitive context tracking (location, health, communication metadata)
+- encryption/secret handling
+- deletion/retention/cascade logic
+- webhook validation and identity boundaries
+
+Minimum gates:
+
+- full local checklist
+- CI green
+- explicit threat model note
+- privacy checklist completion
+- rollout guardrails and rollback playbook
+- two reviewers required
+
+## 6) Branching and Commits
+
+### 6.1 Branch Naming
+
+- `feature/<area>-<short-desc>`
+- `fix/<area>-<short-desc>`
+- `hotfix/<area>-<short-desc>`
+- `chore/<area>-<short-desc>`
+
+Examples:
+
+- `feature/mobile-background-location-guardrails`
+- `fix/web-oauth-callback-state-validation`
+
+### 6.2 Commit Style
+
+Use Conventional Commits:
+
+- `feat`
+- `fix`
+- `perf`
+- `refactor`
+- `test`
+- `docs`
+- `chore`
+
+Requirements:
+
+- imperative subject
+- scope included when useful (`feat(web): ...`)
+- body includes why and risk notes for non-trivial changes
+
+## 7) Delivery Lifecycle
+
+### 7.1 Plan
+
+Before coding, document:
+
+- problem statement
+- impacted modules
+- risk level (R0-R3)
+- validation plan
+- rollback strategy (R2/R3)
+
+### 7.2 Implement
+
+Implementation rules:
+
+- keep diffs focused
+- avoid unrelated refactors in same PR
+- preserve backwards compatibility for shared contracts unless a planned migration is included
+
+### 7.3 Validate Locally
+
+Run required local checks before requesting review.
+
+### 7.4 Review
+
+Review focuses on:
+
+- correctness and regressions
+- authz/authn boundaries
+- data integrity and idempotency
+- scalability (pagination, bounded queries, N+1 avoidance)
+- observability and operability
+
+### 7.5 Merge
+
+Merge only after:
+
+- required approvals
+- required checks green
+- unresolved critical comments closed
+
+### 7.6 Deploy
+
+Follow `DEPLOY_RUNBOOK.md` and execute smoke checks.
+
+### 7.7 Verify
+
+Post-deploy verification is mandatory for R2/R3 changes.
+
+## 8) Mandatory Local Validation Commands
+
+Run from repo root unless noted.
+
+Core (all non-doc PRs):
+
+```bash
+pnpm install
+pnpm lint
+pnpm typecheck
+```
+
+Backend-affecting changes:
+
+```bash
+pnpm --filter @repo/backend lint
+pnpm --filter @repo/backend test:run
+pnpm test:coverage:backend
+```
+
+Web-affecting changes:
+
+```bash
+pnpm build:web
+pnpm --filter web test:oauth-abuse
+```
+
+Admin-affecting changes:
+
+```bash
+pnpm build:admin
+pnpm --filter admin lint
+```
+
+Mobile-affecting changes:
+
+```bash
+pnpm --filter mobile check-types
+pnpm --filter mobile lint
+pnpm --filter mobile build:ci
+pnpm --filter mobile exec vitest run
+```
+
+Notes:
+
+- Mobile unit tests exist in `apps/mobile/lib/*.test.ts`; they are required for mobile logic changes.
+- If a command is intentionally skipped, document why in PR with owner approval.
+
+## 9) CI and Branch Protection
+
+Source of truth:
+
+- workflow: `.github/workflows/backend-validation.yml`
+- policy: `.github/branch-protection.expected.json`
+
+Current required branch check:
+
+- `backend-validation`
+
+Policy verification command:
+
+```bash
+GITHUB_TOKEN=<token> GITHUB_REPOSITORY=<owner/repo> pnpm verify:branch-protection -- --branch main
+```
+
+Any change to CI policy requires:
+
+- update to expected policy file
+- runbook update
+- explicit PR note under "CI impact"
+
+## 10) Pull Request Standard
 
 Every PR must include:
 
-- Clear problem statement
-- What changed and why
-- Risk assessment
-- Test evidence (commands and result summary)
-- Screenshots/video for UI changes (web/mobile/admin)
-- Data migration notes if schema/storage behavior changed
+1. Problem and intent
+2. Risk level (R0-R3)
+3. What changed (by module)
+4. Validation evidence (commands + pass/fail)
+5. Screenshots/video for UI changes (web/admin/mobile)
+6. Migration and rollback notes (R2/R3)
+7. Privacy/security checklist for sensitive features
 
-PR size guidance:
+Preferred PR size:
 
-- Preferred: < 500 net lines
-- Above 500 lines: justify split constraints and highlight review focus areas
+- under 500 net lines
 
-## 6) CI Expectations
+If larger:
 
-Source-of-truth workflow:
+- justify why split was not practical
+- provide review map by file and risk hotspots
 
-- .github/workflows/backend-validation.yml
+## 11) Data and Schema Change Protocol
 
-Required status check for main:
+Applies to schema/index/data-model changes.
 
-- backend-validation
+Requirements:
 
-Validation gates enforced by CI:
+1. Forward-compatible rollout plan
+2. Backfill or migration strategy (if needed)
+3. Idempotent migration behavior
+4. Rollback strategy with failure handling
+5. Post-deploy validation query or dashboard checks
 
-- secret scan
-- lint (repo)
-- typecheck (repo)
-- backend lint
-- backend tests
-- backend coverage gate
-- web OAuth abuse tests
-- mobile typecheck
-- mobile lint
-- mobile Expo web export build validation
-- selective web/admin builds based on changed paths
+Additional constraints:
 
-Branch protection verification:
+- all user-facing queries must stay bounded (pagination or explicit limits)
+- avoid unbounded table scans on hot paths
+- avoid per-row lookup loops when set-based alternatives exist
 
-- Policy file: .github/branch-protection.expected.json
-- Verification script: scripts/verify-branch-protection.mjs
-- Command:
-  - pnpm verify:branch-protection -- --branch main
+## 12) Sensitive Context and Privacy Standard
 
-## 7) Local Pre-PR Checklist
+Applies to location, health/fitness, calendar/notification context, communication metadata, and inferred mood/activity signals.
 
-Run from repository root:
+Mandatory requirements:
 
-- pnpm install
-- pnpm lint
-- pnpm typecheck
-- pnpm --filter @repo/backend test:run
-- pnpm --filter mobile check-types
-- pnpm --filter mobile lint
-- pnpm --filter mobile build:ci
-- pnpm build:web
-- pnpm build:admin
+1. Explicit opt-in before collection
+2. Feature-scoped permissions (no silent enablement of adjacent signals)
+3. Fail-closed behavior when permissions are denied
+4. Coarse, minimum-necessary data retention by default
+5. Disable path stops new writes immediately
+6. Export/delete flows include newly collected fields
+7. No raw secret or sensitive payload logging
 
-If your change touches web API OAuth routes:
+Merge is blocked if this section is incomplete for applicable changes.
 
-- pnpm --filter web test:oauth-abuse
+## 13) Observability and Reliability Requirements
 
-If your change touches branch policy tooling:
+For R1-R3 changes:
 
-- GITHUB_TOKEN=token_value GITHUB_REPOSITORY=owner/repo pnpm verify:branch-protection -- --branch main
+- emit structured logs for key state transitions
+- include actionable error messages for users/operators
+- ensure failures are observable without attaching debuggers
+- avoid console-only error handling in production user flows
 
-## 8) Code Review Standards
+For background/sync pipelines:
 
-Reviewers must prioritize:
+- idempotency keys or equivalent guards
+- timeout and retry strategy documented
+- degraded mode behavior defined
 
-- Correctness and regressions
-- Security boundaries (authz, token handling, secret safety)
-- Data integrity (idempotency, migrations, cascade behavior)
-- Performance/scalability (query patterns, pagination, N+1 paths)
-- Observability impact (logs, metrics, actionable errors)
+## 14) Release Checklist
 
-Review checklist:
+Before release:
 
-- Is behavior correct in success and failure paths?
-- Are edge cases handled explicitly?
-- Are mutations/queries bounded and safe at scale?
-- Is user feedback clear for loading/error/empty states?
-- Are tests sufficient for changed risk surface?
-- Is documentation updated where behavior/ops changed?
+1. Latest `main` has green required checks
+2. Branch protection policy verified
+3. Environment variables validated (no placeholders)
+4. Security-sensitive migrations audited (if applicable)
+5. Smoke test plan assigned and owned
 
-Approval policy:
+After release:
 
-- At least 1 reviewer approval required.
-- Critical/security/data-path changes require 2 approvals when available.
-- Unresolved critical comments block merge.
+1. Sign-in and dashboard flow succeeds
+2. Summary generation succeeds
+3. Integration connect/sync path succeeds
+4. Admin critical pages load
+5. Error rates show no unexpected spike
 
-## 9) Release Checklist
+## 15) Hotfix Process
 
-Before release cut or production deploy:
+For production-impacting defects:
 
-1. Ensure latest main is green for backend-validation.
-2. Verify branch protection policy matches expected JSON.
-3. Confirm production environment variables are valid and non-placeholder.
-4. Run retention/integration migration audits when applicable.
-5. Confirm webhook health and auth flow smoke tests.
-6. Smoke test web, admin, and mobile primary journeys.
-7. Confirm rollback plan and owner-on-call coverage.
+1. Branch from `main` using `hotfix/...`
+2. Implement minimal targeted fix
+3. Add/adjust tests for root cause
+4. Open expedited PR with incident context
+5. Require approvals and green CI
+6. Deploy, verify, and publish incident follow-up actions
 
-Post-deploy checks:
+No "fix now, test later" merges to `main`.
 
-1. Sign-in and core dashboard flow work.
-2. Summary generation succeeds.
-3. Integration connect/sync paths succeed for configured providers.
-4. Admin pages load and key metrics/audit screens function.
-5. Error rates and logs show no unexpected spike.
+## 16) Definition of Done
 
-## 10) Definition of Done (Strict)
+A change is done only when all are true:
 
-A task is done only when all are true:
+1. Functional behavior meets acceptance criteria
+2. Required local checks completed
+3. Required CI checks green
+4. Security/privacy requirements satisfied
+5. Reliability and failure handling are explicit
+6. Tests cover changed risk surface
+7. Documentation/runbook updates are complete
+8. Rollback impact is understood for production
 
-1. Functional acceptance
-   - Feature/fix works as specified across affected clients.
-2. Quality gates
-   - Local checks pass and CI backend-validation passes.
-3. Security and privacy
-   - No secret leakage, no weakened auth boundaries, no unsafe token handling.
-4. Reliability
-   - Failure states are handled with clear user or operator signal.
-5. Performance
-   - No new unbounded hot paths or avoidable N+1 patterns in critical flows.
-6. Tests
-   - Automated tests added/updated for changed risk areas.
-7. Documentation
-   - Relevant docs/runbooks updated.
-8. Operability
-   - Rollout and rollback impact understood for production changes.
+If any item is missing, the work is not done.
 
-If any item is incomplete, the work is not done.
+## 17) Exception Handling
 
-## 11) Incident and Hotfix Process
+Exceptions are rare and must include:
 
-Use this process for production-impacting defects:
+- reason and risk
+- approver
+- compensating controls
+- follow-up deadline
 
-1. Create hotfix/area-description from main.
-2. Add minimal, targeted fix and test coverage.
-3. Open expedited PR with incident context and risk note.
-4. Obtain required approvals.
-5. Merge after green CI.
-6. Perform post-release verification and incident retrospective.
+Allowed examples:
 
-## 12) Ownership and Escalation
+- temporary CI bypass for external outage with manual validation evidence
+- staged mitigation for urgent incident with explicit post-incident hardening tasks
 
-- Feature owner is responsible for validation evidence in PR.
-- Reviewer is responsible for risk-focused review quality.
-- Release driver is responsible for checklist completion and go/no-go decision.
-
-If uncertainty remains on security, data migration, or rollback safety, do not ship.
-
-## 13) Sensitive Context Tracking Standard (Mandatory)
-
-Scope:
-
-- Applies to any feature that touches location, health/fitness, calendar, communication metadata, notification context, or inferred mood/activity signals.
-
-### 13.1 Feature development rules
-
-- Explicit opt-in is required before collecting sensitive context data.
-- Collection must be feature-scoped; enabling one signal must not silently enable others.
-- Data collection must default to minimum viable granularity (coarse location, day-level aggregates, bounded signal lists).
-- Raw sensitive payloads must be normalized on-device or at ingestion edge before persistence.
-- Every sensitive data path must have a kill switch (feature flag or user toggle) that can disable new writes without redeploying mobile clients.
-- No implementation may rely on restricted or prohibited platform data sources (for example raw call logs on iOS).
-- No biometric/face-recognition processing may ship by default; it requires explicit product/legal approval, separate user consent, and a dedicated threat-model review.
-- Any background collection mode must include a documented battery budget and user-facing justification.
-
-### 13.2 Privacy-first checklist (required in PR description)
-
-- Data inventory updated: what fields are collected, transformed, stored, and exported.
-- Legal/privacy surface reviewed for the feature scope.
-- User-facing disclosure text added/updated where the feature is enabled.
-- Consent copy and UX evidence attached (screenshots/video of enable + disable path).
-- Disable path implemented and verified (toggle off stops writes immediately).
-- Data retention behavior documented for any new fields/tables.
-- Export and delete-account flows verified for newly collected data.
-- Logs and telemetry checked to confirm no secrets or raw sensitive payload leakage.
-
-PRs that miss any checklist item are not merge-ready.
-
-### 13.3 Permission handling standards
-
-- Use just-in-time permission prompts tied to user action, never on silent app startup.
-- If permission is denied, the feature must fail closed and remain disabled.
-- Permission denial UX must include clear remediation path (system settings deep link where available).
-- Do not repeatedly prompt after denial in the same session; require explicit user re-attempt.
-- Platform constraints must be respected and coded explicitly:
-  - iOS: no raw call log ingestion path.
-  - iOS HealthKit: must run only in native/dev client builds where supported.
-  - Android background/location usage: request only if corresponding feature mode is enabled.
-- Permission matrix must be documented in PR when changed:
-  - `location`: foreground first, background only with separate opt-in.
-  - `fitness`: HealthKit/Google Fit only after provider consent.
-  - `calendarNotifications`: notification/calendar scopes only when feature enabled.
-  - `callLogs`: Android only, aggregate counts/duration only, no contact identifiers.
-- Preference state in backend must mirror effective permission state (`granted`, `denied`, `unknown`) for operational visibility.
-
-### 13.4 Testing requirements for mobile sensors
-
-- Unit tests are required for normalization/sanitization logic and edge cases.
-- Sensor pipelines must include test coverage for permission states:
-  - granted
-  - denied
-  - unavailable/unsupported device
-  - revoked after being granted
-- Battery-aware behavior must be validated:
-  - throttling interval enforcement
-  - no tight polling loops
-  - bounded in-memory buffering
-  - auto-disable paths when runtime safety thresholds are exceeded
-- Backend behavior tests must validate:
-  - dayKey validation at all entry points
-  - idempotent upsert by `userId + provider + dayKey`
-  - aggregate query correctness for mixed provider data
-- Summary generation tests must cover context-aware inputs and no-data fallbacks.
-- Tests must prove no raw sensitive payload fields are persisted (only normalized aggregates/context).
-
-### 13.5 Release checklist additions for tracking features
-
-Before production rollout of any sensitive tracking feature:
-
-1. Confirm consent text, settings copy, and privacy policy updates are deployed together.
-2. Verify iOS/Android permission strings and manifest entries are accurate and minimal.
-3. Run full mobile + backend validation suite, including sensor/permission scenarios.
-4. Validate retention/export paths for new context fields in staging.
-5. Confirm on-call rollback plan can disable collection quickly (kill switch verified).
-6. Perform staged rollout with monitoring on:
-   - write volume anomalies
-   - permission denial spikes
-   - battery/performance regressions
-   - error-rate increase in sync flows
-
-### 13.6 Enforcement gates (merge blocking)
-
-- PRs touching sensitive context must include a completed Section 13 checklist in the PR body.
-- Missing consent UX, permission handling evidence, or sensor test evidence is a hard block.
-- Any exception request (for urgent hotfixes) must be approved by feature owner + reviewer and documented with follow-up action items.
-
-No sensitive tracking feature may be marked complete without satisfying Section 13.
+Unapproved exceptions are policy violations.

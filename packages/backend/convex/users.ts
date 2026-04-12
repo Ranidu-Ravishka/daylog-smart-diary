@@ -80,6 +80,7 @@ async function syncUserRecord(
     firstName: args.firstName,
     lastName: args.lastName,
     imageUrl: args.imageUrl,
+    planTier: "free",
     isAdmin: false,
   });
 

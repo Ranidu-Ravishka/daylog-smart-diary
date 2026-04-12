@@ -12,4 +12,11 @@ crons.interval(
   },
 );
 
+crons.interval(
+  "export-job-retention-cleanup-every-6h",
+  { hours: 6 },
+  (internal as any).summaries.runScheduledExportJobRetentionCleanupInternal,
+  {},
+);
+
 export default crons;

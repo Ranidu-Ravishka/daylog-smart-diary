@@ -4,6 +4,36 @@ import { requireUser, requireOwnership } from "./authz";
 import { validateDayKey, clampLimit } from "./validators";
 import type { Id } from "./_generated/dataModel";
 import { applyDashboardMetricsDelta } from "./dashboardMetrics";
+import { getPlanLimitsForTier, normalizeUserPlanTier } from "./planLimits";
+
+const IMAGE_CONTENT_TYPE_PREFIX = "image/";
+const VIDEO_CONTENT_TYPE_PREFIX = "video/";
+
+function bytesToMbLabel(bytes: number): string {
+  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10}MB`;
+}
+
+function assertMemoryTextLimits(args: {
+  title: string;
+  description: string | undefined;
+  planTier: string | undefined;
+}) {
+  const planTier = normalizeUserPlanTier(args.planTier);
+  const limits = getPlanLimitsForTier(planTier).memory;
+
+  if (args.title.length > limits.maxTitleLength) {
+    throw new Error(
+      `Plan limit reached: title supports up to ${limits.maxTitleLength} characters on ${planTier} plan.`,
+    );
+  }
+
+  const descriptionLength = args.description?.length ?? 0;
+  if (descriptionLength > limits.maxDescriptionLength) {
+    throw new Error(
+      `Plan limit reached: description supports up to ${limits.maxDescriptionLength} characters on ${planTier} plan.`,
+    );
+  }
+}
 
 // ── Generate an upload URL for memory media ─────────────────
 export const generateMemoryMediaUploadUrl = mutation({
@@ -28,6 +58,11 @@ export const createMemory = mutation({
     const user = await requireUser(ctx);
 
     validateDayKey(args.dayKey);
+    assertMemoryTextLimits({
+      title: args.title,
+      description: args.description,
+      planTier: user.planTier,
+    });
 
     const id = await ctx.db.insert("memories", {
       userId: user._id,
@@ -94,6 +129,24 @@ export const listRecentMemories = query({
   },
 });
 
+// ── Read current user's memory plan limits ─────────────────
+export const getMyMemoryPlanLimits = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await requireUser(ctx);
+    const planTier = normalizeUserPlanTier(user.planTier);
+    const limits = getPlanLimitsForTier(planTier).memory;
+
+    return {
+      planTier,
+      maxTitleLength: limits.maxTitleLength,
+      maxDescriptionLength: limits.maxDescriptionLength,
+      maxMediaPerMemory: limits.maxMediaPerMemory,
+      maxMediaBytesPerFile: limits.maxMediaBytesPerFile,
+    };
+  },
+});
+
 // ── Update a memory ─────────────────────────────────────────
 export const updateMemory = mutation({
   args: {
@@ -113,6 +166,12 @@ export const updateMemory = mutation({
     }
 
     requireOwnership(user, memory.userId);
+
+    assertMemoryTextLimits({
+      title: args.title ?? memory.title,
+      description: args.description ?? memory.description,
+      planTier: user.planTier,
+    });
 
     const updates: Record<string, unknown> = {};
     if (args.title !== undefined) updates.title = args.title;
@@ -185,6 +244,58 @@ export const addMemoryMedia = mutation({
     }
 
     requireOwnership(user, memory.userId);
+
+    const planTier = normalizeUserPlanTier(user.planTier);
+    const limits = getPlanLimitsForTier(planTier).memory;
+
+    const existingMediaCount = (
+      await ctx.db
+        .query("memoryMedia")
+        .withIndex("by_memory", (q) => q.eq("memoryId", args.memoryId))
+        .take(limits.maxMediaPerMemory + 1)
+    ).length;
+
+    if (existingMediaCount >= limits.maxMediaPerMemory) {
+      throw new Error(
+        `Plan limit reached: up to ${limits.maxMediaPerMemory} media item(s) per memory on ${planTier} plan.`,
+      );
+    }
+
+    const metadata = await ctx.storage.getMetadata(args.storageId as any);
+    if (!metadata) {
+      throw new Error(
+        "Uploaded media file was not found. Please upload again.",
+      );
+    }
+
+    if (metadata.size > limits.maxMediaBytesPerFile) {
+      try {
+        await ctx.storage.delete(args.storageId as any);
+      } catch {
+        // Ignore cleanup failures for oversized uploads.
+      }
+
+      throw new Error(
+        `Plan limit reached: max file size is ${bytesToMbLabel(limits.maxMediaBytesPerFile)} on ${planTier} plan.`,
+      );
+    }
+
+    const contentType = metadata.contentType?.toLowerCase();
+    if (
+      args.type === "image" &&
+      contentType &&
+      !contentType.startsWith(IMAGE_CONTENT_TYPE_PREFIX)
+    ) {
+      throw new Error("Invalid media type: expected an image upload.");
+    }
+
+    if (
+      args.type === "video" &&
+      contentType &&
+      !contentType.startsWith(VIDEO_CONTENT_TYPE_PREFIX)
+    ) {
+      throw new Error("Invalid media type: expected a video upload.");
+    }
 
     const id = await ctx.db.insert("memoryMedia", {
       memoryId: args.memoryId,

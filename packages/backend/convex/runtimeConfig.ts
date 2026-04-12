@@ -6,6 +6,7 @@ const RETENTION_DAY_SUMMARIES_DAYS_ENV = "RETENTION_DAY_SUMMARIES_DAYS";
 const RETENTION_INTEGRATION_DATA_DAYS_ENV = "RETENTION_INTEGRATION_DATA_DAYS";
 const RETENTION_LOCATION_SIGNALS_DAYS_ENV = "RETENTION_LOCATION_SIGNALS_DAYS";
 const RETENTION_SUMMARY_EVENTS_DAYS_ENV = "RETENTION_SUMMARY_EVENTS_DAYS";
+const RETENTION_EXPORT_JOBS_DAYS_ENV = "RETENTION_EXPORT_JOBS_DAYS";
 const RETENTION_DELETE_BATCH_SIZE_ENV = "RETENTION_DELETE_BATCH_SIZE";
 const SUMMARY_LOW_QUALITY_THRESHOLD_ENV = "SUMMARY_LOW_QUALITY_THRESHOLD";
 const ENABLE_BACKGROUND_LOCATION_TRACKING_ENV =
@@ -103,7 +104,8 @@ export type RetentionPolicyKey =
   | "daySummaries"
   | "integrationDailyData"
   | "locationSignals"
-  | "summaryGenerationEvents";
+  | "summaryGenerationEvents"
+  | "exportJobs";
 
 export function getRetentionPolicyDefaults(): Record<
   RetentionPolicyKey,
@@ -164,7 +166,21 @@ export function getRetentionPolicyDefaults(): Record<
       sensitive: false,
       enabled: true,
     },
+    exportJobs: {
+      retentionDays: parseBoundedInt({
+        envName: RETENTION_EXPORT_JOBS_DAYS_ENV,
+        fallback: 14,
+        min: 1,
+        max: 3650,
+      }),
+      sensitive: true,
+      enabled: true,
+    },
   };
+}
+
+export function getExportJobRetentionDays(): number {
+  return getRetentionPolicyDefaults().exportJobs.retentionDays;
 }
 
 export function getRetentionDeleteBatchSize(): number {
