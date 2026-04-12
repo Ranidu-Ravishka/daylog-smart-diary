@@ -51,6 +51,32 @@ function formatMemoryTime(timestamp: number): string {
   return `${h}:${m} ${ampm}`;
 }
 
+function formatRelativeElapsed(lastSyncAt: number, now: number): string {
+  const elapsedSeconds = Math.max(0, Math.floor((now - lastSyncAt) / 1000));
+  if (elapsedSeconds < 60) return `${elapsedSeconds}s ago`;
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours}h ago`;
+
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  return `${elapsedDays}d ago`;
+}
+
+function formatLastSyncTime(lastSyncAt: number | null, now: number): string {
+  if (lastSyncAt === null) return "Last sync: pending";
+
+  const absolute = new Date(lastSyncAt).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
+  return `Last sync: ${absolute} • Updated ${formatRelativeElapsed(lastSyncAt, now)}`;
+}
+
 // ── Loading skeleton ────────────────────────────────────────
 function HomeScreenSkeleton() {
   return (
@@ -83,25 +109,28 @@ const HomeScreen = () => {
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
   const todayKey = getTodayDayKey();
   const [refreshing, setRefreshing] = React.useState(false);
+  const [refreshToken, setRefreshToken] = React.useState(0);
+  const [lastSyncAt, setLastSyncAt] = React.useState<number | null>(null);
+  const [relativeNow, setRelativeNow] = React.useState(() => Date.now());
 
   const recentMemories = useQuery(
     api.memories.listRecentMemories,
-    isAuthenticated ? { limit: 10 } : "skip",
+    isAuthenticated ? { limit: 10, refreshToken } : "skip",
   );
   const todayDay = useQuery(
     api.days.getDay,
-    isAuthenticated ? { dayKey: todayKey } : "skip",
+    isAuthenticated ? { dayKey: todayKey, refreshToken } : "skip",
   );
   const todaySummary = useQuery(
     api.summaries.getSummaryByDay,
-    isAuthenticated ? { dayKey: todayKey } : "skip",
+    isAuthenticated ? { dayKey: todayKey, refreshToken } : "skip",
   );
   const memoryIds = (recentMemories ?? []).map(
     (memory: { _id: GenericId<"memories"> }) => memory._id,
   );
   const memoryThumbnails = useQuery(
     api.memories.listMemoryMediaThumbnailsForMemories,
-    isAuthenticated ? { memoryIds } : "skip",
+    isAuthenticated ? { memoryIds, refreshToken } : "skip",
   ) as { memoryId: string; thumbnailUrl: string | null }[] | undefined;
 
   const thumbnailCacheRef = React.useRef<Map<string, string | null>>(new Map());
@@ -136,6 +165,49 @@ const HomeScreen = () => {
   const isLoading =
     isAuthLoading || (isAuthenticated && recentMemories === undefined);
 
+  const isRefreshDataReady =
+    !isAuthenticated ||
+    (recentMemories !== undefined &&
+      todayDay !== undefined &&
+      todaySummary !== undefined &&
+      memoryThumbnails !== undefined);
+
+  React.useEffect(() => {
+    if (!isRefreshDataReady) return;
+
+    setLastSyncAt((current) => current ?? Date.now());
+  }, [isRefreshDataReady]);
+
+  React.useEffect(() => {
+    if (!refreshing || !isRefreshDataReady) return;
+
+    setRefreshing(false);
+    setLastSyncAt(Date.now());
+  }, [isRefreshDataReady, refreshing]);
+
+  React.useEffect(() => {
+    if (lastSyncAt === null) return;
+
+    const interval = setInterval(() => {
+      setRelativeNow(Date.now());
+    }, 1_000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [lastSyncAt]);
+
+  const onRefresh = React.useCallback(() => {
+    if (refreshing) return;
+
+    setRefreshing(true);
+    setRefreshToken((value) => value + 1);
+  }, [refreshing]);
+
+  const syncStatusText = refreshing
+    ? "Syncing..."
+    : formatLastSyncTime(lastSyncAt, relativeNow);
+
   if (isLoading) return <HomeScreenSkeleton />;
 
   const memories = recentMemories ?? [];
@@ -143,11 +215,6 @@ const HomeScreen = () => {
     (m: { dayKey: string }) => m.dayKey === todayKey,
   );
   const userName = user?.firstName ?? "there";
-
-  const onRefresh = () => {
-    setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
-  };
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -167,6 +234,7 @@ const HomeScreen = () => {
           <View>
             <Text style={styles.greeting}>{getGreeting()},</Text>
             <Text style={styles.userName}>{userName}</Text>
+            <Text style={styles.syncText}>{syncStatusText}</Text>
           </View>
           <TouchableOpacity
             style={styles.avatarBtn}
@@ -384,6 +452,11 @@ const styles = StyleSheet.create({
     ...Typography.title1,
     color: c.text,
     marginTop: 2,
+  },
+  syncText: {
+    ...Typography.caption2,
+    color: c.textSecondary,
+    marginTop: 4,
   },
   avatarBtn: {
     width: 40,

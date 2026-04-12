@@ -119,7 +119,10 @@ export async function reserveSummaryGenerationSlotForUser(
 
 // ── Get summary for a specific day ──────────────────────────
 export const getSummaryByDay = query({
-  args: { dayKey: v.string() },
+  args: {
+    dayKey: v.string(),
+    refreshToken: v.optional(v.number()),
+  },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
 
@@ -150,7 +153,10 @@ export const getSummaryById = query({
 
 // ── List recent summaries ───────────────────────────────────
 export const listRecentSummaries = query({
-  args: { limit: v.optional(v.number()) },
+  args: {
+    limit: v.optional(v.number()),
+    refreshToken: v.optional(v.number()),
+  },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
     const limit = clampLimit(args.limit ?? 7);
@@ -214,7 +220,9 @@ export const deleteSummary = mutation({
 
 // ── Get current authenticated user's generation quota usage for today (UTC) ──
 export const getSummaryQuotaForDay = query({
-  args: {},
+  args: {
+    refreshToken: v.optional(v.number()),
+  },
   handler: async (ctx) => {
     const user = await requireUser(ctx);
     const quotaDayKey = getUtcDayKey(Date.now());
