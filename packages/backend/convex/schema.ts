@@ -227,7 +227,8 @@ export default defineSchema(
       height: v.optional(v.number()),
     })
       .index("by_memory", ["memoryId"])
-      .index("by_user", ["userId"]),
+      .index("by_user", ["userId"])
+      .index("by_user_memory_type", ["userId", "memoryId", "type"]),
 
     // ── Days (one daily record per user per day) ─────────────
     days: defineTable({

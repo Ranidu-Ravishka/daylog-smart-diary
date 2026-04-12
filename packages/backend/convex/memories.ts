@@ -360,38 +360,30 @@ export const listMemoryMediaThumbnailsForMemories = query({
       return [];
     }
 
-    const requestedMemoryIds = new Set(uniqueIds.map((id) => String(id)));
-    const firstImageStorageIdByMemoryId = new Map<string, string>();
-    let cursor: string | null = null;
+    const firstImageStorageIdByMemoryId = new Map<string, string | null>(
+      await Promise.all(
+        uniqueIds.map(async (memoryId): Promise<[string, string | null]> => {
+          const firstImage = await ctx.db
+            .query("memoryMedia")
+            .withIndex("by_user_memory_type", (q) =>
+              q
+                .eq("userId", user._id)
+                .eq("memoryId", memoryId)
+                .eq("type", "image"),
+            )
+            .take(1);
 
-    while (firstImageStorageIdByMemoryId.size < requestedMemoryIds.size) {
-      const page = await ctx.db
-        .query("memoryMedia")
-        .withIndex("by_user", (q) => q.eq("userId", user._id))
-        .paginate({
-          numItems: 256,
-          cursor,
-        });
-
-      for (const media of page.page) {
-        if (media.type !== "image") continue;
-
-        const memoryId = String(media.memoryId);
-        if (!requestedMemoryIds.has(memoryId)) continue;
-        if (firstImageStorageIdByMemoryId.has(memoryId)) continue;
-
-        firstImageStorageIdByMemoryId.set(memoryId, media.storageId);
-      }
-
-      if (page.isDone || !page.continueCursor) {
-        break;
-      }
-
-      cursor = page.continueCursor;
-    }
+          return [String(memoryId), firstImage[0]?.storageId ?? null];
+        }),
+      ),
+    );
 
     const uniqueStorageIds = Array.from(
-      new Set(firstImageStorageIdByMemoryId.values()),
+      new Set(
+        Array.from(firstImageStorageIdByMemoryId.values()).filter(
+          (storageId): storageId is string => typeof storageId === "string",
+        ),
+      ),
     );
 
     const storageIdToUrlEntries = await Promise.all(
