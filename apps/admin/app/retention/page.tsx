@@ -1,6 +1,11 @@
 "use client";
 
 import AdminGuard from "@/components/admin-guard";
+import {
+  formatRetentionDeletedCounts,
+  sumRetentionDeletedCounts,
+  type RetentionDeletedCounts,
+} from "@/lib/retention-counts";
 import { api } from "@repo/backend/convex";
 import { makeFunctionReference } from "convex/server";
 import {
@@ -27,13 +32,7 @@ type RetentionRunRow = {
   dryRun: boolean;
   startedAt: number;
   finishedAt: number;
-  deletedCounts: {
-    memories: number;
-    daySummaries: number;
-    integrationDailyData: number;
-    locationSignals: number;
-    summaryGenerationEvents: number;
-  };
+  deletedCounts?: RetentionDeletedCounts;
   error?: string;
 };
 
@@ -44,14 +43,7 @@ type PolicyDraft = {
 };
 
 function totalDeletes(run: RetentionRunRow): number {
-  const counts = run.deletedCounts;
-  return (
-    counts.memories +
-    counts.daySummaries +
-    counts.integrationDailyData +
-    counts.locationSignals +
-    counts.summaryGenerationEvents
-  );
+  return sumRetentionDeletedCounts(run.deletedCounts);
 }
 
 export default function RetentionPage() {
@@ -151,12 +143,7 @@ export default function RetentionPage() {
 
     try {
       const result = await runCleanup({ dryRun });
-      const total =
-        result.deletedCounts.memories +
-        result.deletedCounts.daySummaries +
-        result.deletedCounts.integrationDailyData +
-        result.deletedCounts.locationSignals +
-        result.deletedCounts.summaryGenerationEvents;
+      const total = sumRetentionDeletedCounts(result.deletedCounts);
 
       setStatusMessage(
         dryRun
@@ -416,7 +403,7 @@ export default function RetentionPage() {
                           <td className="max-w-sm px-4 py-3 text-xs text-gray-600">
                             {run.status === "error"
                               ? (run.error ?? "Cleanup failed")
-                              : `memories=${run.deletedCounts.memories}, summaries=${run.deletedCounts.daySummaries}, integration=${run.deletedCounts.integrationDailyData}, location=${run.deletedCounts.locationSignals}, summaryEvents=${run.deletedCounts.summaryGenerationEvents}`}
+                              : formatRetentionDeletedCounts(run.deletedCounts)}
                           </td>
                         </tr>
                       ))}
