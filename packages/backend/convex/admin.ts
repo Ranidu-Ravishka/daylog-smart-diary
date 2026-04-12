@@ -240,7 +240,7 @@ export const adminDeleteUser = mutation({
     success: boolean;
     queued: boolean;
     jobId: Id<"userDeletionJobs">;
-    status: "queued" | "running" | "completed";
+    status: "requested" | "processing" | "completed" | "failed";
     stage: string;
     created: boolean;
   }> => {
@@ -257,12 +257,12 @@ export const adminDeleteUser = mutation({
       },
     )) as {
       jobId: Id<"userDeletionJobs">;
-      status: "queued" | "running" | "completed";
+      status: "requested" | "processing" | "completed" | "failed";
       stage: string;
       created: boolean;
     };
 
-    await logAdminAction(ctx, admin._id, "delete_user_queued", user.email);
+    await logAdminAction(ctx, admin._id, "delete_user_requested", user.email);
 
     return {
       success: true,
@@ -293,28 +293,123 @@ export const adminGetUserDeletionJob = query({
   },
 });
 
+export const adminMigrateUserDeletionJobStatuses = mutation({
+  args: {
+    dryRun: v.optional(v.boolean()),
+    cursor: v.optional(v.string()),
+    pageSize: v.optional(v.number()),
+    maxPages: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const admin = await requireAdmin(ctx);
+    const dryRun = args.dryRun ?? false;
+    const pageSize = clampLimit(args.pageSize ?? 256, 512);
+    const maxPages = clampLimit(args.maxPages ?? 64, 512);
+
+    let cursor: string | null = args.cursor ?? null;
+    let pagesScanned = 0;
+    let scanned = 0;
+    let migratedRequested = 0;
+    let migratedProcessing = 0;
+    const migrationTs = Date.now();
+
+    while (pagesScanned < maxPages) {
+      const page = await ctx.db
+        .query("userDeletionJobs")
+        .withIndex("by_updatedAt")
+        .paginate({
+          numItems: pageSize,
+          cursor,
+        });
+
+      pagesScanned += 1;
+
+      for (const row of page.page) {
+        scanned += 1;
+
+        const status = (row as { status?: unknown }).status;
+        const nextStatus =
+          status === "queued"
+            ? "requested"
+            : status === "running"
+              ? "processing"
+              : null;
+
+        if (!nextStatus) {
+          continue;
+        }
+
+        if (!dryRun) {
+          await ctx.db.patch((row as { _id: Id<"userDeletionJobs"> })._id, {
+            status: nextStatus,
+            updatedAt: migrationTs,
+          });
+        }
+
+        if (nextStatus === "requested") {
+          migratedRequested += 1;
+        } else {
+          migratedProcessing += 1;
+        }
+      }
+
+      if (page.isDone) {
+        cursor = null;
+        break;
+      }
+
+      cursor = page.continueCursor;
+    }
+
+    const totalMigrated = migratedRequested + migratedProcessing;
+
+    if (!dryRun && totalMigrated > 0) {
+      await logAdminAction(
+        ctx,
+        admin._id,
+        "migrate_user_deletion_job_statuses",
+        `requested:${migratedRequested},processing:${migratedProcessing}`,
+      );
+    }
+
+    return {
+      success: true,
+      dryRun,
+      pageSize,
+      maxPages,
+      pagesScanned,
+      scanned,
+      migratedRequested,
+      migratedProcessing,
+      totalMigrated,
+      hasMore: cursor !== null,
+      nextCursor: cursor,
+    };
+  },
+});
+
 export const adminGetLatestUserDeletionJobByUserId = query({
   args: { userId: v.id("user") },
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
 
-    const running = await ctx.db
+    const processing = await ctx.db
       .query("userDeletionJobs")
       .withIndex("by_user_status", (q) =>
-        q.eq("userId", args.userId).eq("status", "running"),
+        q.eq("userId", args.userId).eq("status", "processing"),
       )
       .order("desc")
       .take(1);
-    if (running[0]) return running[0];
+    if (processing[0]) return processing[0];
 
-    const queued = await ctx.db
+    const requested = await ctx.db
       .query("userDeletionJobs")
       .withIndex("by_user_status", (q) =>
-        q.eq("userId", args.userId).eq("status", "queued"),
+        q.eq("userId", args.userId).eq("status", "requested"),
       )
       .order("desc")
       .take(1);
-    if (queued[0]) return queued[0];
+    if (requested[0]) return requested[0];
 
     const completed = await ctx.db
       .query("userDeletionJobs")
@@ -324,7 +419,28 @@ export const adminGetLatestUserDeletionJobByUserId = query({
       .order("desc")
       .take(1);
 
-    return completed[0] ?? null;
+    const failed = await ctx.db
+      .query("userDeletionJobs")
+      .withIndex("by_user_status", (q) =>
+        q.eq("userId", args.userId).eq("status", "failed"),
+      )
+      .order("desc")
+      .take(1);
+
+    const latestCompleted = completed[0] ?? null;
+    const latestFailed = failed[0] ?? null;
+
+    if (!latestCompleted) {
+      return latestFailed;
+    }
+
+    if (!latestFailed) {
+      return latestCompleted;
+    }
+
+    return latestCompleted.updatedAt >= latestFailed.updatedAt
+      ? latestCompleted
+      : latestFailed;
   },
 });
 
