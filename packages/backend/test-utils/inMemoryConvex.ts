@@ -65,6 +65,7 @@ const INDEX_FIELDS: Record<TableName, Record<string, string[]>> = {
   memoryMedia: {
     by_memory: ["memoryId"],
     by_user: ["userId"],
+    by_user_memory_type: ["userId", "memoryId", "type"],
   },
   days: {
     by_user_day: ["userId", "dayKey"],

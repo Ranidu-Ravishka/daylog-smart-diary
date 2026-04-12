@@ -178,6 +178,15 @@ describe("memories behavior", () => {
     expect(updated?.title).toBe("A better day");
     expect(updated?.mood).toBe("calm");
 
+    await db.insert("memoryMedia", {
+      memoryId,
+      userId: USER_ID,
+      storageId: "storage_vid_001",
+      type: "video",
+      width: 1920,
+      height: 1080,
+    });
+
     const media = await addMemoryMedia(ctx, {
       memoryId,
       storageId: "storage_img_001",
@@ -188,17 +197,45 @@ describe("memories behavior", () => {
     const mediaId = media?._id as Id<"memoryMedia">;
 
     const listedMedia = await listMemoryMedia(ctx, { memoryId });
-    expect(listedMedia[0]?.url).toBe("https://cdn.example.com/storage_img_001");
+    expect(
+      listedMedia.some(
+        (item) => item.url === "https://cdn.example.com/storage_img_001",
+      ),
+    ).toBe(true);
+
+    const otherCtx = createMemoryCtx(db, "clerk_other_001");
+    const otherMemory = await createMemory(otherCtx, {
+      title: "Other memory",
+      happenedAt: 110,
+      dayKey: "2026-04-02",
+    });
+    const otherMemoryId = otherMemory?._id as Id<"memories">;
+
+    await addMemoryMedia(otherCtx, {
+      memoryId: otherMemoryId,
+      storageId: "storage_img_other_001",
+      type: "image",
+      width: 1000,
+      height: 600,
+    });
+
+    ctx.storage.getUrl.mockClear();
 
     const thumbnails = await listMemoryMediaThumbnailsForMemories(ctx, {
-      memoryIds: [memoryId, memoryId],
+      memoryIds: [memoryId, memoryId, otherMemoryId],
     });
     expect(thumbnails).toEqual([
       {
         memoryId: String(memoryId),
         thumbnailUrl: "https://cdn.example.com/storage_img_001",
       },
+      {
+        memoryId: String(otherMemoryId),
+        thumbnailUrl: null,
+      },
     ]);
+    expect(ctx.storage.getUrl).toHaveBeenCalledTimes(1);
+    expect(ctx.storage.getUrl).toHaveBeenCalledWith("storage_img_001");
 
     const deletedMedia = await deleteMemoryMedia(ctx, { mediaId });
     expect(deletedMedia.success).toBe(true);
@@ -206,7 +243,9 @@ describe("memories behavior", () => {
 
     const deleted = await deleteMemory(ctx, { memoryId });
     expect(deleted.success).toBe(true);
-    expect(db.getTable("memories")).toHaveLength(0);
+    expect(db.getTable("memories").map((row) => row._id)).toEqual([
+      otherMemoryId,
+    ]);
   });
 
   it("rejects invalid optional dayKey on memory update", async () => {
