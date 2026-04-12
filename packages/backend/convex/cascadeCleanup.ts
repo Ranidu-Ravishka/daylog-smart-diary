@@ -27,6 +27,123 @@ export type DayCascadeDeleteCounts = {
   deletedSummaries: number;
 };
 
+export type UserCascadeDeleteProgress = UserCascadeDeleteCounts & {
+  deletedMemoryMedia: number;
+  deletedIntegrationDailyData: number;
+  deletedIntegrationSecrets: number;
+  deletedIntegrationSyncRuns: number;
+  deletedSummaryGenerationQuotas: number;
+};
+
+export const USER_CASCADE_DELETION_STAGES = [
+  "memoryMedia",
+  "memories",
+  "daySummaries",
+  "days",
+  "integrations",
+  "integrationDailyData",
+  "integrationSecrets",
+  "integrationSyncRuns",
+  "userPreferences",
+  "auditLogs",
+  "summaryGenerationQuotas",
+] as const;
+
+export type UserCascadeDeletionStage =
+  (typeof USER_CASCADE_DELETION_STAGES)[number];
+
+const DEFAULT_USER_CASCADE_DELETE_BATCH_SIZE = 128;
+
+type UserCascadeBatchInput = {
+  userId: Id<"user">;
+  clerkUserId: string;
+  stage: UserCascadeDeletionStage;
+  cursor: string | null;
+  batchSize?: number;
+};
+
+type UserCascadeBatchResult = {
+  stage: UserCascadeDeletionStage;
+  nextCursor: string | null;
+  isStageComplete: boolean;
+  deleted: UserCascadeDeleteProgress;
+};
+
+function emptyUserCascadeDeleteProgress(): UserCascadeDeleteProgress {
+  return {
+    deletedMemories: 0,
+    deletedSummaries: 0,
+    deletedDays: 0,
+    deletedIntegrations: 0,
+    deletedPreferences: 0,
+    deletedAuditLogs: 0,
+    deletedMemoryMedia: 0,
+    deletedIntegrationDailyData: 0,
+    deletedIntegrationSecrets: 0,
+    deletedIntegrationSyncRuns: 0,
+    deletedSummaryGenerationQuotas: 0,
+  };
+}
+
+function mergeUserCascadeDeleteProgress(
+  base: UserCascadeDeleteProgress,
+  delta: UserCascadeDeleteProgress,
+): UserCascadeDeleteProgress {
+  return {
+    deletedMemories: base.deletedMemories + delta.deletedMemories,
+    deletedSummaries: base.deletedSummaries + delta.deletedSummaries,
+    deletedDays: base.deletedDays + delta.deletedDays,
+    deletedIntegrations: base.deletedIntegrations + delta.deletedIntegrations,
+    deletedPreferences: base.deletedPreferences + delta.deletedPreferences,
+    deletedAuditLogs: base.deletedAuditLogs + delta.deletedAuditLogs,
+    deletedMemoryMedia: base.deletedMemoryMedia + delta.deletedMemoryMedia,
+    deletedIntegrationDailyData:
+      base.deletedIntegrationDailyData + delta.deletedIntegrationDailyData,
+    deletedIntegrationSecrets:
+      base.deletedIntegrationSecrets + delta.deletedIntegrationSecrets,
+    deletedIntegrationSyncRuns:
+      base.deletedIntegrationSyncRuns + delta.deletedIntegrationSyncRuns,
+    deletedSummaryGenerationQuotas:
+      base.deletedSummaryGenerationQuotas +
+      delta.deletedSummaryGenerationQuotas,
+  };
+}
+
+function toUserCascadeDeleteCounts(
+  progress: UserCascadeDeleteProgress,
+): UserCascadeDeleteCounts {
+  return {
+    deletedMemories: progress.deletedMemories,
+    deletedSummaries: progress.deletedSummaries,
+    deletedDays: progress.deletedDays,
+    deletedIntegrations: progress.deletedIntegrations,
+    deletedPreferences: progress.deletedPreferences,
+    deletedAuditLogs: progress.deletedAuditLogs,
+  };
+}
+
+export function getNextUserCascadeDeletionStage(
+  stage: UserCascadeDeletionStage,
+): UserCascadeDeletionStage | null {
+  const currentIndex = USER_CASCADE_DELETION_STAGES.indexOf(stage);
+  const next = USER_CASCADE_DELETION_STAGES[currentIndex + 1];
+  return next ?? null;
+}
+
+type BatchDeleteResult = {
+  nextCursor: string | null;
+  isDone: boolean;
+  deleted: number;
+};
+
+function resolveBatchSize(value: number | undefined): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_USER_CASCADE_DELETE_BATCH_SIZE;
+  }
+
+  return Math.max(1, Math.min(Math.floor(value ?? 0), 512));
+}
+
 async function safeDeleteStorageBlob(
   ctx: CascadeCtx,
   storageId: string,
@@ -57,179 +174,465 @@ export async function deleteMemoryMediaByMemoryId(
   return deletedMediaCount;
 }
 
-async function deleteMemoriesByUser(
+async function deleteMemoryMediaByUserBatch(
   ctx: CascadeCtx,
   userId: Id<"user">,
-): Promise<number> {
-  const memories = await ctx.db
+  cursor: string | null,
+  batchSize: number,
+): Promise<BatchDeleteResult> {
+  const page = await ctx.db
+    .query("memoryMedia")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .paginate({
+      numItems: batchSize,
+      cursor,
+    });
+
+  let deleted = 0;
+  for (const mediaDoc of page.page) {
+    await safeDeleteStorageBlob(ctx, mediaDoc.storageId);
+    await ctx.db.delete(mediaDoc._id);
+    deleted += 1;
+  }
+
+  return {
+    deleted,
+    isDone: page.isDone,
+    nextCursor: page.isDone ? null : page.continueCursor,
+  };
+}
+
+async function deleteMemoriesByUserBatch(
+  ctx: CascadeCtx,
+  userId: Id<"user">,
+  cursor: string | null,
+  batchSize: number,
+): Promise<BatchDeleteResult> {
+  const page = await ctx.db
     .query("memories")
     .withIndex("by_user_day", (q) => q.eq("userId", userId))
-    .collect();
+    .paginate({
+      numItems: batchSize,
+      cursor,
+    });
 
-  let deletedMemories = 0;
-  for (const memory of memories) {
-    await deleteMemoryMediaByMemoryId(ctx, memory._id);
+  let deleted = 0;
+  for (const memory of page.page) {
     await ctx.db.delete(memory._id);
-    deletedMemories += 1;
+    deleted += 1;
   }
 
-  return deletedMemories;
+  return {
+    deleted,
+    isDone: page.isDone,
+    nextCursor: page.isDone ? null : page.continueCursor,
+  };
 }
 
-async function deleteSummariesByUser(
+async function deleteSummariesByUserBatch(
   ctx: CascadeCtx,
   userId: Id<"user">,
-): Promise<number> {
-  const summaries = await ctx.db
+  cursor: string | null,
+  batchSize: number,
+): Promise<BatchDeleteResult> {
+  const page = await ctx.db
     .query("daySummaries")
     .withIndex("by_user_day", (q) => q.eq("userId", userId))
-    .collect();
+    .paginate({
+      numItems: batchSize,
+      cursor,
+    });
 
-  let deletedSummaries = 0;
-  for (const summary of summaries) {
+  let deleted = 0;
+  for (const summary of page.page) {
     await ctx.db.delete(summary._id);
-    deletedSummaries += 1;
+    deleted += 1;
   }
 
-  return deletedSummaries;
+  return {
+    deleted,
+    isDone: page.isDone,
+    nextCursor: page.isDone ? null : page.continueCursor,
+  };
 }
 
-async function deleteDaysByUser(
+async function deleteDaysByUserBatch(
   ctx: CascadeCtx,
   userId: Id<"user">,
-): Promise<number> {
-  const days = await ctx.db
+  cursor: string | null,
+  batchSize: number,
+): Promise<BatchDeleteResult> {
+  const page = await ctx.db
     .query("days")
     .withIndex("by_user_day", (q) => q.eq("userId", userId))
-    .collect();
+    .paginate({
+      numItems: batchSize,
+      cursor,
+    });
 
-  let deletedDays = 0;
-  for (const day of days) {
+  let deleted = 0;
+  for (const day of page.page) {
     await ctx.db.delete(day._id);
-    deletedDays += 1;
+    deleted += 1;
   }
 
-  return deletedDays;
+  return {
+    deleted,
+    isDone: page.isDone,
+    nextCursor: page.isDone ? null : page.continueCursor,
+  };
 }
 
-async function deleteIntegrationsByUser(
+async function deleteIntegrationsByUserBatch(
   ctx: CascadeCtx,
   userId: Id<"user">,
-): Promise<number> {
-  const integrations = await ctx.db
+  cursor: string | null,
+  batchSize: number,
+): Promise<BatchDeleteResult> {
+  const page = await ctx.db
     .query("integrations")
     .withIndex("by_user_provider", (q) => q.eq("userId", userId))
-    .collect();
+    .paginate({
+      numItems: batchSize,
+      cursor,
+    });
 
-  let deletedIntegrations = 0;
-  for (const integration of integrations) {
+  let deleted = 0;
+  for (const integration of page.page) {
     await ctx.db.delete(integration._id);
-    deletedIntegrations += 1;
+    deleted += 1;
   }
 
-  const integrationDailyData = await ctx.db
+  return {
+    deleted,
+    isDone: page.isDone,
+    nextCursor: page.isDone ? null : page.continueCursor,
+  };
+}
+
+async function deleteIntegrationDailyDataByUserBatch(
+  ctx: CascadeCtx,
+  userId: Id<"user">,
+  cursor: string | null,
+  batchSize: number,
+): Promise<BatchDeleteResult> {
+  const page = await ctx.db
     .query("integrationDailyData")
     .withIndex("by_user_day", (q) => q.eq("userId", userId))
-    .collect();
+    .paginate({
+      numItems: batchSize,
+      cursor,
+    });
 
-  for (const row of integrationDailyData) {
+  let deleted = 0;
+  for (const row of page.page) {
     await ctx.db.delete(row._id);
+    deleted += 1;
   }
 
-  const integrationSecrets = await ctx.db
+  return {
+    deleted,
+    isDone: page.isDone,
+    nextCursor: page.isDone ? null : page.continueCursor,
+  };
+}
+
+async function deleteIntegrationSecretsByUserBatch(
+  ctx: CascadeCtx,
+  userId: Id<"user">,
+  cursor: string | null,
+  batchSize: number,
+): Promise<BatchDeleteResult> {
+  const page = await ctx.db
     .query("integrationSecrets")
     .withIndex("by_user_provider", (q) => q.eq("userId", userId))
-    .collect();
+    .paginate({
+      numItems: batchSize,
+      cursor,
+    });
 
-  for (const secret of integrationSecrets) {
+  let deleted = 0;
+  for (const secret of page.page) {
     await ctx.db.delete(secret._id);
+    deleted += 1;
   }
 
-  const integrationSyncRuns = await ctx.db
+  return {
+    deleted,
+    isDone: page.isDone,
+    nextCursor: page.isDone ? null : page.continueCursor,
+  };
+}
+
+async function deleteIntegrationSyncRunsByUserBatch(
+  ctx: CascadeCtx,
+  userId: Id<"user">,
+  cursor: string | null,
+  batchSize: number,
+): Promise<BatchDeleteResult> {
+  const page = await ctx.db
     .query("integrationSyncRuns")
     .withIndex("by_user_provider", (q) => q.eq("userId", userId))
-    .collect();
+    .paginate({
+      numItems: batchSize,
+      cursor,
+    });
 
-  for (const run of integrationSyncRuns) {
-    await ctx.db.delete(run._id);
+  let deleted = 0;
+  for (const row of page.page) {
+    await ctx.db.delete(row._id);
+    deleted += 1;
   }
 
-  return deletedIntegrations;
+  return {
+    deleted,
+    isDone: page.isDone,
+    nextCursor: page.isDone ? null : page.continueCursor,
+  };
 }
 
-async function deletePreferencesByClerkUserId(
+async function deletePreferencesByClerkUserIdBatch(
   ctx: CascadeCtx,
   clerkUserId: string,
-): Promise<number> {
-  const preferences = await ctx.db
+  cursor: string | null,
+  batchSize: number,
+): Promise<BatchDeleteResult> {
+  const page = await ctx.db
     .query("userPreferences")
     .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", clerkUserId))
-    .collect();
+    .paginate({
+      numItems: batchSize,
+      cursor,
+    });
 
-  let deletedPreferences = 0;
-  for (const preference of preferences) {
+  let deleted = 0;
+  for (const preference of page.page) {
     await ctx.db.delete(preference._id);
-    deletedPreferences += 1;
+    deleted += 1;
   }
 
-  return deletedPreferences;
+  return {
+    deleted,
+    isDone: page.isDone,
+    nextCursor: page.isDone ? null : page.continueCursor,
+  };
 }
 
-async function deleteAuditLogsByUser(
+async function deleteAuditLogsByUserBatch(
   ctx: CascadeCtx,
   userId: Id<"user">,
-): Promise<number> {
-  const auditLogs = await ctx.db
+  cursor: string | null,
+  batchSize: number,
+): Promise<BatchDeleteResult> {
+  const page = await ctx.db
     .query("auditLogs")
     .withIndex("by_userId", (q) => q.eq("actorUserId", userId))
-    .collect();
+    .paginate({
+      numItems: batchSize,
+      cursor,
+    });
 
-  let deletedAuditLogs = 0;
-  for (const log of auditLogs) {
+  let deleted = 0;
+  for (const log of page.page) {
     await ctx.db.delete(log._id);
-    deletedAuditLogs += 1;
+    deleted += 1;
   }
 
-  return deletedAuditLogs;
+  return {
+    deleted,
+    isDone: page.isDone,
+    nextCursor: page.isDone ? null : page.continueCursor,
+  };
 }
 
-async function deleteSummaryQuotasByUser(
+async function deleteSummaryQuotasByUserBatch(
   ctx: CascadeCtx,
   userId: Id<"user">,
-): Promise<void> {
-  const quotas = await ctx.db
+  cursor: string | null,
+  batchSize: number,
+): Promise<BatchDeleteResult> {
+  const page = await ctx.db
     .query("summaryGenerationQuotas")
     .withIndex("by_user_day", (q) => q.eq("userId", userId))
-    .collect();
+    .paginate({
+      numItems: batchSize,
+      cursor,
+    });
 
-  for (const quota of quotas) {
+  let deleted = 0;
+  for (const quota of page.page) {
     await ctx.db.delete(quota._id);
+    deleted += 1;
   }
+
+  return {
+    deleted,
+    isDone: page.isDone,
+    nextCursor: page.isDone ? null : page.continueCursor,
+  };
+}
+
+export async function runUserCascadeDeletionStageBatch(
+  ctx: CascadeCtx,
+  input: UserCascadeBatchInput,
+): Promise<UserCascadeBatchResult> {
+  const batchSize = resolveBatchSize(input.batchSize);
+  const deleted = emptyUserCascadeDeleteProgress();
+  let result: BatchDeleteResult;
+
+  switch (input.stage) {
+    case "memoryMedia": {
+      result = await deleteMemoryMediaByUserBatch(
+        ctx,
+        input.userId,
+        input.cursor,
+        batchSize,
+      );
+      deleted.deletedMemoryMedia = result.deleted;
+      break;
+    }
+    case "memories": {
+      result = await deleteMemoriesByUserBatch(
+        ctx,
+        input.userId,
+        input.cursor,
+        batchSize,
+      );
+      deleted.deletedMemories = result.deleted;
+      break;
+    }
+    case "daySummaries": {
+      result = await deleteSummariesByUserBatch(
+        ctx,
+        input.userId,
+        input.cursor,
+        batchSize,
+      );
+      deleted.deletedSummaries = result.deleted;
+      break;
+    }
+    case "days": {
+      result = await deleteDaysByUserBatch(
+        ctx,
+        input.userId,
+        input.cursor,
+        batchSize,
+      );
+      deleted.deletedDays = result.deleted;
+      break;
+    }
+    case "integrations": {
+      result = await deleteIntegrationsByUserBatch(
+        ctx,
+        input.userId,
+        input.cursor,
+        batchSize,
+      );
+      deleted.deletedIntegrations = result.deleted;
+      break;
+    }
+    case "integrationDailyData": {
+      result = await deleteIntegrationDailyDataByUserBatch(
+        ctx,
+        input.userId,
+        input.cursor,
+        batchSize,
+      );
+      deleted.deletedIntegrationDailyData = result.deleted;
+      break;
+    }
+    case "integrationSecrets": {
+      result = await deleteIntegrationSecretsByUserBatch(
+        ctx,
+        input.userId,
+        input.cursor,
+        batchSize,
+      );
+      deleted.deletedIntegrationSecrets = result.deleted;
+      break;
+    }
+    case "integrationSyncRuns": {
+      result = await deleteIntegrationSyncRunsByUserBatch(
+        ctx,
+        input.userId,
+        input.cursor,
+        batchSize,
+      );
+      deleted.deletedIntegrationSyncRuns = result.deleted;
+      break;
+    }
+    case "userPreferences": {
+      result = await deletePreferencesByClerkUserIdBatch(
+        ctx,
+        input.clerkUserId,
+        input.cursor,
+        batchSize,
+      );
+      deleted.deletedPreferences = result.deleted;
+      break;
+    }
+    case "auditLogs": {
+      result = await deleteAuditLogsByUserBatch(
+        ctx,
+        input.userId,
+        input.cursor,
+        batchSize,
+      );
+      deleted.deletedAuditLogs = result.deleted;
+      break;
+    }
+    case "summaryGenerationQuotas": {
+      result = await deleteSummaryQuotasByUserBatch(
+        ctx,
+        input.userId,
+        input.cursor,
+        batchSize,
+      );
+      deleted.deletedSummaryGenerationQuotas = result.deleted;
+      break;
+    }
+    default: {
+      throw new Error("Unsupported user deletion stage");
+    }
+  }
+
+  return {
+    stage: input.stage,
+    deleted,
+    isStageComplete: result.isDone,
+    nextCursor: result.nextCursor,
+  };
 }
 
 export async function deleteUserCascadeData(
   ctx: CascadeCtx,
   input: UserCascadeInput,
 ): Promise<UserCascadeDeleteCounts> {
-  const deletedMemories = await deleteMemoriesByUser(ctx, input.userId);
-  const deletedDays = await deleteDaysByUser(ctx, input.userId);
-  const deletedSummaries = await deleteSummariesByUser(ctx, input.userId);
-  const deletedIntegrations = await deleteIntegrationsByUser(ctx, input.userId);
-  const deletedPreferences = await deletePreferencesByClerkUserId(
-    ctx,
-    input.clerkUserId,
-  );
-  const deletedAuditLogs = await deleteAuditLogsByUser(ctx, input.userId);
-  await deleteSummaryQuotasByUser(ctx, input.userId);
+  let stage: UserCascadeDeletionStage | null = USER_CASCADE_DELETION_STAGES[0];
+  let cursor: string | null = null;
+  let progress = emptyUserCascadeDeleteProgress();
 
-  return {
-    deletedMemories,
-    deletedSummaries,
-    deletedDays,
-    deletedIntegrations,
-    deletedPreferences,
-    deletedAuditLogs,
-  };
+  while (stage) {
+    const batch = await runUserCascadeDeletionStageBatch(ctx, {
+      userId: input.userId,
+      clerkUserId: input.clerkUserId,
+      stage,
+      cursor,
+      batchSize: DEFAULT_USER_CASCADE_DELETE_BATCH_SIZE,
+    });
+
+    progress = mergeUserCascadeDeleteProgress(progress, batch.deleted);
+
+    if (batch.isStageComplete) {
+      stage = getNextUserCascadeDeletionStage(stage);
+      cursor = null;
+      continue;
+    }
+
+    cursor = batch.nextCursor;
+  }
+
+  return toUserCascadeDeleteCounts(progress);
 }
 
 export async function deleteDayCascadeData(

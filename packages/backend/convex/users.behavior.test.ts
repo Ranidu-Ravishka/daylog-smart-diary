@@ -306,15 +306,32 @@ describe("users behavior", () => {
     });
 
     const storageDelete = vi.fn(async () => undefined);
+    const schedulerRunAfter = vi.fn(async () => undefined);
     const deleteUserAndRelatedDataByClerkId = handler<
       { clerkUserId: string },
-      { success: boolean; deleted: boolean }
+      {
+        success: boolean;
+        deleted: boolean;
+        queued?: boolean;
+        jobId?: Id<"userDeletionJobs">;
+      }
     >(usersModule.deleteUserAndRelatedDataByClerkId);
+    const runUserDeletionCascadeJobStepInternal = handler<
+      { jobId: Id<"userDeletionJobs">; batchSize?: number },
+      { success: boolean; done: boolean; status?: string }
+    >(usersModule.runUserDeletionCascadeJobStepInternal);
+    const getUserDeletionJobByIdInternal = handler<
+      { jobId: Id<"userDeletionJobs"> },
+      { status: string; checkpoints: number; processedBatches: number } | null
+    >(usersModule.getUserDeletionJobByIdInternal);
 
     const ctx = {
       ...createAuthCtx(db, "clerk_admin_001"),
       storage: {
         delete: storageDelete,
+      },
+      scheduler: {
+        runAfter: schedulerRunAfter,
       },
     };
 
@@ -322,7 +339,43 @@ describe("users behavior", () => {
       clerkUserId: "clerk_target_001",
     });
 
-    expect(first).toEqual({ success: true, deleted: true });
+    expect(first.success).toBe(true);
+    expect(first.deleted).toBe(true);
+    expect(first.queued).toBe(true);
+    expect(first.jobId).toBeDefined();
+    expect(schedulerRunAfter).toHaveBeenCalledTimes(1);
+
+    const jobId = first.jobId as Id<"userDeletionJobs">;
+    const beforeSteps = await getUserDeletionJobByIdInternal(ctx, {
+      jobId,
+    });
+    expect(beforeSteps?.status).toBe("queued");
+    expect(beforeSteps?.checkpoints).toBe(0);
+
+    let completed = false;
+    let guard = 0;
+    while (!completed) {
+      guard += 1;
+      if (guard > 200) {
+        throw new Error("Timed out waiting for user deletion job completion");
+      }
+
+      const step = await runUserDeletionCascadeJobStepInternal(ctx, {
+        jobId,
+        batchSize: 1,
+      });
+
+      expect(step.success).toBe(true);
+      completed = step.done;
+    }
+
+    const afterSteps = await getUserDeletionJobByIdInternal(ctx, {
+      jobId,
+    });
+    expect(afterSteps?.status).toBe("completed");
+    expect(afterSteps?.checkpoints).toBeGreaterThan(0);
+    expect(afterSteps?.processedBatches).toBe(afterSteps?.checkpoints);
+
     expect(storageDelete).toHaveBeenCalledTimes(1);
     expect(db.getTable("user").map((row) => row._id)).not.toContain(
       targetUserId,
@@ -338,10 +391,18 @@ describe("users behavior", () => {
     expect(db.getTable("auditLogs")).toHaveLength(0);
     expect(db.getTable("summaryGenerationQuotas")).toHaveLength(0);
 
+    const replay = await runUserDeletionCascadeJobStepInternal(ctx, {
+      jobId,
+      batchSize: 1,
+    });
+    expect(replay.success).toBe(true);
+    expect(replay.done).toBe(true);
+    expect(replay.status).toBe("completed");
+
     const second = await deleteUserAndRelatedDataByClerkId(ctx, {
       clerkUserId: "clerk_target_001",
     });
 
-    expect(second).toEqual({ success: true, deleted: false });
+    expect(second).toEqual({ success: true, deleted: false, queued: false });
   });
 });

@@ -9,7 +9,6 @@ import { assertIntegrationProvider } from "./integrationProviders";
 import {
   deleteDayCascadeData,
   deleteMemoryMediaByMemoryId,
-  deleteUserCascadeData,
 } from "./cascadeCleanup";
 import {
   applyDashboardMetricsDelta,
@@ -234,30 +233,98 @@ export const adminUpdateUser = mutation({
 
 export const adminDeleteUser = mutation({
   args: { userId: v.id("user") },
-  handler: async (ctx, args) => {
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    success: boolean;
+    queued: boolean;
+    jobId: Id<"userDeletionJobs">;
+    status: "queued" | "running" | "completed";
+    stage: string;
+    created: boolean;
+  }> => {
     const admin = await requireAdmin(ctx);
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("User not found");
 
-    const deleted = await deleteUserCascadeData(ctx, {
-      userId: args.userId,
-      clerkUserId: user.clerkUserId,
-    });
+    const deletionJob = (await ctx.runMutation(
+      internal.users.enqueueUserDeletionJobInternal as any,
+      {
+        userId: args.userId,
+        clerkUserId: user.clerkUserId,
+        requestedByUserId: admin._id,
+      },
+    )) as {
+      jobId: Id<"userDeletionJobs">;
+      status: "queued" | "running" | "completed";
+      stage: string;
+      created: boolean;
+    };
 
-    await ctx.db.delete(args.userId);
+    await logAdminAction(ctx, admin._id, "delete_user_queued", user.email);
 
-    await applyDashboardMetricsDelta(ctx.db, {
-      totalUsers: -1,
-      totalMemories: -deleted.deletedMemories,
-      totalDays: -deleted.deletedDays,
-      totalSummaries: -deleted.deletedSummaries,
-      totalIntegrations: -deleted.deletedIntegrations,
-      totalPreferences: -deleted.deletedPreferences,
-      totalAuditLogs: -deleted.deletedAuditLogs,
-    });
+    return {
+      success: true,
+      queued: true,
+      jobId: deletionJob.jobId,
+      status: deletionJob.status,
+      stage: deletionJob.stage,
+      created: deletionJob.created,
+    };
+  },
+});
 
-    await logAdminAction(ctx, admin._id, "delete_user", user.email);
-    return { success: true };
+export const adminGetUserDeletionJob = query({
+  args: {
+    jobId: v.id("userDeletionJobs"),
+    pollToken: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+    void args.pollToken;
+
+    const job = await ctx.db.get(args.jobId);
+    if (!job) {
+      throw new Error("User deletion job not found");
+    }
+
+    return job;
+  },
+});
+
+export const adminGetLatestUserDeletionJobByUserId = query({
+  args: { userId: v.id("user") },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+
+    const running = await ctx.db
+      .query("userDeletionJobs")
+      .withIndex("by_user_status", (q) =>
+        q.eq("userId", args.userId).eq("status", "running"),
+      )
+      .order("desc")
+      .take(1);
+    if (running[0]) return running[0];
+
+    const queued = await ctx.db
+      .query("userDeletionJobs")
+      .withIndex("by_user_status", (q) =>
+        q.eq("userId", args.userId).eq("status", "queued"),
+      )
+      .order("desc")
+      .take(1);
+    if (queued[0]) return queued[0];
+
+    const completed = await ctx.db
+      .query("userDeletionJobs")
+      .withIndex("by_user_status", (q) =>
+        q.eq("userId", args.userId).eq("status", "completed"),
+      )
+      .order("desc")
+      .take(1);
+
+    return completed[0] ?? null;
   },
 });
 
