@@ -396,3 +396,214 @@ Allowed examples:
 - staged mitigation for urgent incident with explicit post-incident hardening tasks
 
 Unapproved exceptions are policy violations.
+
+## 18) Cross-Surface Contract Enforcement
+
+All shared contracts between web, mobile, admin, and backend must be treated as production APIs.
+
+Requirements:
+
+1. Single source of truth:
+   - Shared types/validators must be defined in backend or shared packages
+2. No implicit assumptions:
+   - Frontend must not assume fields not defined in backend contracts
+3. Backward compatibility:
+   - Breaking changes require migration strategy (R2/R3)
+4. Validation:
+   - All external inputs must pass strict validation (no "any" bypass)
+
+CI expectation:
+
+- Contract-breaking changes must fail typecheck or tests
+- Boundary checks must be enforced (no direct backend misuse)
+
+Failure to follow this leads to silent production bugs.
+
+## 19) Feature Flags and Controlled Rollouts
+
+All high-risk or user-sensitive features must be behind feature flags.
+
+Examples:
+
+- integrations
+- summary generation changes
+- background tracking
+- AI features
+
+Requirements:
+
+1. Feature flags must be:
+   - remotely configurable (runtimeConfig or backend-driven)
+   - environment-aware (dev/staging/prod)
+
+2. Rollout strategy:
+
+- Phase 1: internal testing
+- Phase 2: limited user rollout
+- Phase 3: full release
+
+3. Kill switch:
+
+- Every critical feature must be disable-able without redeploy
+
+Merge is blocked for R2/R3 features without rollout strategy.
+
+## 20) Performance Budget and Constraints
+
+All features must respect performance budgets.
+
+Backend:
+
+- No unbounded queries on user-facing paths
+- Queries must be paginated or explicitly limited
+- Avoid N+1 query patterns
+
+Web/Admin:
+
+- First load must not block on heavy data
+- Use loading states for async operations
+
+Mobile:
+
+- Avoid excessive background processing
+- Limit network calls and batching frequency
+- Minimize battery impact
+
+PRs must include:
+
+- performance impact note (if applicable)
+
+Regressions must be treated as defects.
+
+## 21) Observability Standard
+
+All production flows must be observable.
+
+Requirements:
+
+1. Structured logging:
+
+- Use consistent format:
+  - event name
+  - userId (if applicable)
+  - status (success/failure)
+  - error reason (if failure)
+
+2. Error tracking:
+
+- All critical errors must be captured (e.g., Sentry)
+- No silent failures
+
+3. Key events to log:
+
+- summary generation start/end
+- integration sync start/end
+- webhook processing
+- export requests
+- background tracking events
+
+4. User-facing errors:
+
+- Must be actionable
+- Must not expose internal details
+
+Console-only logging is not acceptable for production-critical paths.
+
+## 22) Mobile-Specific Production Rules
+
+Mobile behavior must respect OS constraints and user expectations.
+
+Requirements:
+
+1. Background features:
+
+- Must be explicitly enabled
+- Must respect OS permissions
+- Must fail safely if permissions revoked
+
+2. Battery impact:
+
+- Background tracking must be bounded
+- Avoid high-frequency polling
+
+3. Network reliability:
+
+- Offline-safe behavior required where applicable
+- Retry strategy must be defined
+
+4. UI consistency:
+
+- Every async action must have:
+  - loading state
+  - success feedback
+  - error handling
+
+Mobile-specific failures must not silently degrade behavior.
+
+## 23) Data Lifecycle and Retention
+
+All stored data must have a defined lifecycle.
+
+Requirements:
+
+1. Retention policy:
+
+- Define how long data is stored
+- Apply especially to:
+  - location data
+  - health data
+  - integration data
+
+2. Cleanup:
+
+- Background jobs must enforce retention rules
+- Must be idempotent
+
+3. User control:
+
+- Users must be able to:
+  - export data
+  - delete data
+
+4. Storage control:
+
+- Avoid unbounded data growth
+- Use limits or archival strategies
+
+Unbounded storage growth is not acceptable.
+
+## 24) Integration Reliability Standard
+
+All external integrations must be resilient and observable.
+
+Requirements:
+
+1. Sync behavior:
+
+- Must be idempotent
+- Must handle partial failures
+
+2. Retry policy:
+
+- Define retry strategy (with limits)
+- Avoid infinite loops
+
+3. Health tracking:
+
+- Track:
+  - success rate
+  - failure rate
+  - last sync time
+
+4. User visibility:
+
+- Users must see:
+  - connection status
+  - last sync result
+
+5. Failure handling:
+
+- Must degrade gracefully
+- Must not block core app usage
+
+Integration failures must be visible and recoverable.

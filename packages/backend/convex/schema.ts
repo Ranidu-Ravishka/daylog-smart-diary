@@ -439,7 +439,7 @@ export default defineSchema(
         integrationDailyData: v.number(),
         locationSignals: v.number(),
         summaryGenerationEvents: v.number(),
-        exportJobs: v.number(),
+        exportJobs: v.optional(v.number()),
       }),
       error: v.optional(v.string()),
       actorUserId: v.optional(v.id("user")),
