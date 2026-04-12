@@ -8,7 +8,7 @@ import * as Notifications from "expo-notifications";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import "react-native-reanimated";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
 import { ConvexReactClient, useConvexAuth, useMutation } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
@@ -26,14 +26,66 @@ Notifications.setNotificationHandler({
   }),
 });
 
-const defaultConvexUrl = "http://localhost:4334";
-const configuredConvexUrl = process.env.EXPO_PUBLIC_CONVEX_URL;
+const DEV_FALLBACK_CONVEX_URL = "http://localhost:4334";
+const CONVEX_URL_ENV_VAR = "EXPO_PUBLIC_CONVEX_URL";
 
-if (!configuredConvexUrl && !__DEV__) {
-  console.error("Missing EXPO_PUBLIC_CONVEX_URL in production build.");
+type ConvexBootstrap = {
+  client: ConvexReactClient | null;
+  startupError: Error | null;
+};
+
+function resolveConvexUrlOrThrow(): { url: string; usingDevFallback: boolean } {
+  const configuredConvexUrl = process.env.EXPO_PUBLIC_CONVEX_URL?.trim();
+
+  if (configuredConvexUrl) {
+    return {
+      url: configuredConvexUrl,
+      usingDevFallback: false,
+    };
+  }
+
+  if (__DEV__) {
+    return {
+      url: DEV_FALLBACK_CONVEX_URL,
+      usingDevFallback: true,
+    };
+  }
+
+  throw new Error(
+    `Missing ${CONVEX_URL_ENV_VAR}. Set ${CONVEX_URL_ENV_VAR} to your Convex deployment URL and restart the app.`,
+  );
 }
 
-const convex = new ConvexReactClient(configuredConvexUrl ?? defaultConvexUrl);
+function bootstrapConvexClient(): ConvexBootstrap {
+  try {
+    const resolved = resolveConvexUrlOrThrow();
+
+    if (resolved.usingDevFallback) {
+      console.warn(
+        `[startup] ${CONVEX_URL_ENV_VAR} is not set. Using local development fallback at ${DEV_FALLBACK_CONVEX_URL}.`,
+      );
+    }
+
+    return {
+      client: new ConvexReactClient(resolved.url),
+      startupError: null,
+    };
+  } catch (error) {
+    const startupError =
+      error instanceof Error
+        ? error
+        : new Error("Unexpected startup misconfiguration.");
+
+    console.error(`[startup] ${startupError.message}`);
+
+    return {
+      client: null,
+      startupError,
+    };
+  }
+}
+
+const convexBootstrap = bootstrapConvexClient();
 
 export const unstable_settings = {
   anchor: "(tabs)",
@@ -87,11 +139,33 @@ function SyncClerkUserToConvex() {
   return null;
 }
 
-function ConvexAuthProvider({ children }: { children: React.ReactNode }) {
+function ConvexAuthProvider({
+  children,
+  client,
+}: {
+  children: React.ReactNode;
+  client: ConvexReactClient;
+}) {
   return (
-    <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
+    <ConvexProviderWithClerk client={client} useAuth={useAuth}>
       {children}
     </ConvexProviderWithClerk>
+  );
+}
+
+function StartupConfigErrorScreen({ message }: { message: string }) {
+  return (
+    <View style={styles.configErrorContainer}>
+      <Text style={styles.configErrorTitle}>Startup configuration error</Text>
+      <Text style={styles.configErrorBody}>
+        DayLog could not start because Convex is not configured for this build.
+      </Text>
+      <Text style={styles.configErrorCode}>{CONVEX_URL_ENV_VAR}</Text>
+      <Text style={styles.configErrorBody}>{message}</Text>
+      <Text style={styles.configErrorHint}>
+        Update your app environment with a valid Convex URL and restart.
+      </Text>
+    </View>
   );
 }
 
@@ -142,12 +216,28 @@ function RootAuthBoundary({ children }: { children: React.ReactNode }) {
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+  const startupError = convexBootstrap.startupError;
+  const convexClient = convexBootstrap.client;
+
+  if (startupError || !convexClient) {
+    return (
+      <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
+        <StartupConfigErrorScreen
+          message={
+            startupError?.message ??
+            "Convex client could not be initialized at startup."
+          }
+        />
+        <StatusBar style="auto" />
+      </ThemeProvider>
+    );
+  }
 
   return (
     <ClerkProvider
       publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!}
     >
-      <ConvexAuthProvider>
+      <ConvexAuthProvider client={convexClient}>
         <ThemeProvider
           value={colorScheme === "dark" ? DarkTheme : DefaultTheme}
         >
@@ -185,5 +275,37 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+  },
+  configErrorContainer: {
+    flex: 1,
+    paddingHorizontal: 24,
+    justifyContent: "center",
+    backgroundColor: "#fff",
+    gap: 12,
+  },
+  configErrorTitle: {
+    fontSize: 24,
+    fontWeight: "700",
+    color: "#0f172a",
+  },
+  configErrorBody: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: "#334155",
+  },
+  configErrorCode: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#b91c1c",
+    backgroundColor: "#fee2e2",
+    alignSelf: "flex-start",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  configErrorHint: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: "#475569",
   },
 });
