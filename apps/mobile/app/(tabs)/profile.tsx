@@ -59,6 +59,7 @@ import {
 } from "../../lib/life-context-toggle-policy";
 import { collectAndroidScreenTimeDailyDataForDay } from "../../lib/android-screen-time-sync";
 import { collectIosScreenTimeDailyDataForDay } from "../../lib/ios-screen-time-sync";
+import { getOfflineOutboxSnapshot } from "@/lib/offline-outbox";
 import {
   Colors,
   Spacing,
@@ -88,6 +89,10 @@ type IntegrationSyncRunDoc = {
   updatedAt: number;
   lastError?: string;
 };
+
+type OfflineOutboxSnapshot = Awaited<
+  ReturnType<typeof getOfflineOutboxSnapshot>
+>;
 
 function getTodayDayKey(): string {
   const timeZone = getResolvedTimeZone();
@@ -278,6 +283,11 @@ const SettingsScreen = () => {
     } | null>(null);
   const [callActivityDiagnostics, setCallActivityDiagnostics] =
     useState<AndroidCallActivityRuntimeDiagnostics | null>(null);
+  const [offlineOutboxSnapshot, setOfflineOutboxSnapshot] =
+    useState<OfflineOutboxSnapshot>({
+      pending: 0,
+      dueNow: 0,
+    });
   const callActivityCollectionSupported = React.useMemo(
     () =>
       Platform.OS === "android" && isAndroidCallActivityCollectionSupported(),
@@ -286,6 +296,11 @@ const SettingsScreen = () => {
 
   const refreshCallActivityDiagnostics = useCallback(async () => {
     return await getAndroidCallActivityRuntimeDiagnostics();
+  }, []);
+
+  const refreshOfflineOutboxStatus = useCallback(async () => {
+    const snapshot = await getOfflineOutboxSnapshot();
+    setOfflineOutboxSnapshot(snapshot);
   }, []);
 
   const syncReminderRuntimeFromPreferences = useCallback(
@@ -667,13 +682,35 @@ const SettingsScreen = () => {
       void (async () => {
         const diagnostics = await refreshCallActivityDiagnostics();
         setCallActivityDiagnostics(diagnostics);
+        await refreshOfflineOutboxStatus();
       })();
     });
 
     return () => {
       subscription.remove();
     };
-  }, [refreshCallActivityDiagnostics]);
+  }, [refreshCallActivityDiagnostics, refreshOfflineOutboxStatus]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const refresh = async () => {
+      const snapshot = await getOfflineOutboxSnapshot();
+      if (!cancelled) {
+        setOfflineOutboxSnapshot(snapshot);
+      }
+    };
+
+    void refresh();
+    const intervalId = setInterval(() => {
+      void refresh();
+    }, 15_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, []);
 
   const updateReminderType = useCallback(
     async (nextReminderType: "daily" | "weekly") => {
@@ -1650,6 +1687,12 @@ const SettingsScreen = () => {
     callActivityDiagnostics?.permissionStatus === "not_supported"
       ? "not supported"
       : (callActivityDiagnostics?.permissionStatus ?? "checking");
+  const outboxLastSyncStatusColor =
+    offlineOutboxSnapshot.lastSyncResult?.status === "error"
+      ? c.error
+      : offlineOutboxSnapshot.lastSyncResult?.status === "partial"
+        ? c.warning
+        : c.success;
 
   /* ── Toggle row helper ───────────────── */
   const ToggleRow = ({
@@ -2252,6 +2295,44 @@ const SettingsScreen = () => {
           <View style={styles.pad}>
             <SectionHeader title="Sync Status" />
             <AppCard>
+              <Text style={styles.syncHeading}>Offline Outbox</Text>
+              <Text style={styles.syncText}>
+                Pending operations: {offlineOutboxSnapshot.pending}
+                {offlineOutboxSnapshot.dueNow > 0
+                  ? ` (${offlineOutboxSnapshot.dueNow} ready now)`
+                  : ""}
+              </Text>
+              <Text style={[styles.syncText, { marginTop: 4 }]}>
+                Oldest queued item:{" "}
+                {offlineOutboxSnapshot.oldestCreatedAt
+                  ? new Date(
+                      offlineOutboxSnapshot.oldestCreatedAt,
+                    ).toLocaleString()
+                  : "None"}
+              </Text>
+              {offlineOutboxSnapshot.lastSyncResult ? (
+                <>
+                  <Text style={[styles.syncText, { marginTop: 4 }]}>
+                    Last outbox sync:{" "}
+                    {new Date(
+                      offlineOutboxSnapshot.lastSyncResult.updatedAt,
+                    ).toLocaleString()}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.syncText,
+                      { marginTop: 4, color: outboxLastSyncStatusColor },
+                    ]}
+                  >
+                    Result: {offlineOutboxSnapshot.lastSyncResult.message}
+                  </Text>
+                </>
+              ) : (
+                <Text style={[styles.syncText, { marginTop: 4 }]}>
+                  Last outbox sync: No sync attempts yet.
+                </Text>
+              )}
+              <View style={styles.divider} />
               <Text style={styles.syncText}>
                 Reminder: {preferences.reminderType} at{" "}
                 {preferences.formattedTime}
@@ -2342,6 +2423,32 @@ const SettingsScreen = () => {
               <Text style={styles.syncText}>
                 Preferences not set yet. Complete Quick Setup to sync reminders.
               </Text>
+              <View style={styles.divider} />
+              <Text style={styles.syncHeading}>Offline Outbox</Text>
+              <Text style={styles.syncText}>
+                Pending operations: {offlineOutboxSnapshot.pending}
+                {offlineOutboxSnapshot.dueNow > 0
+                  ? ` (${offlineOutboxSnapshot.dueNow} ready now)`
+                  : ""}
+              </Text>
+              <Text style={[styles.syncText, { marginTop: 4 }]}>
+                Last outbox sync:{" "}
+                {offlineOutboxSnapshot.lastSyncResult
+                  ? new Date(
+                      offlineOutboxSnapshot.lastSyncResult.updatedAt,
+                    ).toLocaleString()
+                  : "No sync attempts yet"}
+              </Text>
+              {offlineOutboxSnapshot.lastSyncResult ? (
+                <Text
+                  style={[
+                    styles.syncText,
+                    { marginTop: 4, color: outboxLastSyncStatusColor },
+                  ]}
+                >
+                  Result: {offlineOutboxSnapshot.lastSyncResult.message}
+                </Text>
+              ) : null}
               <TouchableOpacity
                 onPress={() => router.push("/quick-setup")}
                 style={[styles.quickBtn, { marginTop: Spacing.md }]}
@@ -2752,6 +2859,12 @@ const styles = StyleSheet.create({
   },
 
   /* Sync */
+  syncHeading: {
+    ...Typography.caption1,
+    color: c.text,
+    textTransform: "uppercase",
+    marginBottom: 4,
+  },
   syncText: {
     ...Typography.callout,
     color: c.textSecondary,

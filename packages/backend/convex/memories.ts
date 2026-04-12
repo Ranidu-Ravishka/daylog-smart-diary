@@ -1,8 +1,8 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type MutationCtx } from "./_generated/server";
 import { requireUser, requireOwnership } from "./authz";
 import { validateDayKey, clampLimit } from "./validators";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { applyDashboardMetricsDelta } from "./dashboardMetrics";
 import { getPlanLimitsForTier, normalizeUserPlanTier } from "./planLimits";
 
@@ -35,6 +35,111 @@ function assertMemoryTextLimits(args: {
   }
 }
 
+type AddMemoryMediaArgs = {
+  memoryId: Id<"memories">;
+  storageId: string;
+  type: "image" | "video";
+  width: number | undefined;
+  height: number | undefined;
+  clientMediaId?: string;
+};
+
+function normalizeClientMediaId(
+  clientMediaId: string | undefined,
+): string | undefined {
+  const trimmed = clientMediaId?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+async function addMemoryMediaForOwnedMemory(
+  ctx: MutationCtx,
+  user: Doc<"user">,
+  args: AddMemoryMediaArgs,
+) {
+  const clientMediaId = normalizeClientMediaId(args.clientMediaId);
+
+  if (clientMediaId) {
+    const existing = await ctx.db
+      .query("memoryMedia")
+      .withIndex("by_memory_clientMediaId", (q) =>
+        q.eq("memoryId", args.memoryId).eq("clientMediaId", clientMediaId),
+      )
+      .unique();
+
+    if (existing) {
+      if (existing.type !== args.type) {
+        throw new Error(
+          "Conflict: clientMediaId already used for a different media payload.",
+        );
+      }
+
+      return existing;
+    }
+  }
+
+  const planTier = normalizeUserPlanTier(user.planTier);
+  const limits = getPlanLimitsForTier(planTier).memory;
+
+  const existingMediaCount = (
+    await ctx.db
+      .query("memoryMedia")
+      .withIndex("by_memory", (q) => q.eq("memoryId", args.memoryId))
+      .take(limits.maxMediaPerMemory + 1)
+  ).length;
+
+  if (existingMediaCount >= limits.maxMediaPerMemory) {
+    throw new Error(
+      `Plan limit reached: up to ${limits.maxMediaPerMemory} media item(s) per memory on ${planTier} plan.`,
+    );
+  }
+
+  const metadata = await ctx.storage.getMetadata(args.storageId as any);
+  if (!metadata) {
+    throw new Error("Uploaded media file was not found. Please upload again.");
+  }
+
+  if (metadata.size > limits.maxMediaBytesPerFile) {
+    try {
+      await ctx.storage.delete(args.storageId as any);
+    } catch {
+      // Ignore cleanup failures for oversized uploads.
+    }
+
+    throw new Error(
+      `Plan limit reached: max file size is ${bytesToMbLabel(limits.maxMediaBytesPerFile)} on ${planTier} plan.`,
+    );
+  }
+
+  const contentType = metadata.contentType?.toLowerCase();
+  if (
+    args.type === "image" &&
+    contentType &&
+    !contentType.startsWith(IMAGE_CONTENT_TYPE_PREFIX)
+  ) {
+    throw new Error("Invalid media type: expected an image upload.");
+  }
+
+  if (
+    args.type === "video" &&
+    contentType &&
+    !contentType.startsWith(VIDEO_CONTENT_TYPE_PREFIX)
+  ) {
+    throw new Error("Invalid media type: expected a video upload.");
+  }
+
+  const id = await ctx.db.insert("memoryMedia", {
+    memoryId: args.memoryId,
+    userId: user._id,
+    clientMediaId,
+    storageId: args.storageId,
+    type: args.type,
+    width: args.width,
+    height: args.height,
+  });
+
+  return await ctx.db.get(id);
+}
+
 // ── Generate an upload URL for memory media ─────────────────
 export const generateMemoryMediaUploadUrl = mutation({
   args: {},
@@ -48,6 +153,7 @@ export const generateMemoryMediaUploadUrl = mutation({
 // ── Create a new memory ─────────────────────────────────────
 export const createMemory = mutation({
   args: {
+    clientRequestId: v.optional(v.string()),
     title: v.string(),
     description: v.optional(v.string()),
     mood: v.optional(v.string()),
@@ -64,8 +170,36 @@ export const createMemory = mutation({
       planTier: user.planTier,
     });
 
+    if (args.clientRequestId) {
+      const existing = await ctx.db
+        .query("memories")
+        .withIndex("by_user_clientRequestId", (q) =>
+          q.eq("userId", user._id).eq("clientRequestId", args.clientRequestId),
+        )
+        .unique();
+
+      if (existing) {
+        const samePayload =
+          existing.title === args.title &&
+          (existing.description ?? undefined) ===
+            (args.description ?? undefined) &&
+          (existing.mood ?? undefined) === (args.mood ?? undefined) &&
+          existing.happenedAt === args.happenedAt &&
+          existing.dayKey === args.dayKey;
+
+        if (!samePayload) {
+          throw new Error(
+            "Conflict: clientRequestId already used for a different memory payload.",
+          );
+        }
+
+        return existing;
+      }
+    }
+
     const id = await ctx.db.insert("memories", {
       userId: user._id,
+      clientRequestId: args.clientRequestId,
       title: args.title,
       description: args.description,
       mood: args.mood,
@@ -234,6 +368,7 @@ export const deleteMemory = mutation({
 export const addMemoryMedia = mutation({
   args: {
     memoryId: v.id("memories"),
+    clientMediaId: v.optional(v.string()),
     storageId: v.string(),
     type: v.union(v.literal("image"), v.literal("video")),
     width: v.optional(v.number()),
@@ -249,68 +384,50 @@ export const addMemoryMedia = mutation({
 
     requireOwnership(user, memory.userId);
 
-    const planTier = normalizeUserPlanTier(user.planTier);
-    const limits = getPlanLimitsForTier(planTier).memory;
-
-    const existingMediaCount = (
-      await ctx.db
-        .query("memoryMedia")
-        .withIndex("by_memory", (q) => q.eq("memoryId", args.memoryId))
-        .take(limits.maxMediaPerMemory + 1)
-    ).length;
-
-    if (existingMediaCount >= limits.maxMediaPerMemory) {
-      throw new Error(
-        `Plan limit reached: up to ${limits.maxMediaPerMemory} media item(s) per memory on ${planTier} plan.`,
-      );
-    }
-
-    const metadata = await ctx.storage.getMetadata(args.storageId as any);
-    if (!metadata) {
-      throw new Error(
-        "Uploaded media file was not found. Please upload again.",
-      );
-    }
-
-    if (metadata.size > limits.maxMediaBytesPerFile) {
-      try {
-        await ctx.storage.delete(args.storageId as any);
-      } catch {
-        // Ignore cleanup failures for oversized uploads.
-      }
-
-      throw new Error(
-        `Plan limit reached: max file size is ${bytesToMbLabel(limits.maxMediaBytesPerFile)} on ${planTier} plan.`,
-      );
-    }
-
-    const contentType = metadata.contentType?.toLowerCase();
-    if (
-      args.type === "image" &&
-      contentType &&
-      !contentType.startsWith(IMAGE_CONTENT_TYPE_PREFIX)
-    ) {
-      throw new Error("Invalid media type: expected an image upload.");
-    }
-
-    if (
-      args.type === "video" &&
-      contentType &&
-      !contentType.startsWith(VIDEO_CONTENT_TYPE_PREFIX)
-    ) {
-      throw new Error("Invalid media type: expected a video upload.");
-    }
-
-    const id = await ctx.db.insert("memoryMedia", {
+    return await addMemoryMediaForOwnedMemory(ctx, user, {
       memoryId: args.memoryId,
-      userId: user._id,
+      clientMediaId: args.clientMediaId,
       storageId: args.storageId,
       type: args.type,
       width: args.width,
       height: args.height,
     });
+  },
+});
 
-    return await ctx.db.get(id);
+// ── Add media to a memory by clientRequestId ──────────────
+export const addMemoryMediaByClientRequestId = mutation({
+  args: {
+    memoryClientRequestId: v.string(),
+    clientMediaId: v.string(),
+    storageId: v.string(),
+    type: v.union(v.literal("image"), v.literal("video")),
+    width: v.optional(v.number()),
+    height: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    const memoryClientRequestId = args.memoryClientRequestId.trim();
+
+    const memory = await ctx.db
+      .query("memories")
+      .withIndex("by_user_clientRequestId", (q) =>
+        q.eq("userId", user._id).eq("clientRequestId", memoryClientRequestId),
+      )
+      .unique();
+
+    if (!memory) {
+      throw new Error("Memory not found for clientRequestId.");
+    }
+
+    return await addMemoryMediaForOwnedMemory(ctx, user, {
+      memoryId: memory._id,
+      clientMediaId: args.clientMediaId,
+      storageId: args.storageId,
+      type: args.type,
+      width: args.width,
+      height: args.height,
+    });
   },
 });
 
