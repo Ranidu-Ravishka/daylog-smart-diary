@@ -13,6 +13,12 @@ import {
   type LocationContextPayload,
   type LocationTrackPoint,
 } from "./location-stay-points";
+import {
+  getLocationQueueSize,
+  loadLocationQueueForSync,
+  saveLocationQueue,
+  setLocationQueueSessionScope,
+} from "./secure-location-queue";
 
 export type BackgroundLocationRuntimeConfig = {
   enabled: boolean;
@@ -74,9 +80,9 @@ export type BackgroundLocationEnablementStatus = {
 };
 
 const TASK_NAME = "daylog.background_location.context.batch";
-const STORAGE_POINTS_KEY = "daylog.background_location.points";
 const STORAGE_TELEMETRY_KEY = "daylog.background_location.telemetry";
-const MAX_POINT_RETENTION = 4000;
+// Keep raw queued points intentionally small; only short-lived coarse context is needed.
+const MAX_POINT_RETENTION = 480;
 
 const DEFAULT_RUNTIME_CONFIG: BackgroundLocationRuntimeConfig = {
   enabled: false,
@@ -145,14 +151,18 @@ function sanitizeTrackPoint(
   if (point.latitude < -90 || point.latitude > 90) return null;
   if (point.longitude < -180 || point.longitude > 180) return null;
 
+  const roundedLatitude = Math.round(point.latitude * 10_000) / 10_000;
+  const roundedLongitude = Math.round(point.longitude * 10_000) / 10_000;
+  const roundedTimestampMs = Math.round(point.timestampMs / 1_000) * 1_000;
+
   return {
-    latitude: point.latitude,
-    longitude: point.longitude,
-    timestampMs: point.timestampMs,
+    latitude: roundedLatitude,
+    longitude: roundedLongitude,
+    timestampMs: roundedTimestampMs,
     accuracyMeters:
       typeof point.accuracyMeters === "number" &&
       Number.isFinite(point.accuracyMeters)
-        ? point.accuracyMeters
+        ? Math.round(point.accuracyMeters)
         : undefined,
   };
 }
@@ -164,7 +174,13 @@ function dedupeSignals(signals: string[]): string[] {
 }
 
 async function loadQueuedPoints(): Promise<LocationTrackPoint[]> {
-  return await readJson<LocationTrackPoint[]>(STORAGE_POINTS_KEY, []);
+  const decrypted = await loadLocationQueueForSync();
+
+  return decrypted
+    .map((point) => sanitizeTrackPoint(point))
+    .filter((point): point is LocationTrackPoint => point !== null)
+    .sort((a, b) => a.timestampMs - b.timestampMs)
+    .slice(-MAX_POINT_RETENTION);
 }
 
 async function saveQueuedPoints(points: LocationTrackPoint[]): Promise<void> {
@@ -174,7 +190,14 @@ async function saveQueuedPoints(points: LocationTrackPoint[]): Promise<void> {
     .sort((a, b) => a.timestampMs - b.timestampMs)
     .slice(-MAX_POINT_RETENTION);
 
-  await writeJson(STORAGE_POINTS_KEY, normalized);
+  await saveLocationQueue(normalized);
+}
+
+export async function setBackgroundLocationEncryptionSession(
+  sessionScope: string | null,
+): Promise<void> {
+  if (Platform.OS === "web") return;
+  await setLocationQueueSessionScope(sessionScope);
 }
 
 async function loadTelemetry(): Promise<PersistedTelemetry> {
@@ -296,7 +319,7 @@ async function maybeAutoDisableTracking(): Promise<void> {
     // Ignore stop errors.
   }
 
-  const queueSize = (await loadQueuedPoints()).length;
+  const queueSize = await getLocationQueueSize();
   await autoDisabledListener?.({
     updatesInWindow: nextTelemetry.updatesInWindow,
     windowStartedAt: nextTelemetry.windowStartedAt,
@@ -569,6 +592,7 @@ export async function getBackgroundLocationEnablementStatus(): Promise<Backgroun
 export async function flushBackgroundLocationBatches(): Promise<
   BackgroundLocationUploadPayload[]
 > {
+  // Decrypt queue only for upload/sync path; callers should not access raw queue directly.
   const queuedPoints = await loadQueuedPoints();
   if (queuedPoints.length === 0) return [];
 
@@ -646,7 +670,7 @@ export async function flushBackgroundLocationBatches(): Promise<
 
 export async function getBackgroundLocationTelemetry(): Promise<BackgroundLocationTelemetry> {
   const telemetry = await loadTelemetry();
-  const queueSize = (await loadQueuedPoints()).length;
+  const queueSize = await getLocationQueueSize();
 
   return {
     updatesInWindow: telemetry.updatesInWindow,

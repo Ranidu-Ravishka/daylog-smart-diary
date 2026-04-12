@@ -17,6 +17,7 @@ import { useColorScheme } from "@/hooks/use-color-scheme";
 import {
   flushBackgroundLocationBatches,
   getBackgroundLocationTelemetry,
+  setBackgroundLocationEncryptionSession,
   startBackgroundLocationTracker,
   stopBackgroundLocationTracker,
 } from "@/lib/background-location-tracker";
@@ -43,7 +44,7 @@ function dedupeSignals(signals: string[]): string[] {
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn, sessionId, userId } = useAuth();
   const { isLoading: isConvexAuthLoading, isAuthenticated } = useConvexAuth();
   const launchPreferences = useQuery(
     api.userPreferences.getMyUserPreferences,
@@ -72,6 +73,20 @@ export default function TabLayout() {
     launchPreferences?.backgroundLocationTrackingEnabled ?? false;
 
   const theme = Colors[colorScheme ?? "light"];
+
+  React.useEffect(() => {
+    if (!isLoaded) {
+      return;
+    }
+
+    if (!isSignedIn || !userId) {
+      void setBackgroundLocationEncryptionSession(null);
+      return;
+    }
+
+    const sessionScope = sessionId ? `${userId}:${sessionId}` : userId;
+    void setBackgroundLocationEncryptionSession(sessionScope);
+  }, [isLoaded, isSignedIn, sessionId, userId]);
 
   React.useEffect(() => {
     if (!isAuthenticated || launchPreferences === undefined) return;
