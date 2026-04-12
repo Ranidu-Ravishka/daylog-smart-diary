@@ -37,6 +37,21 @@ export type BackgroundLocationUploadPayload = {
   areaLabel: string;
 };
 
+export type PreparedBackgroundLocationFlush = {
+  flushId: string;
+  preparedAt: number;
+  queuedPointCount: number;
+  batches: BackgroundLocationUploadPayload[];
+};
+
+export type BackgroundLocationFlushAckResult = {
+  acknowledged: boolean;
+  flushId: string;
+  removedPointCount: number;
+  remainingQueueSize: number;
+  reason?: "no_prepared_flush" | "flush_id_mismatch";
+};
+
 export type BackgroundLocationTelemetry = {
   updatesInWindow: number;
   windowStartedAt: number;
@@ -96,6 +111,11 @@ let activeRuntimeConfig = DEFAULT_RUNTIME_CONFIG;
 let autoDisabledListener:
   | ((telemetry: BackgroundLocationTelemetry) => Promise<void> | void)
   | undefined;
+let preparedBackgroundLocationFlush: {
+  flushId: string;
+  preparedAt: number;
+  pointSignatureCounts: Map<string, number>;
+} | null = null;
 
 function getCurrentUserTimeZone(): string {
   return getResolvedTimeZone();
@@ -171,6 +191,41 @@ function dedupeSignals(signals: string[]): string[] {
   return Array.from(
     new Set(signals.map((signal) => signal.trim()).filter(Boolean)),
   ).slice(0, 24);
+}
+
+function buildPointSignature(point: LocationTrackPoint): string {
+  const accuracyPart =
+    typeof point.accuracyMeters === "number"
+      ? String(point.accuracyMeters)
+      : "na";
+
+  return [
+    String(point.timestampMs),
+    String(point.latitude),
+    String(point.longitude),
+    accuracyPart,
+  ].join("|");
+}
+
+function buildPointSignatureCounts(
+  points: LocationTrackPoint[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+
+  for (const point of points) {
+    const signature = buildPointSignature(point);
+    counts.set(signature, (counts.get(signature) ?? 0) + 1);
+  }
+
+  return counts;
+}
+
+function buildFlushId(preparedAt: number): string {
+  const randomPart = Math.floor(Math.random() * 1_000_000)
+    .toString()
+    .padStart(6, "0");
+
+  return `bgflush_${preparedAt}_${randomPart}`;
 }
 
 async function loadQueuedPoints(): Promise<LocationTrackPoint[]> {
@@ -589,12 +644,12 @@ export async function getBackgroundLocationEnablementStatus(): Promise<Backgroun
   };
 }
 
-export async function flushBackgroundLocationBatches(): Promise<
-  BackgroundLocationUploadPayload[]
-> {
-  // Decrypt queue only for upload/sync path; callers should not access raw queue directly.
-  const queuedPoints = await loadQueuedPoints();
-  if (queuedPoints.length === 0) return [];
+async function buildBackgroundLocationUploadPayloadsFromPoints(
+  queuedPoints: LocationTrackPoint[],
+): Promise<BackgroundLocationUploadPayload[]> {
+  if (queuedPoints.length === 0) {
+    return [];
+  }
 
   const userTimeZone = getCurrentUserTimeZone();
 
@@ -664,8 +719,90 @@ export async function flushBackgroundLocationBatches(): Promise<
     });
   }
 
-  await saveQueuedPoints([]);
   return payloads;
+}
+
+export async function prepareBackgroundLocationFlushBatches(): Promise<PreparedBackgroundLocationFlush | null> {
+  // Decrypt queue only for upload/sync path; callers should not access raw queue directly.
+  const queuedPoints = await loadQueuedPoints();
+  if (queuedPoints.length === 0) {
+    preparedBackgroundLocationFlush = null;
+    return null;
+  }
+
+  const preparedAt = Date.now();
+  const flushId = buildFlushId(preparedAt);
+  const batches =
+    await buildBackgroundLocationUploadPayloadsFromPoints(queuedPoints);
+
+  preparedBackgroundLocationFlush = {
+    flushId,
+    preparedAt,
+    pointSignatureCounts: buildPointSignatureCounts(queuedPoints),
+  };
+
+  return {
+    flushId,
+    preparedAt,
+    queuedPointCount: queuedPoints.length,
+    batches,
+  };
+}
+
+export async function acknowledgeBackgroundLocationFlush(
+  flushId: string,
+): Promise<BackgroundLocationFlushAckResult> {
+  const prepared = preparedBackgroundLocationFlush;
+
+  if (!prepared) {
+    const currentQueue = await loadQueuedPoints();
+    return {
+      acknowledged: false,
+      flushId,
+      removedPointCount: 0,
+      remainingQueueSize: currentQueue.length,
+      reason: "no_prepared_flush",
+    };
+  }
+
+  if (prepared.flushId !== flushId) {
+    const currentQueue = await loadQueuedPoints();
+    return {
+      acknowledged: false,
+      flushId,
+      removedPointCount: 0,
+      remainingQueueSize: currentQueue.length,
+      reason: "flush_id_mismatch",
+    };
+  }
+
+  const queuedPoints = await loadQueuedPoints();
+  const remainingPoints: LocationTrackPoint[] = [];
+  const signatureCounts = new Map(prepared.pointSignatureCounts);
+  let removedPointCount = 0;
+
+  for (const point of queuedPoints) {
+    const signature = buildPointSignature(point);
+    const availableCount = signatureCounts.get(signature) ?? 0;
+
+    if (availableCount > 0) {
+      signatureCounts.set(signature, availableCount - 1);
+      removedPointCount += 1;
+      continue;
+    }
+
+    remainingPoints.push(point);
+  }
+
+  await saveQueuedPoints(remainingPoints);
+  preparedBackgroundLocationFlush = null;
+
+  return {
+    acknowledged: true,
+    flushId,
+    removedPointCount,
+    remainingQueueSize: remainingPoints.length,
+  };
 }
 
 export async function getBackgroundLocationTelemetry(): Promise<BackgroundLocationTelemetry> {

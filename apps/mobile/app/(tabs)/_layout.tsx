@@ -15,8 +15,9 @@ import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import {
-  flushBackgroundLocationBatches,
+  acknowledgeBackgroundLocationFlush,
   getBackgroundLocationTelemetry,
+  prepareBackgroundLocationFlushBatches,
   setBackgroundLocationEncryptionSession,
   startBackgroundLocationTracker,
   stopBackgroundLocationTracker,
@@ -35,11 +36,27 @@ import {
   getReminderRuntimeState,
   syncReminderNotifications,
 } from "@/lib/reminder-notifications";
+import {
+  createBackgroundTaskRunner,
+  type BackgroundTaskExecutionEvent,
+} from "@/lib/background-task-runner";
 
 function dedupeSignals(signals: string[]): string[] {
   return Array.from(
     new Set(signals.map((signal) => signal.trim()).filter(Boolean)),
   ).slice(0, 24);
+}
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+
+  if (typeof error === "string" && error.trim().length > 0) {
+    return error;
+  }
+
+  return "Unknown error";
 }
 
 export default function TabLayout() {
@@ -95,7 +112,15 @@ export default function TabLayout() {
   }, [isAuthenticated, launchPreferences]);
 
   React.useEffect(() => {
-    if (!isAuthenticated || !launchPreferences) return;
+    if (
+      !isAuthenticated ||
+      launchPreferences == null ||
+      locationTrackingRuntimeConfig === undefined
+    ) {
+      return;
+    }
+
+    let cancelled = false;
 
     const fitnessTrackingEnabled =
       launchPreferences.fitnessTrackingEnabled ?? false;
@@ -105,19 +130,18 @@ export default function TabLayout() {
       launchPreferences.callLogsTrackingEnabled ?? false;
     const moodAssistanceEnabled =
       launchPreferences.moodDetectionFaceRecognitionEnabled ?? false;
-
-    if (
-      !fitnessTrackingEnabled &&
-      !calendarContextEnabled &&
-      !callSummaryEnabled &&
-      !moodAssistanceEnabled
-    ) {
-      return;
-    }
-
-    let cancelled = false;
+    const hasLifeContextPipeline =
+      fitnessTrackingEnabled ||
+      calendarContextEnabled ||
+      callSummaryEnabled ||
+      moodAssistanceEnabled;
 
     const syncLifeContextSignals = async () => {
+      if (!hasLifeContextPipeline) {
+        return;
+      }
+
+      const pipelineErrors: string[] = [];
       const userTimeZone = getResolvedTimeZone();
       const dayKey = getDayKeyForTimestamp(Date.now(), userTimeZone);
       let inferredSteps: number | undefined;
@@ -134,7 +158,10 @@ export default function TabLayout() {
               dayKey,
               userTimeZone,
             );
-            if (cancelled) return;
+
+            if (cancelled) {
+              return;
+            }
 
             inferredSteps = healthData.metrics.steps;
             inferredActiveMinutes =
@@ -160,8 +187,8 @@ export default function TabLayout() {
                 },
               },
             });
-          } catch {
-            // Ignore transient collection errors; next scheduled pass will retry.
+          } catch (error) {
+            pipelineErrors.push(`fitness:${toErrorMessage(error)}`);
           }
         }
       }
@@ -169,7 +196,10 @@ export default function TabLayout() {
       if (calendarContextEnabled) {
         try {
           const reminderRuntime = await getReminderRuntimeState();
-          if (cancelled) return;
+
+          if (cancelled) {
+            return;
+          }
 
           const remindersCount = reminderRuntime.scheduledCount;
           const summary =
@@ -196,8 +226,8 @@ export default function TabLayout() {
               },
             },
           });
-        } catch {
-          // Ignore transient collection errors; next scheduled pass will retry.
+        } catch (error) {
+          pipelineErrors.push(`calendar:${toErrorMessage(error)}`);
         }
       }
 
@@ -208,51 +238,228 @@ export default function TabLayout() {
       ) {
         try {
           const callSummary = await collectAndroidCallActivityForDay(dayKey);
-          if (cancelled) return;
+          if (cancelled) {
+            return;
+          }
 
           callsCount = callSummary.metrics.callsCount;
           callDurationMinutes = callSummary.metrics.callDurationMinutes;
-        } catch {
-          // Ignore transient collection errors; next scheduled pass will retry.
+        } catch (error) {
+          pipelineErrors.push(`calls:${toErrorMessage(error)}`);
         }
       }
 
       if (callSummaryEnabled || moodAssistanceEnabled) {
-        const activityContext = buildActivitySummaryContext({
-          nowMs: Date.now(),
-          steps: inferredSteps,
-          activeMinutes: inferredActiveMinutes,
-          callsCount,
-          callDurationMinutes,
-          moodAssistanceEnabled,
-        });
+        try {
+          const activityContext = buildActivitySummaryContext({
+            nowMs: Date.now(),
+            steps: inferredSteps,
+            activeMinutes: inferredActiveMinutes,
+            callsCount,
+            callDurationMinutes,
+            moodAssistanceEnabled,
+          });
 
-        if (cancelled) return;
+          if (cancelled) {
+            return;
+          }
 
-        await upsertMyContextualDailyData({
-          type: "activity_summary",
-          dayKey,
-          summary: activityContext.summary,
-          signals: activityContext.signals,
-          context: activityContext.context,
-        });
+          await upsertMyContextualDailyData({
+            type: "activity_summary",
+            dayKey,
+            summary: activityContext.summary,
+            signals: activityContext.signals,
+            context: activityContext.context,
+          });
+        } catch (error) {
+          pipelineErrors.push(`activity_summary:${toErrorMessage(error)}`);
+        }
+      }
+
+      if (pipelineErrors.length > 0) {
+        throw new Error(
+          `life_context_pipeline_failed: ${pipelineErrors.join(" | ")}`,
+        );
       }
     };
 
-    void syncLifeContextSignals();
+    const flushBackgroundLocationPipeline = async () => {
+      const pipelineErrors: string[] = [];
 
-    const interval = setInterval(
-      () => {
-        void syncLifeContextSignals();
+      let preparedFlush: Awaited<
+        ReturnType<typeof prepareBackgroundLocationFlushBatches>
+      > | null = null;
+      try {
+        preparedFlush = await prepareBackgroundLocationFlushBatches();
+      } catch (error) {
+        pipelineErrors.push(`flush_prepare:${toErrorMessage(error)}`);
+      }
+
+      const batches = preparedFlush?.batches ?? [];
+      let uploadSucceeded =
+        preparedFlush !== null && pipelineErrors.length === 0;
+
+      for (const batch of batches) {
+        if (cancelled) {
+          return;
+        }
+
+        try {
+          await upsertMyIntegrationDailyData({
+            provider: "location",
+            dayKey: batch.dayKey,
+            summary: batch.summary,
+            signals: batch.signals,
+            context: batch.context,
+          });
+
+          await updateMyLocationTrackingState({
+            locationLastUpdatedAt: batch.observedAt,
+            locationLastArea: batch.areaLabel,
+          });
+        } catch (error) {
+          uploadSucceeded = false;
+          pipelineErrors.push(
+            `upload:${batch.dayKey}:${toErrorMessage(error)}`,
+          );
+        }
+      }
+
+      if (preparedFlush && uploadSucceeded) {
+        try {
+          const ackResult = await acknowledgeBackgroundLocationFlush(
+            preparedFlush.flushId,
+          );
+
+          if (!ackResult.acknowledged) {
+            pipelineErrors.push(
+              `flush_ack:${ackResult.reason ?? "not_acknowledged"}`,
+            );
+          }
+        } catch (error) {
+          pipelineErrors.push(`flush_ack:${toErrorMessage(error)}`);
+        }
+      }
+
+      try {
+        const telemetry = await getBackgroundLocationTelemetry();
+        if (cancelled) {
+          return;
+        }
+
+        if (typeof telemetry.batteryDrainPercentPerHour === "number") {
+          try {
+            await updateMyLocationTrackingState({
+              backgroundLocationBatteryImpactScore:
+                telemetry.batteryDrainPercentPerHour,
+            });
+          } catch (error) {
+            pipelineErrors.push(`battery:${toErrorMessage(error)}`);
+          }
+        }
+
+        if (telemetry.autoDisabled) {
+          const payload: {
+            backgroundLocationTrackingEnabled: boolean;
+            backgroundLocationAutoDisabledAt?: number;
+            backgroundLocationAutoDisableReason?: string;
+          } = {
+            backgroundLocationTrackingEnabled: false,
+          };
+
+          if (typeof telemetry.autoDisabledAt === "number") {
+            payload.backgroundLocationAutoDisabledAt = telemetry.autoDisabledAt;
+          }
+          if (telemetry.autoDisableReason) {
+            payload.backgroundLocationAutoDisableReason =
+              telemetry.autoDisableReason;
+          }
+
+          try {
+            await updateMyLocationTrackingState(payload);
+          } catch (error) {
+            pipelineErrors.push(`auto_disable:${toErrorMessage(error)}`);
+          }
+        }
+      } catch (error) {
+        pipelineErrors.push(`telemetry:${toErrorMessage(error)}`);
+      }
+
+      if (pipelineErrors.length > 0) {
+        throw new Error(
+          `background_location_pipeline_failed: ${pipelineErrors.join(" | ")}`,
+        );
+      }
+    };
+
+    const runner = createBackgroundTaskRunner({
+      tickIntervalMs: 1_000,
+      onExecution: (event: BackgroundTaskExecutionEvent) => {
+        console.info("[background-pipeline]", {
+          taskId: event.taskId,
+          status: event.status,
+          attempt: event.attempt,
+          queueDepth: event.queueDepth,
+          durationMs: event.durationMs,
+          error: event.error,
+          nextRunAt: event.nextRunAt,
+        });
       },
-      45 * 60 * 1000,
-    );
+    });
+
+    runner.registerTask({
+      taskId: "life_context_signals",
+      intervalMs: 45 * 60 * 1_000,
+      run: async () => {
+        if (cancelled) {
+          return;
+        }
+
+        await syncLifeContextSignals();
+      },
+      retryPolicy: {
+        maxAttempts: 3,
+        baseDelayMs: 30_000,
+        maxDelayMs: 15 * 60 * 1_000,
+      },
+    });
+
+    runner.registerTask({
+      taskId: "background_location_flush",
+      intervalMs:
+        Math.max(5, locationTrackingRuntimeConfig.batchFlushIntervalMinutes) *
+        60 *
+        1_000,
+      run: async () => {
+        if (cancelled) {
+          return;
+        }
+
+        await flushBackgroundLocationPipeline();
+      },
+      retryPolicy: {
+        maxAttempts: 4,
+        baseDelayMs: 15_000,
+        maxDelayMs: 10 * 60 * 1_000,
+      },
+    });
+
+    runner.start();
+    runner.triggerTaskNow("life_context_signals");
+    runner.triggerTaskNow("background_location_flush");
 
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      runner.stop();
     };
-  }, [isAuthenticated, launchPreferences, upsertMyContextualDailyData]);
+  }, [
+    isAuthenticated,
+    launchPreferences,
+    locationTrackingRuntimeConfig,
+    updateMyLocationTrackingState,
+    upsertMyContextualDailyData,
+    upsertMyIntegrationDailyData,
+  ]);
 
   React.useEffect(() => {
     if (!isAuthenticated || launchPreferences === undefined) return;
@@ -403,90 +610,6 @@ export default function TabLayout() {
     locationTrackingEnabled,
     locationTrackingRuntimeConfig,
     updateMyLocationTrackingState,
-  ]);
-
-  React.useEffect(() => {
-    if (
-      !isAuthenticated ||
-      launchPreferences === undefined ||
-      locationTrackingRuntimeConfig === undefined
-    ) {
-      return;
-    }
-
-    let cancelled = false;
-
-    const flushBatches = async () => {
-      const batches = await flushBackgroundLocationBatches();
-
-      for (const batch of batches) {
-        if (cancelled) return;
-
-        await upsertMyIntegrationDailyData({
-          provider: "location",
-          dayKey: batch.dayKey,
-          summary: batch.summary,
-          signals: batch.signals,
-          context: batch.context,
-        });
-
-        await updateMyLocationTrackingState({
-          locationLastUpdatedAt: batch.observedAt,
-          locationLastArea: batch.areaLabel,
-        });
-      }
-
-      const telemetry = await getBackgroundLocationTelemetry();
-      if (cancelled) return;
-
-      if (typeof telemetry.batteryDrainPercentPerHour === "number") {
-        await updateMyLocationTrackingState({
-          backgroundLocationBatteryImpactScore:
-            telemetry.batteryDrainPercentPerHour,
-        });
-      }
-
-      if (telemetry.autoDisabled) {
-        const payload: {
-          backgroundLocationTrackingEnabled: boolean;
-          backgroundLocationAutoDisabledAt?: number;
-          backgroundLocationAutoDisableReason?: string;
-        } = {
-          backgroundLocationTrackingEnabled: false,
-        };
-
-        if (typeof telemetry.autoDisabledAt === "number") {
-          payload.backgroundLocationAutoDisabledAt = telemetry.autoDisabledAt;
-        }
-        if (telemetry.autoDisableReason) {
-          payload.backgroundLocationAutoDisableReason =
-            telemetry.autoDisableReason;
-        }
-
-        await updateMyLocationTrackingState(payload);
-      }
-    };
-
-    void flushBatches();
-
-    const intervalMs = Math.max(
-      5,
-      locationTrackingRuntimeConfig.batchFlushIntervalMinutes,
-    );
-    const interval = setInterval(() => {
-      void flushBatches();
-    }, intervalMs * 60_000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [
-    isAuthenticated,
-    launchPreferences,
-    locationTrackingRuntimeConfig,
-    updateMyLocationTrackingState,
-    upsertMyIntegrationDailyData,
   ]);
 
   if (
