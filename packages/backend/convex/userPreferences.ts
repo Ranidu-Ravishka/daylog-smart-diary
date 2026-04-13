@@ -7,37 +7,35 @@ import {
   requireIdentityMatch,
 } from "./authz";
 import { applyDashboardMetricsDelta } from "./dashboardMetrics";
+import {
+  LOCATION_PERMISSION_STATUS_VALUES,
+  USER_SETTINGS_THEME_VALUES,
+  normalizeUserSettings,
+  normalizeUserSettingsPatch,
+  type UserSettingsDto,
+} from "@repo/user-settings/lib/user-settings";
 
 const preferenceThemeValidator = v.union(
-  v.literal("light"),
-  v.literal("dark"),
-  v.literal("system"),
+  v.literal(USER_SETTINGS_THEME_VALUES[0]),
+  v.literal(USER_SETTINGS_THEME_VALUES[1]),
+  v.literal(USER_SETTINGS_THEME_VALUES[2]),
 );
 
 const locationPermissionStatusValidator = v.union(
-  v.literal("unknown"),
-  v.literal("granted"),
-  v.literal("denied"),
+  v.literal(LOCATION_PERMISSION_STATUS_VALUES[0]),
+  v.literal(LOCATION_PERMISSION_STATUS_VALUES[1]),
+  v.literal(LOCATION_PERMISSION_STATUS_VALUES[2]),
 );
 
-const defaultPreferenceSettings = {
-  theme: "system" as const,
-  notificationsEnabled: true,
-  dailySummaryEnabled: true,
-  weeklyInsightsEnabled: true,
-  quietHoursEnabled: false,
-  quietHoursStart: "22:00",
-  quietHoursEnd: "07:00",
-  autoSyncIntegrations: true,
-  defaultMemoryMood: "happy",
-  locationTrackingEnabled: false,
-  callLogsTrackingEnabled: false,
-  moodDetectionFaceRecognitionEnabled: false,
-  fitnessTrackingEnabled: false,
-  calendarNotificationsTrackingEnabled: false,
-  backgroundLocationTrackingEnabled: false,
-  locationPermissionStatus: "unknown" as const,
-};
+function resolveNextUserSettings(
+  patchInput: Partial<UserSettingsDto>,
+  existingPreferenceDoc?: Record<string, unknown> | null,
+): UserSettingsDto {
+  return {
+    ...normalizeUserSettings(existingPreferenceDoc),
+    ...normalizeUserSettingsPatch(patchInput),
+  };
+}
 
 const canonicalFocusAreaIds = new Set([0, 1, 2, 3, 4]);
 
@@ -60,8 +58,11 @@ function normalizePreferenceDoc<T extends { focusAreas: number[] } | null>(
 ): T {
   if (!preferenceDoc) return preferenceDoc;
 
+  const normalizedSettings = normalizeUserSettings(preferenceDoc);
+
   return {
     ...preferenceDoc,
+    ...normalizedSettings,
     focusAreas: normalizeFocusAreas(preferenceDoc.focusAreas),
   };
 }
@@ -108,6 +109,7 @@ export const syncUserPreferencesFromClerk = mutation({
       .unique();
 
     const now = Date.now();
+    const nextSettings = resolveNextUserSettings(args, existing);
 
     if (existing) {
       await ctx.db.patch(existing._id, {
@@ -116,67 +118,7 @@ export const syncUserPreferencesFromClerk = mutation({
         dailyTime: args.dailyTime,
         weeklyDay: args.weeklyDay,
         formattedTime: args.formattedTime,
-        theme: args.theme ?? existing.theme ?? defaultPreferenceSettings.theme,
-        notificationsEnabled:
-          args.notificationsEnabled ??
-          existing.notificationsEnabled ??
-          defaultPreferenceSettings.notificationsEnabled,
-        dailySummaryEnabled:
-          args.dailySummaryEnabled ??
-          existing.dailySummaryEnabled ??
-          defaultPreferenceSettings.dailySummaryEnabled,
-        weeklyInsightsEnabled:
-          args.weeklyInsightsEnabled ??
-          existing.weeklyInsightsEnabled ??
-          defaultPreferenceSettings.weeklyInsightsEnabled,
-        quietHoursEnabled:
-          args.quietHoursEnabled ??
-          existing.quietHoursEnabled ??
-          defaultPreferenceSettings.quietHoursEnabled,
-        quietHoursStart:
-          args.quietHoursStart ??
-          existing.quietHoursStart ??
-          defaultPreferenceSettings.quietHoursStart,
-        quietHoursEnd:
-          args.quietHoursEnd ??
-          existing.quietHoursEnd ??
-          defaultPreferenceSettings.quietHoursEnd,
-        autoSyncIntegrations:
-          args.autoSyncIntegrations ??
-          existing.autoSyncIntegrations ??
-          defaultPreferenceSettings.autoSyncIntegrations,
-        defaultMemoryMood:
-          args.defaultMemoryMood ??
-          existing.defaultMemoryMood ??
-          defaultPreferenceSettings.defaultMemoryMood,
-        locationTrackingEnabled:
-          args.locationTrackingEnabled ??
-          existing.locationTrackingEnabled ??
-          defaultPreferenceSettings.locationTrackingEnabled,
-        callLogsTrackingEnabled:
-          args.callLogsTrackingEnabled ??
-          existing.callLogsTrackingEnabled ??
-          defaultPreferenceSettings.callLogsTrackingEnabled,
-        moodDetectionFaceRecognitionEnabled:
-          args.moodDetectionFaceRecognitionEnabled ??
-          existing.moodDetectionFaceRecognitionEnabled ??
-          defaultPreferenceSettings.moodDetectionFaceRecognitionEnabled,
-        fitnessTrackingEnabled:
-          args.fitnessTrackingEnabled ??
-          existing.fitnessTrackingEnabled ??
-          defaultPreferenceSettings.fitnessTrackingEnabled,
-        calendarNotificationsTrackingEnabled:
-          args.calendarNotificationsTrackingEnabled ??
-          existing.calendarNotificationsTrackingEnabled ??
-          defaultPreferenceSettings.calendarNotificationsTrackingEnabled,
-        backgroundLocationTrackingEnabled:
-          args.backgroundLocationTrackingEnabled ??
-          existing.backgroundLocationTrackingEnabled ??
-          defaultPreferenceSettings.backgroundLocationTrackingEnabled,
-        locationPermissionStatus:
-          args.locationPermissionStatus ??
-          existing.locationPermissionStatus ??
-          defaultPreferenceSettings.locationPermissionStatus,
+        ...nextSettings,
         locationLastUpdatedAt:
           args.locationLastUpdatedAt ?? existing.locationLastUpdatedAt,
         locationLastArea: args.locationLastArea ?? existing.locationLastArea,
@@ -202,48 +144,7 @@ export const syncUserPreferencesFromClerk = mutation({
       dailyTime: args.dailyTime,
       weeklyDay: args.weeklyDay,
       formattedTime: args.formattedTime,
-      theme: args.theme ?? defaultPreferenceSettings.theme,
-      notificationsEnabled:
-        args.notificationsEnabled ??
-        defaultPreferenceSettings.notificationsEnabled,
-      dailySummaryEnabled:
-        args.dailySummaryEnabled ??
-        defaultPreferenceSettings.dailySummaryEnabled,
-      weeklyInsightsEnabled:
-        args.weeklyInsightsEnabled ??
-        defaultPreferenceSettings.weeklyInsightsEnabled,
-      quietHoursEnabled:
-        args.quietHoursEnabled ?? defaultPreferenceSettings.quietHoursEnabled,
-      quietHoursStart:
-        args.quietHoursStart ?? defaultPreferenceSettings.quietHoursStart,
-      quietHoursEnd:
-        args.quietHoursEnd ?? defaultPreferenceSettings.quietHoursEnd,
-      autoSyncIntegrations:
-        args.autoSyncIntegrations ??
-        defaultPreferenceSettings.autoSyncIntegrations,
-      defaultMemoryMood:
-        args.defaultMemoryMood ?? defaultPreferenceSettings.defaultMemoryMood,
-      locationTrackingEnabled:
-        args.locationTrackingEnabled ??
-        defaultPreferenceSettings.locationTrackingEnabled,
-      callLogsTrackingEnabled:
-        args.callLogsTrackingEnabled ??
-        defaultPreferenceSettings.callLogsTrackingEnabled,
-      moodDetectionFaceRecognitionEnabled:
-        args.moodDetectionFaceRecognitionEnabled ??
-        defaultPreferenceSettings.moodDetectionFaceRecognitionEnabled,
-      fitnessTrackingEnabled:
-        args.fitnessTrackingEnabled ??
-        defaultPreferenceSettings.fitnessTrackingEnabled,
-      calendarNotificationsTrackingEnabled:
-        args.calendarNotificationsTrackingEnabled ??
-        defaultPreferenceSettings.calendarNotificationsTrackingEnabled,
-      backgroundLocationTrackingEnabled:
-        args.backgroundLocationTrackingEnabled ??
-        defaultPreferenceSettings.backgroundLocationTrackingEnabled,
-      locationPermissionStatus:
-        args.locationPermissionStatus ??
-        defaultPreferenceSettings.locationPermissionStatus,
+      ...nextSettings,
       locationLastUpdatedAt: args.locationLastUpdatedAt,
       locationLastArea: args.locationLastArea,
       backgroundLocationAutoDisabledAt: args.backgroundLocationAutoDisabledAt,
@@ -350,6 +251,7 @@ export const syncMyUserPreferences = mutation({
       .unique();
 
     const now = Date.now();
+    const nextSettings = resolveNextUserSettings(args, existing);
 
     if (existing) {
       await ctx.db.patch(existing._id, {
@@ -358,67 +260,7 @@ export const syncMyUserPreferences = mutation({
         dailyTime: args.dailyTime,
         weeklyDay: args.weeklyDay,
         formattedTime: args.formattedTime,
-        theme: args.theme ?? existing.theme ?? defaultPreferenceSettings.theme,
-        notificationsEnabled:
-          args.notificationsEnabled ??
-          existing.notificationsEnabled ??
-          defaultPreferenceSettings.notificationsEnabled,
-        dailySummaryEnabled:
-          args.dailySummaryEnabled ??
-          existing.dailySummaryEnabled ??
-          defaultPreferenceSettings.dailySummaryEnabled,
-        weeklyInsightsEnabled:
-          args.weeklyInsightsEnabled ??
-          existing.weeklyInsightsEnabled ??
-          defaultPreferenceSettings.weeklyInsightsEnabled,
-        quietHoursEnabled:
-          args.quietHoursEnabled ??
-          existing.quietHoursEnabled ??
-          defaultPreferenceSettings.quietHoursEnabled,
-        quietHoursStart:
-          args.quietHoursStart ??
-          existing.quietHoursStart ??
-          defaultPreferenceSettings.quietHoursStart,
-        quietHoursEnd:
-          args.quietHoursEnd ??
-          existing.quietHoursEnd ??
-          defaultPreferenceSettings.quietHoursEnd,
-        autoSyncIntegrations:
-          args.autoSyncIntegrations ??
-          existing.autoSyncIntegrations ??
-          defaultPreferenceSettings.autoSyncIntegrations,
-        defaultMemoryMood:
-          args.defaultMemoryMood ??
-          existing.defaultMemoryMood ??
-          defaultPreferenceSettings.defaultMemoryMood,
-        locationTrackingEnabled:
-          args.locationTrackingEnabled ??
-          existing.locationTrackingEnabled ??
-          defaultPreferenceSettings.locationTrackingEnabled,
-        callLogsTrackingEnabled:
-          args.callLogsTrackingEnabled ??
-          existing.callLogsTrackingEnabled ??
-          defaultPreferenceSettings.callLogsTrackingEnabled,
-        moodDetectionFaceRecognitionEnabled:
-          args.moodDetectionFaceRecognitionEnabled ??
-          existing.moodDetectionFaceRecognitionEnabled ??
-          defaultPreferenceSettings.moodDetectionFaceRecognitionEnabled,
-        fitnessTrackingEnabled:
-          args.fitnessTrackingEnabled ??
-          existing.fitnessTrackingEnabled ??
-          defaultPreferenceSettings.fitnessTrackingEnabled,
-        calendarNotificationsTrackingEnabled:
-          args.calendarNotificationsTrackingEnabled ??
-          existing.calendarNotificationsTrackingEnabled ??
-          defaultPreferenceSettings.calendarNotificationsTrackingEnabled,
-        backgroundLocationTrackingEnabled:
-          args.backgroundLocationTrackingEnabled ??
-          existing.backgroundLocationTrackingEnabled ??
-          defaultPreferenceSettings.backgroundLocationTrackingEnabled,
-        locationPermissionStatus:
-          args.locationPermissionStatus ??
-          existing.locationPermissionStatus ??
-          defaultPreferenceSettings.locationPermissionStatus,
+        ...nextSettings,
         locationLastUpdatedAt:
           args.locationLastUpdatedAt ?? existing.locationLastUpdatedAt,
         locationLastArea: args.locationLastArea ?? existing.locationLastArea,
@@ -444,48 +286,7 @@ export const syncMyUserPreferences = mutation({
       dailyTime: args.dailyTime,
       weeklyDay: args.weeklyDay,
       formattedTime: args.formattedTime,
-      theme: args.theme ?? defaultPreferenceSettings.theme,
-      notificationsEnabled:
-        args.notificationsEnabled ??
-        defaultPreferenceSettings.notificationsEnabled,
-      dailySummaryEnabled:
-        args.dailySummaryEnabled ??
-        defaultPreferenceSettings.dailySummaryEnabled,
-      weeklyInsightsEnabled:
-        args.weeklyInsightsEnabled ??
-        defaultPreferenceSettings.weeklyInsightsEnabled,
-      quietHoursEnabled:
-        args.quietHoursEnabled ?? defaultPreferenceSettings.quietHoursEnabled,
-      quietHoursStart:
-        args.quietHoursStart ?? defaultPreferenceSettings.quietHoursStart,
-      quietHoursEnd:
-        args.quietHoursEnd ?? defaultPreferenceSettings.quietHoursEnd,
-      autoSyncIntegrations:
-        args.autoSyncIntegrations ??
-        defaultPreferenceSettings.autoSyncIntegrations,
-      defaultMemoryMood:
-        args.defaultMemoryMood ?? defaultPreferenceSettings.defaultMemoryMood,
-      locationTrackingEnabled:
-        args.locationTrackingEnabled ??
-        defaultPreferenceSettings.locationTrackingEnabled,
-      callLogsTrackingEnabled:
-        args.callLogsTrackingEnabled ??
-        defaultPreferenceSettings.callLogsTrackingEnabled,
-      moodDetectionFaceRecognitionEnabled:
-        args.moodDetectionFaceRecognitionEnabled ??
-        defaultPreferenceSettings.moodDetectionFaceRecognitionEnabled,
-      fitnessTrackingEnabled:
-        args.fitnessTrackingEnabled ??
-        defaultPreferenceSettings.fitnessTrackingEnabled,
-      calendarNotificationsTrackingEnabled:
-        args.calendarNotificationsTrackingEnabled ??
-        defaultPreferenceSettings.calendarNotificationsTrackingEnabled,
-      backgroundLocationTrackingEnabled:
-        args.backgroundLocationTrackingEnabled ??
-        defaultPreferenceSettings.backgroundLocationTrackingEnabled,
-      locationPermissionStatus:
-        args.locationPermissionStatus ??
-        defaultPreferenceSettings.locationPermissionStatus,
+      ...nextSettings,
       locationLastUpdatedAt: args.locationLastUpdatedAt,
       locationLastArea: args.locationLastArea,
       backgroundLocationAutoDisabledAt: args.backgroundLocationAutoDisabledAt,
@@ -530,24 +331,10 @@ export const updateMyLocationTrackingState = mutation({
 
     if (!existing) return null;
 
+    const nextSettings = resolveNextUserSettings(args, existing);
+
     await ctx.db.patch(existing._id, {
-      locationTrackingEnabled:
-        args.locationTrackingEnabled ?? existing.locationTrackingEnabled,
-      callLogsTrackingEnabled:
-        args.callLogsTrackingEnabled ?? existing.callLogsTrackingEnabled,
-      moodDetectionFaceRecognitionEnabled:
-        args.moodDetectionFaceRecognitionEnabled ??
-        existing.moodDetectionFaceRecognitionEnabled,
-      fitnessTrackingEnabled:
-        args.fitnessTrackingEnabled ?? existing.fitnessTrackingEnabled,
-      calendarNotificationsTrackingEnabled:
-        args.calendarNotificationsTrackingEnabled ??
-        existing.calendarNotificationsTrackingEnabled,
-      backgroundLocationTrackingEnabled:
-        args.backgroundLocationTrackingEnabled ??
-        existing.backgroundLocationTrackingEnabled,
-      locationPermissionStatus:
-        args.locationPermissionStatus ?? existing.locationPermissionStatus,
+      ...nextSettings,
       locationLastUpdatedAt:
         args.locationLastUpdatedAt ?? existing.locationLastUpdatedAt,
       locationLastArea: args.locationLastArea ?? existing.locationLastArea,

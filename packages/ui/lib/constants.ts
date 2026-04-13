@@ -1,3 +1,8 @@
+import {
+  MEMORY_MOOD_VALUES,
+  USER_SETTINGS_DEFAULTS,
+} from "@repo/user-settings/lib/user-settings";
+
 export const MOOD_EMOJI: Record<string, string> = {
   happy: "😊",
   sad: "😢",
@@ -11,13 +16,7 @@ export const MOOD_EMOJI: Record<string, string> = {
 
 export const MOODS = Object.keys(MOOD_EMOJI);
 
-export const MEMORY_MOOD_OPTIONS = [
-  "happy",
-  "peaceful",
-  "excited",
-  "loved",
-  "sad",
-] as const;
+export const MEMORY_MOOD_OPTIONS = MEMORY_MOOD_VALUES;
 
 export const FOCUS_AREAS = [
   { id: 0, label: "Mental Health", icon: "fitness" },
@@ -27,23 +26,7 @@ export const FOCUS_AREAS = [
   { id: 4, label: "Creativity", icon: "compass" },
 ] as const;
 
-export const SETTINGS_DEFAULTS = {
-  theme: "system",
-  notificationsEnabled: true,
-  dailySummaryEnabled: true,
-  weeklyInsightsEnabled: true,
-  quietHoursEnabled: false,
-  quietHoursStart: "22:00",
-  quietHoursEnd: "07:00",
-  autoSyncIntegrations: true,
-  defaultMemoryMood: "happy",
-  locationTrackingEnabled: false,
-  callLogsTrackingEnabled: false,
-  moodDetectionFaceRecognitionEnabled: false,
-  fitnessTrackingEnabled: false,
-  calendarNotificationsTrackingEnabled: false,
-  backgroundLocationTrackingEnabled: false,
-} as const;
+export const SETTINGS_DEFAULTS = USER_SETTINGS_DEFAULTS;
 
 export const INTEGRATION_PROVIDERS = [
   "google_calendar",

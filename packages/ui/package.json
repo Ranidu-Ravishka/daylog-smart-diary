@@ -11,6 +11,9 @@
     "generate:component": "turbo gen react-component",
     "check-types": "tsc --noEmit"
   },
+  "dependencies": {
+    "@repo/user-settings": "workspace:*"
+  },
   "devDependencies": {
     "@repo/eslint-config": "workspace:*",
     "@repo/typescript-config": "workspace:*",

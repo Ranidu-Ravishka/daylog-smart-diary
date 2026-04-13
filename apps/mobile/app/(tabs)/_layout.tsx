@@ -1,11 +1,11 @@
 import { Tabs, Redirect } from "expo-router";
 import React from "react";
 import { ActivityIndicator, Platform, StyleSheet, View } from "react-native";
-import NetInfo from "@react-native-community/netinfo";
 
 import { useAuth } from "@clerk/clerk-expo";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "@repo/backend/convex";
+import { normalizeUserSettings } from "@repo/user-settings/lib/user-settings";
 import {
   getDayKeyForTimestamp,
   getResolvedTimeZone,
@@ -67,6 +67,48 @@ function toErrorMessage(error: unknown): string {
   return "Unknown error";
 }
 
+type ConnectivityState = {
+  isConnected: boolean | null;
+  isInternetReachable: boolean | null;
+};
+
+async function subscribeToConnectivityChanges(
+  onOnline: () => void,
+): Promise<() => void> {
+  try {
+    const netInfoModule = await import("@react-native-community/netinfo");
+    const addEventListener =
+      netInfoModule.addEventListener ?? netInfoModule.default?.addEventListener;
+
+    if (typeof addEventListener !== "function") {
+      logInfo("mobile_netinfo_listener_unavailable", {
+        reason: "addEventListener_missing",
+      });
+      return () => {};
+    }
+
+    const unsubscribe = addEventListener((state: ConnectivityState) => {
+      const isConnected = Boolean(state.isConnected);
+      const isInternetReachable = state.isInternetReachable !== false;
+
+      if (isConnected && isInternetReachable) {
+        onOnline();
+      }
+    });
+
+    if (typeof unsubscribe === "function") {
+      return unsubscribe;
+    }
+
+    return () => {};
+  } catch (error) {
+    logInfo("mobile_netinfo_listener_unavailable", {
+      reason: toErrorMessage(error),
+    });
+    return () => {};
+  }
+}
+
 export default function TabLayout() {
   const colorScheme = useColorScheme();
   const { isLoaded, isSignedIn, sessionId, userId } = useAuth();
@@ -102,10 +144,13 @@ export default function TabLayout() {
     isAuthenticated &&
     (launchPreferences === undefined ||
       locationTrackingRuntimeConfig === undefined);
-  const locationTrackingEnabled =
-    launchPreferences?.locationTrackingEnabled ?? false;
+  const launchUserSettings = React.useMemo(
+    () => normalizeUserSettings(launchPreferences),
+    [launchPreferences],
+  );
+  const locationTrackingEnabled = launchUserSettings.locationTrackingEnabled;
   const backgroundLocationTrackingEnabled =
-    launchPreferences?.backgroundLocationTrackingEnabled ?? false;
+    launchUserSettings.backgroundLocationTrackingEnabled;
 
   const theme = Colors[colorScheme ?? "light"];
 
@@ -236,14 +281,20 @@ export default function TabLayout() {
     runner.start();
     runner.triggerTaskNow("offline_outbox_flush");
 
-    const unsubscribeNetInfo = NetInfo.addEventListener((state) => {
-      const isConnected = Boolean(state.isConnected);
-      const isInternetReachable = state.isInternetReachable !== false;
+    let unsubscribeNetInfo = () => {};
 
-      if (isConnected && isInternetReachable) {
+    void (async () => {
+      const unsubscribe = await subscribeToConnectivityChanges(() => {
         runner.triggerTaskNow("offline_outbox_flush");
+      });
+
+      if (cancelled) {
+        unsubscribe();
+        return;
       }
-    });
+
+      unsubscribeNetInfo = unsubscribe;
+    })();
 
     return () => {
       cancelled = true;
@@ -269,14 +320,12 @@ export default function TabLayout() {
 
     let cancelled = false;
 
-    const fitnessTrackingEnabled =
-      launchPreferences.fitnessTrackingEnabled ?? false;
+    const fitnessTrackingEnabled = launchUserSettings.fitnessTrackingEnabled;
     const calendarContextEnabled =
-      launchPreferences.calendarNotificationsTrackingEnabled ?? false;
-    const callSummaryEnabled =
-      launchPreferences.callLogsTrackingEnabled ?? false;
+      launchUserSettings.calendarNotificationsTrackingEnabled;
+    const callSummaryEnabled = launchUserSettings.callLogsTrackingEnabled;
     const moodAssistanceEnabled =
-      launchPreferences.moodDetectionFaceRecognitionEnabled ?? false;
+      launchUserSettings.moodDetectionFaceRecognitionEnabled;
     const hasLifeContextPipeline =
       fitnessTrackingEnabled ||
       calendarContextEnabled ||
@@ -602,6 +651,10 @@ export default function TabLayout() {
   }, [
     isAuthenticated,
     launchPreferences,
+    launchUserSettings.calendarNotificationsTrackingEnabled,
+    launchUserSettings.callLogsTrackingEnabled,
+    launchUserSettings.fitnessTrackingEnabled,
+    launchUserSettings.moodDetectionFaceRecognitionEnabled,
     locationTrackingRuntimeConfig,
     updateMyLocationTrackingState,
     upsertMyContextualDailyData,

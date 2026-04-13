@@ -4,6 +4,22 @@
 
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import {
+  LOCATION_PERMISSION_STATUS_VALUES,
+  USER_SETTINGS_THEME_VALUES,
+} from "@repo/user-settings/lib/user-settings";
+
+const userSettingsThemeValidator = v.union(
+  v.literal(USER_SETTINGS_THEME_VALUES[0]),
+  v.literal(USER_SETTINGS_THEME_VALUES[1]),
+  v.literal(USER_SETTINGS_THEME_VALUES[2]),
+);
+
+const locationPermissionStatusValidator = v.union(
+  v.literal(LOCATION_PERMISSION_STATUS_VALUES[0]),
+  v.literal(LOCATION_PERMISSION_STATUS_VALUES[1]),
+  v.literal(LOCATION_PERMISSION_STATUS_VALUES[2]),
+);
 
 const encryptedSecretEnvelopeValidator = v.object({
   version: v.number(),
@@ -170,9 +186,7 @@ export default defineSchema(
       dailyTime: v.string(),
       weeklyDay: v.string(),
       formattedTime: v.string(),
-      theme: v.optional(
-        v.union(v.literal("light"), v.literal("dark"), v.literal("system")),
-      ),
+      theme: v.optional(userSettingsThemeValidator),
       notificationsEnabled: v.optional(v.boolean()),
       dailySummaryEnabled: v.optional(v.boolean()),
       weeklyInsightsEnabled: v.optional(v.boolean()),
@@ -187,13 +201,7 @@ export default defineSchema(
       fitnessTrackingEnabled: v.optional(v.boolean()),
       calendarNotificationsTrackingEnabled: v.optional(v.boolean()),
       backgroundLocationTrackingEnabled: v.optional(v.boolean()),
-      locationPermissionStatus: v.optional(
-        v.union(
-          v.literal("unknown"),
-          v.literal("granted"),
-          v.literal("denied"),
-        ),
-      ),
+      locationPermissionStatus: v.optional(locationPermissionStatusValidator),
       locationLastUpdatedAt: v.optional(v.number()),
       locationLastArea: v.optional(v.string()),
       backgroundLocationAutoDisabledAt: v.optional(v.number()),
