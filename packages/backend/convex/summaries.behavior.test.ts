@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Id } from "./_generated/dataModel";
 import { createAuthCtx, createInMemoryDb } from "../test-utils/inMemoryConvex";
@@ -6,6 +6,15 @@ import * as summariesModule from "./summaries";
 
 const originalSummaryDailyLimit = process.env.SUMMARY_DAILY_GENERATION_LIMIT;
 const originalExportJobsRetentionDays = process.env.RETENTION_EXPORT_JOBS_DAYS;
+const originalRestoreJobsRetentionDays =
+  process.env.RETENTION_RESTORE_JOBS_DAYS;
+const originalClerkWebhookSecret = process.env.CLERK_WEBHOOK_SECRET;
+const originalRestoreSigningSecret = process.env.EXPORT_RESTORE_SIGNING_SECRET;
+
+beforeEach(() => {
+  process.env.CLERK_WEBHOOK_SECRET =
+    process.env.CLERK_WEBHOOK_SECRET ?? "whsec_test_restore_signing_secret";
+});
 
 afterEach(() => {
   if (originalSummaryDailyLimit === undefined) {
@@ -18,6 +27,24 @@ afterEach(() => {
     delete process.env.RETENTION_EXPORT_JOBS_DAYS;
   } else {
     process.env.RETENTION_EXPORT_JOBS_DAYS = originalExportJobsRetentionDays;
+  }
+
+  if (originalRestoreJobsRetentionDays === undefined) {
+    delete process.env.RETENTION_RESTORE_JOBS_DAYS;
+  } else {
+    process.env.RETENTION_RESTORE_JOBS_DAYS = originalRestoreJobsRetentionDays;
+  }
+
+  if (originalClerkWebhookSecret === undefined) {
+    delete process.env.CLERK_WEBHOOK_SECRET;
+  } else {
+    process.env.CLERK_WEBHOOK_SECRET = originalClerkWebhookSecret;
+  }
+
+  if (originalRestoreSigningSecret === undefined) {
+    delete process.env.EXPORT_RESTORE_SIGNING_SECRET;
+  } else {
+    process.env.EXPORT_RESTORE_SIGNING_SECRET = originalRestoreSigningSecret;
   }
 
   vi.restoreAllMocks();
@@ -373,6 +400,31 @@ describe("summaries behavior", () => {
     const storedPayload = await storedBlob.text();
     expect(storedPayload).toContain('"summaries"');
     expect(storedPayload).toContain('"integrationDailyData"');
+
+    const parsedPayload = JSON.parse(storedPayload) as {
+      schemaVersion: number;
+      owner?: { clerkUserId?: string };
+      counts?: {
+        summaries?: number;
+        memories?: number;
+        days?: number;
+        integrationDailyData?: number;
+      };
+      integrity?: { algorithm?: string; signature?: string };
+    };
+    expect(parsedPayload.schemaVersion).toBe(2);
+    expect(parsedPayload.owner?.clerkUserId).toBe("clerk_member_001");
+    expect(parsedPayload.counts).toEqual({
+      summaries: 1,
+      memories: 1,
+      days: 1,
+      integrationDailyData: 1,
+    });
+    expect(parsedPayload.integrity?.algorithm).toBe("hmac-sha256");
+    expect(typeof parsedPayload.integrity?.signature).toBe("string");
+    expect((parsedPayload.integrity?.signature ?? "").length).toBeGreaterThan(
+      10,
+    );
   });
 
   it("builds multi-page text exports and includes optional fields", async () => {
@@ -558,6 +610,259 @@ describe("summaries behavior", () => {
     ).rejects.toThrow("Unable to prepare export download URL. Please retry.");
   });
 
+  it("validates restore ownership and rejects tampered backups", async () => {
+    let signedPayloadText = "";
+
+    const runQuery = vi.fn(
+      async (_ref: unknown, args: Record<string, unknown>) => {
+        if (Object.keys(args).length === 0) {
+          return {
+            userId: USER_ID,
+            clerkUserId: "clerk_member_001",
+          };
+        }
+
+        const dataset = args.dataset as
+          | "summaries"
+          | "memories"
+          | "days"
+          | "integrationDailyData";
+
+        if (dataset === "summaries") {
+          return {
+            exportedAt: 1,
+            dataset,
+            page: [
+              {
+                dayKey: "2026-04-02",
+                story: "A good day",
+                highlights: ["shipping"],
+                sourcesUsed: ["Memories"],
+                generatedAt: 100,
+              },
+            ],
+            continueCursor: null,
+            isDone: true,
+          };
+        }
+
+        if (dataset === "memories") {
+          return {
+            exportedAt: 1,
+            dataset,
+            page: [
+              {
+                dayKey: "2026-04-02",
+                title: "Memory",
+                happenedAt: 100,
+              },
+            ],
+            continueCursor: null,
+            isDone: true,
+          };
+        }
+
+        if (dataset === "days") {
+          return {
+            exportedAt: 1,
+            dataset,
+            page: [
+              {
+                dayKey: "2026-04-02",
+                manualNotes: [],
+                peopleTags: [],
+              },
+            ],
+            continueCursor: null,
+            isDone: true,
+          };
+        }
+
+        return {
+          exportedAt: 1,
+          dataset,
+          page: [
+            {
+              provider: "spotify",
+              dayKey: "2026-04-02",
+              syncedAt: 100,
+              signals: ["music"],
+            },
+          ],
+          continueCursor: null,
+          isDone: true,
+        };
+      },
+    );
+
+    const store = vi.fn(async (blob: Blob) => {
+      signedPayloadText = await blob.text();
+      return "storage_restore_signed_payload_001";
+    });
+    const getUrl = vi.fn(
+      async (storageId: string) => `https://cdn.example.com/${storageId}`,
+    );
+
+    await summariesModule.prepareDiaryExportArtifactImpl(
+      {
+        runQuery,
+        storage: {
+          store,
+          getUrl,
+        },
+      } as any,
+      {
+        format: "json",
+        includeLocationSignals: false,
+      },
+    );
+
+    const validateMyDiaryRestorePayload = handler<
+      { payloadText: string },
+      {
+        valid: boolean;
+        ownerClerkUserId: string;
+        counts: { memories: number };
+      }
+    >(summariesModule.validateMyDiaryRestorePayload);
+
+    const validation = await validateMyDiaryRestorePayload(
+      {
+        runQuery: vi.fn(async () => ({
+          userId: USER_ID,
+          clerkUserId: "clerk_member_001",
+        })),
+      } as any,
+      {
+        payloadText: signedPayloadText,
+      },
+    );
+    expect(validation.valid).toBe(true);
+    expect(validation.ownerClerkUserId).toBe("clerk_member_001");
+    expect(validation.counts.memories).toBe(1);
+
+    const tamperedPayload = signedPayloadText.replace('"Memory"', '"Changed"');
+    await expect(
+      validateMyDiaryRestorePayload(
+        {
+          runQuery: vi.fn(async () => ({
+            userId: USER_ID,
+            clerkUserId: "clerk_member_001",
+          })),
+        } as any,
+        {
+          payloadText: tamperedPayload,
+        },
+      ),
+    ).rejects.toThrow("integrity check failed");
+
+    await expect(
+      validateMyDiaryRestorePayload(
+        {
+          runQuery: vi.fn(async () => ({
+            userId: OTHER_USER_ID,
+            clerkUserId: "clerk_other_001",
+          })),
+        } as any,
+        {
+          payloadText: signedPayloadText,
+        },
+      ),
+    ).rejects.toThrow("ownership mismatch");
+  });
+
+  it("restores in idempotent batches and handles conflicts", async () => {
+    const db = seededDb();
+    const restoreDiaryDatasetBatchInternal = handler<
+      {
+        userId: Id<"user">;
+        dataset: "summaries" | "memories" | "days" | "integrationDailyData";
+        rows: unknown[];
+        conflictMode: "skip" | "overwrite";
+        allowPartial: boolean;
+      },
+      {
+        inserted: number;
+        updated: number;
+        skipped: number;
+        conflicts: number;
+      }
+    >(summariesModule.restoreDiaryDatasetBatchInternal);
+
+    const ctx = createAuthCtx(db, null);
+
+    const memoryRow = {
+      dayKey: "2026-04-02",
+      title: "Restored memory",
+      description: "from backup",
+      mood: "happy",
+      happenedAt: 100,
+    };
+
+    const firstInsert = await restoreDiaryDatasetBatchInternal(ctx, {
+      userId: USER_ID,
+      dataset: "memories",
+      rows: [memoryRow],
+      conflictMode: "skip",
+      allowPartial: false,
+    });
+    expect(firstInsert.inserted).toBe(1);
+
+    const secondInsert = await restoreDiaryDatasetBatchInternal(ctx, {
+      userId: USER_ID,
+      dataset: "memories",
+      rows: [memoryRow],
+      conflictMode: "skip",
+      allowPartial: false,
+    });
+    expect(secondInsert.skipped).toBe(1);
+    expect(db.getTable("memories")).toHaveLength(1);
+
+    await db.insert("daySummaries", {
+      userId: USER_ID,
+      dayKey: "2026-04-03",
+      story: "Original story",
+      highlights: ["h1"],
+      sourcesUsed: ["Memories"],
+      generatedAt: 10,
+    });
+
+    const incomingSummary = {
+      dayKey: "2026-04-03",
+      story: "Restored story",
+      highlights: ["h2"],
+      sourcesUsed: ["Days"],
+      generatedAt: 20,
+    };
+
+    const skipConflict = await restoreDiaryDatasetBatchInternal(ctx, {
+      userId: USER_ID,
+      dataset: "summaries",
+      rows: [incomingSummary],
+      conflictMode: "skip",
+      allowPartial: false,
+    });
+    expect(skipConflict.conflicts).toBe(1);
+    expect(skipConflict.updated).toBe(0);
+
+    const overwriteConflict = await restoreDiaryDatasetBatchInternal(ctx, {
+      userId: USER_ID,
+      dataset: "summaries",
+      rows: [incomingSummary],
+      conflictMode: "overwrite",
+      allowPartial: false,
+    });
+    expect(overwriteConflict.updated).toBe(1);
+
+    const updatedSummary = await db
+      .query("daySummaries")
+      .withIndex("by_user_day", (q) =>
+        q.eq("userId", USER_ID).eq("dayKey", "2026-04-03"),
+      )
+      .unique();
+    expect(updatedSummary?.story).toBe("Restored story");
+  });
+
   it("tracks export job status history and provides re-download links", async () => {
     const db = seededDb();
 
@@ -674,6 +979,190 @@ describe("summaries behavior", () => {
         { jobId: created.jobId },
       ),
     ).rejects.toThrow("Forbidden");
+  });
+
+  it("tracks restore job status history for recent restore panel", async () => {
+    const db = seededDb();
+
+    const createRestoreJobInternal = handler<
+      {
+        userId: Id<"user">;
+        requestedAt: number;
+        conflictMode: "skip" | "overwrite";
+        allowPartial: boolean;
+        selectedDatasets: Array<
+          "summaries" | "memories" | "days" | "integrationDailyData"
+        >;
+      },
+      { jobId: string; status: "running"; requestedAt: number }
+    >(summariesModule.createRestoreJobInternal);
+    const markRestoreJobCompletedInternal = handler<
+      {
+        jobId: string;
+        status: "succeeded" | "partial";
+        completedAt: number;
+        exportedAt: string;
+        sourceCounts: {
+          summaries: number;
+          memories: number;
+          days: number;
+          integrationDailyData: number;
+        };
+        totals: {
+          processed: number;
+          inserted: number;
+          updated: number;
+          skipped: number;
+          conflicts: number;
+          failed: number;
+          errorSamples: string[];
+        };
+        datasetResults: {
+          summaries: {
+            processed: number;
+            inserted: number;
+            updated: number;
+            skipped: number;
+            conflicts: number;
+            failed: number;
+            errorSamples: string[];
+          };
+          memories: {
+            processed: number;
+            inserted: number;
+            updated: number;
+            skipped: number;
+            conflicts: number;
+            failed: number;
+            errorSamples: string[];
+          };
+          days: {
+            processed: number;
+            inserted: number;
+            updated: number;
+            skipped: number;
+            conflicts: number;
+            failed: number;
+            errorSamples: string[];
+          };
+          integrationDailyData: {
+            processed: number;
+            inserted: number;
+            updated: number;
+            skipped: number;
+            conflicts: number;
+            failed: number;
+            errorSamples: string[];
+          };
+        };
+      },
+      { jobId: string; status: "succeeded" | "partial"; completedAt: number }
+    >(summariesModule.markRestoreJobCompletedInternal);
+    const markRestoreJobFailedInternal = handler<
+      { jobId: string; failedAt: number; error: string },
+      { jobId: string; status: "failed"; failedAt: number }
+    >(summariesModule.markRestoreJobFailedInternal);
+    const listMyRestoreJobsPaginated = handler<
+      { paginationOpts: { numItems: number; cursor: string | null } },
+      {
+        page: Array<{
+          status: string;
+          error: string | null;
+          selectedDatasets: string[];
+          totals: { inserted: number } | null;
+        }>;
+      }
+    >(summariesModule.listMyRestoreJobsPaginated);
+
+    const now = Date.parse("2026-04-04T10:00:00.000Z");
+    const first = await createRestoreJobInternal(createAuthCtx(db, null), {
+      userId: USER_ID,
+      requestedAt: now,
+      conflictMode: "skip",
+      allowPartial: true,
+      selectedDatasets: ["summaries", "memories"],
+    });
+
+    const sharedStats = {
+      processed: 2,
+      inserted: 1,
+      updated: 0,
+      skipped: 1,
+      conflicts: 0,
+      failed: 0,
+      errorSamples: [],
+    };
+
+    await markRestoreJobCompletedInternal(createAuthCtx(db, null), {
+      jobId: first.jobId,
+      status: "succeeded",
+      completedAt: now + 200,
+      exportedAt: "2026-04-04T09:00:00.000Z",
+      sourceCounts: {
+        summaries: 1,
+        memories: 1,
+        days: 0,
+        integrationDailyData: 0,
+      },
+      totals: sharedStats,
+      datasetResults: {
+        summaries: sharedStats,
+        memories: sharedStats,
+        days: {
+          processed: 0,
+          inserted: 0,
+          updated: 0,
+          skipped: 0,
+          conflicts: 0,
+          failed: 0,
+          errorSamples: [],
+        },
+        integrationDailyData: {
+          processed: 0,
+          inserted: 0,
+          updated: 0,
+          skipped: 0,
+          conflicts: 0,
+          failed: 0,
+          errorSamples: [],
+        },
+      },
+    });
+
+    const second = await createRestoreJobInternal(createAuthCtx(db, null), {
+      userId: USER_ID,
+      requestedAt: now + 500,
+      conflictMode: "overwrite",
+      allowPartial: false,
+      selectedDatasets: ["days"],
+    });
+    await markRestoreJobFailedInternal(createAuthCtx(db, null), {
+      jobId: second.jobId,
+      failedAt: now + 650,
+      error: "Backup integrity check failed",
+    });
+
+    const memberPage = await listMyRestoreJobsPaginated(
+      createAuthCtx(db, "clerk_member_001"),
+      {
+        paginationOpts: { numItems: 10, cursor: null },
+      },
+    );
+
+    expect(memberPage.page).toHaveLength(2);
+    expect(memberPage.page[0]?.status).toBe("failed");
+    expect(memberPage.page[0]?.error).toBe("Backup integrity check failed");
+    expect(memberPage.page[0]?.selectedDatasets).toEqual(["days"]);
+    expect(memberPage.page[1]?.status).toBe("succeeded");
+    expect(memberPage.page[1]?.totals?.inserted).toBe(1);
+
+    const otherPage = await listMyRestoreJobsPaginated(
+      createAuthCtx(db, "clerk_other_001"),
+      {
+        paginationOpts: { numItems: 10, cursor: null },
+      },
+    );
+    expect(otherPage.page).toHaveLength(0);
   });
 
   it("returns clear errors for invalid export job state and missing artifacts", async () => {
@@ -908,6 +1397,102 @@ describe("summaries behavior", () => {
       "storage_old_export_delete_fails",
     );
     expect(db.getTable("exportJobs")).toHaveLength(0);
+  });
+
+  it("purges stale restore jobs during scheduled cleanup", async () => {
+    process.env.RETENTION_RESTORE_JOBS_DAYS = "14";
+
+    const now = Date.parse("2026-04-10T12:00:00.000Z");
+    vi.spyOn(Date, "now").mockReturnValue(now);
+
+    const db = seededDb();
+    await db.insert("restoreJobs", {
+      userId: USER_ID,
+      status: "succeeded",
+      requestedAt: now - 30 * 24 * 60 * 60 * 1000,
+      completedAt: now - 30 * 24 * 60 * 60 * 1000,
+      updatedAt: now - 30 * 24 * 60 * 60 * 1000,
+      conflictMode: "skip",
+      allowPartial: true,
+      selectedDatasets: ["summaries"],
+      exportedAt: "2026-03-11T12:00:00.000Z",
+    });
+    await db.insert("restoreJobs", {
+      userId: USER_ID,
+      status: "failed",
+      requestedAt: now - 2 * 24 * 60 * 60 * 1000,
+      failedAt: now - 2 * 24 * 60 * 60 * 1000,
+      updatedAt: now - 2 * 24 * 60 * 60 * 1000,
+      conflictMode: "overwrite",
+      allowPartial: false,
+      selectedDatasets: ["days"],
+      error: "Integrity mismatch",
+    });
+
+    const runScheduledRestoreJobRetentionCleanupInternal = handler<
+      { maxDeletes?: number },
+      { deletedJobs: number; retentionDays: number }
+    >(summariesModule.runScheduledRestoreJobRetentionCleanupInternal);
+
+    const cleanup = await runScheduledRestoreJobRetentionCleanupInternal(
+      createAuthCtx(db, null),
+      {
+        maxDeletes: 10,
+      },
+    );
+
+    expect(cleanup.retentionDays).toBe(14);
+    expect(cleanup.deletedJobs).toBe(1);
+
+    const remainingJobs = db.getTable("restoreJobs");
+    expect(remainingJobs).toHaveLength(1);
+    expect(remainingJobs[0]?.status).toBe("failed");
+  });
+
+  it("uses fallback batch size when restore cleanup maxDeletes is invalid", async () => {
+    process.env.RETENTION_RESTORE_JOBS_DAYS = "14";
+
+    const now = Date.parse("2026-04-10T12:00:00.000Z");
+    vi.spyOn(Date, "now").mockReturnValue(now);
+
+    const db = seededDb();
+    await db.insert("restoreJobs", {
+      userId: USER_ID,
+      status: "succeeded",
+      requestedAt: now - 40 * 24 * 60 * 60 * 1000,
+      completedAt: now - 40 * 24 * 60 * 60 * 1000,
+      updatedAt: now - 40 * 24 * 60 * 60 * 1000,
+      conflictMode: "skip",
+      allowPartial: true,
+      selectedDatasets: ["summaries"],
+      exportedAt: "2026-03-01T12:00:00.000Z",
+    });
+    await db.insert("restoreJobs", {
+      userId: USER_ID,
+      status: "partial",
+      requestedAt: now - 35 * 24 * 60 * 60 * 1000,
+      completedAt: now - 35 * 24 * 60 * 60 * 1000,
+      updatedAt: now - 35 * 24 * 60 * 60 * 1000,
+      conflictMode: "skip",
+      allowPartial: true,
+      selectedDatasets: ["memories"],
+      exportedAt: "2026-03-06T12:00:00.000Z",
+    });
+
+    const runScheduledRestoreJobRetentionCleanupInternal = handler<
+      { maxDeletes?: number },
+      { deletedJobs: number }
+    >(summariesModule.runScheduledRestoreJobRetentionCleanupInternal);
+
+    const cleanup = await runScheduledRestoreJobRetentionCleanupInternal(
+      createAuthCtx(db, null),
+      {
+        maxDeletes: 0,
+      },
+    );
+
+    expect(cleanup.deletedJobs).toBe(2);
+    expect(db.getTable("restoreJobs")).toHaveLength(0);
   });
 
   it("runs export action lifecycle and marks jobs failed when generation throws", async () => {

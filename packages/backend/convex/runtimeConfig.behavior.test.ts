@@ -7,6 +7,7 @@ import {
   getBackgroundLocationMaxUpdatesPerHour,
   getEnableBackgroundLocationTracking,
   getExportJobRetentionDays,
+  getRestoreJobRetentionDays,
   getRetentionDeleteBatchSize,
   getRetentionPolicyDefaults,
   getSummaryDailyGenerationLimit,
@@ -22,6 +23,7 @@ const runtimeEnvKeys = [
   "RETENTION_SUMMARY_EVENTS_DAYS",
   "RETENTION_INFO_EVENTS_DAYS",
   "RETENTION_EXPORT_JOBS_DAYS",
+  "RETENTION_RESTORE_JOBS_DAYS",
   "RETENTION_DELETE_BATCH_SIZE",
   "SUMMARY_LOW_QUALITY_THRESHOLD",
   "ENABLE_BACKGROUND_LOCATION_TRACKING",
@@ -66,6 +68,7 @@ describe("runtime config behavior", () => {
     process.env.RETENTION_SUMMARY_EVENTS_DAYS = "30";
     process.env.RETENTION_INFO_EVENTS_DAYS = "45";
     process.env.RETENTION_EXPORT_JOBS_DAYS = "21";
+    process.env.RETENTION_RESTORE_JOBS_DAYS = "35";
 
     const defaults = getRetentionPolicyDefaults();
 
@@ -77,6 +80,7 @@ describe("runtime config behavior", () => {
     expect(defaults.infoEvents.retentionDays).toBe(45);
     expect(defaults.exportJobs.retentionDays).toBe(21);
     expect(getExportJobRetentionDays()).toBe(21);
+    expect(getRestoreJobRetentionDays()).toBe(35);
   });
 
   it("enforces numeric bounds for batch size and quality threshold", () => {

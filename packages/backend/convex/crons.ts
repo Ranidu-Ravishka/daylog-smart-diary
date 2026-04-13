@@ -19,4 +19,11 @@ crons.interval(
   {},
 );
 
+crons.interval(
+  "restore-job-retention-cleanup-every-6h",
+  { hours: 6 },
+  (internal as any).summaries.runScheduledRestoreJobRetentionCleanupInternal,
+  {},
+);
+
 export default crons;

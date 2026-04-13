@@ -5,6 +5,7 @@ import { requireUser, requireOwnership } from "./authz";
 import { validateDayKey, clampLimit } from "./validators";
 import {
   getExportJobRetentionDays,
+  getRestoreJobRetentionDays,
   getRetentionDeleteBatchSize,
   getSummaryDailyGenerationLimit,
 } from "./runtimeConfig";
@@ -283,23 +284,56 @@ const exportDatasetValidator = v.union(
 const EXPORT_PAGE_SIZE_DEFAULT = 200;
 const EXPORT_PAGE_SIZE_MAX = 500;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const RESTORE_SCHEMA_VERSION = 2;
+const RESTORE_SIGNING_ALGORITHM = "hmac-sha256";
+const RESTORE_MAX_PAYLOAD_BYTES = 5 * 1024 * 1024;
+const RESTORE_BATCH_SIZE = 100;
 
 const exportFormatValidator = v.union(v.literal("json"), v.literal("txt"));
+const restoreConflictModeValidator = v.union(
+  v.literal("skip"),
+  v.literal("overwrite"),
+);
+const restoreBatchResultObjectValidator = v.object({
+  processed: v.number(),
+  inserted: v.number(),
+  updated: v.number(),
+  skipped: v.number(),
+  conflicts: v.number(),
+  failed: v.number(),
+  errorSamples: v.array(v.string()),
+});
+const restoreDatasetResultsValidator = v.object({
+  summaries: restoreBatchResultObjectValidator,
+  memories: restoreBatchResultObjectValidator,
+  days: restoreBatchResultObjectValidator,
+  integrationDailyData: restoreBatchResultObjectValidator,
+});
+const exportCountsObjectValidator = v.object({
+  summaries: v.number(),
+  memories: v.number(),
+  days: v.number(),
+  integrationDailyData: v.number(),
+});
 
 type ExportDataset = "summaries" | "memories" | "days" | "integrationDailyData";
 type ExportFormat = "json" | "txt";
 type ExportJobStatus = "queued" | "running" | "ready" | "failed";
+type RestoreJobStatus = "running" | "succeeded" | "partial" | "failed";
+type RestoreConflictMode = "skip" | "overwrite";
+
+type ExportMetrics = {
+  steps?: number;
+  sleepMinutes?: number;
+  screenTimeMinutes?: number;
+  spendingTotal?: number;
+};
 
 type ExportSummaryRow = {
   dayKey: string;
   story: string;
   highlights: string[];
-  metrics?: {
-    steps?: number;
-    sleepMinutes?: number;
-    screenTimeMinutes?: number;
-    spendingTotal?: number;
-  };
+  metrics?: ExportMetrics;
   sourcesUsed: string[];
   generatedAt: number;
 };
@@ -324,14 +358,16 @@ type ExportIntegrationRow = {
   dayKey: string;
   syncedAt: number;
   summary?: string;
-  metrics?: {
-    steps?: number;
-    sleepMinutes?: number;
-    screenTimeMinutes?: number;
-    spendingTotal?: number;
-  };
+  metrics?: ExportMetrics;
   signals?: string[];
   context?: unknown;
+};
+
+type ExportCounts = {
+  summaries: number;
+  memories: number;
+  days: number;
+  integrationDailyData: number;
 };
 
 type ExportPageResponse<TItem> = {
@@ -350,12 +386,709 @@ type DiaryExportPayload = {
   integrationDailyData: ExportIntegrationRow[];
 };
 
+type SignedDiaryExportPayload = {
+  schemaVersion: typeof RESTORE_SCHEMA_VERSION;
+  exportedAt: string;
+  owner: {
+    clerkUserId: string;
+  };
+  counts: ExportCounts;
+  summaries: ExportSummaryRow[];
+  memories: ExportMemoryRow[];
+  days: ExportDayRow[];
+  integrationDailyData: ExportIntegrationRow[];
+};
+
+type SignedDiaryExportPayloadWithIntegrity = SignedDiaryExportPayload & {
+  integrity: {
+    algorithm: typeof RESTORE_SIGNING_ALGORITHM;
+    signature: string;
+  };
+};
+
+type RestoreBatchResult = {
+  processed: number;
+  inserted: number;
+  updated: number;
+  skipped: number;
+  conflicts: number;
+  failed: number;
+  errorSamples: string[];
+};
+
+type RestoreBatchDatasetArgs = {
+  userId: Id<"user">;
+  dataset: ExportDataset;
+  rows: unknown[];
+  conflictMode: RestoreConflictMode;
+  allowPartial: boolean;
+};
+
+function createEmptyRestoreBatchResult(): RestoreBatchResult {
+  return {
+    processed: 0,
+    inserted: 0,
+    updated: 0,
+    skipped: 0,
+    conflicts: 0,
+    failed: 0,
+    errorSamples: [],
+  };
+}
+
+function mergeRestoreBatchResults(
+  target: RestoreBatchResult,
+  next: RestoreBatchResult,
+): RestoreBatchResult {
+  target.processed += next.processed;
+  target.inserted += next.inserted;
+  target.updated += next.updated;
+  target.skipped += next.skipped;
+  target.conflicts += next.conflicts;
+  target.failed += next.failed;
+
+  for (const error of next.errorSamples) {
+    if (target.errorSamples.length >= 10) {
+      break;
+    }
+    target.errorSamples.push(error);
+  }
+
+  return target;
+}
+
+function toHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function assertNonEmptyString(value: unknown, fieldName: string): string {
+  if (typeof value !== "string") {
+    throw new Error(`Invalid ${fieldName}: expected string`);
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error(`Invalid ${fieldName}: cannot be empty`);
+  }
+
+  return trimmed;
+}
+
+function parseOptionalString(
+  value: unknown,
+  fieldName: string,
+): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (typeof value !== "string") {
+    throw new Error(`Invalid ${fieldName}: expected string`);
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function parseFiniteNumber(value: unknown, fieldName: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`Invalid ${fieldName}: expected finite number`);
+  }
+
+  return value;
+}
+
+function parseOptionalFiniteNumber(
+  value: unknown,
+  fieldName: string,
+): number | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  return parseFiniteNumber(value, fieldName);
+}
+
+function parseStringArray(value: unknown, fieldName: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`Invalid ${fieldName}: expected array`);
+  }
+
+  return value.map((item, index) =>
+    assertNonEmptyString(item, `${fieldName}[${index}]`),
+  );
+}
+
+function parseOptionalMetrics(
+  value: unknown,
+  fieldName: string,
+): ExportMetrics | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    throw new Error(`Invalid ${fieldName}: expected object`);
+  }
+
+  const parsed: ExportMetrics = {};
+  parsed.steps = parseOptionalFiniteNumber(value.steps, `${fieldName}.steps`);
+  parsed.sleepMinutes = parseOptionalFiniteNumber(
+    value.sleepMinutes,
+    `${fieldName}.sleepMinutes`,
+  );
+  parsed.screenTimeMinutes = parseOptionalFiniteNumber(
+    value.screenTimeMinutes,
+    `${fieldName}.screenTimeMinutes`,
+  );
+  parsed.spendingTotal = parseOptionalFiniteNumber(
+    value.spendingTotal,
+    `${fieldName}.spendingTotal`,
+  );
+
+  const hasValues = Object.values(parsed).some((item) => item !== undefined);
+  return hasValues ? parsed : undefined;
+}
+
+function parseSummaryRows(value: unknown): ExportSummaryRow[] {
+  if (!Array.isArray(value)) {
+    throw new Error("Invalid summaries: expected array");
+  }
+
+  return value.map((item, index) => {
+    if (!isRecord(item)) {
+      throw new Error(`Invalid summaries[${index}]: expected object`);
+    }
+
+    const dayKey = assertNonEmptyString(
+      item.dayKey,
+      `summaries[${index}].dayKey`,
+    );
+    validateDayKey(dayKey);
+
+    return {
+      dayKey,
+      story: assertNonEmptyString(item.story, `summaries[${index}].story`),
+      highlights: parseStringArray(
+        item.highlights,
+        `summaries[${index}].highlights`,
+      ),
+      metrics: parseOptionalMetrics(
+        item.metrics,
+        `summaries[${index}].metrics`,
+      ),
+      sourcesUsed: parseStringArray(
+        item.sourcesUsed,
+        `summaries[${index}].sourcesUsed`,
+      ),
+      generatedAt: parseFiniteNumber(
+        item.generatedAt,
+        `summaries[${index}].generatedAt`,
+      ),
+    };
+  });
+}
+
+function parseMemoryRows(value: unknown): ExportMemoryRow[] {
+  if (!Array.isArray(value)) {
+    throw new Error("Invalid memories: expected array");
+  }
+
+  return value.map((item, index) => {
+    if (!isRecord(item)) {
+      throw new Error(`Invalid memories[${index}]: expected object`);
+    }
+
+    const dayKey = assertNonEmptyString(
+      item.dayKey,
+      `memories[${index}].dayKey`,
+    );
+    validateDayKey(dayKey);
+
+    return {
+      dayKey,
+      title: assertNonEmptyString(item.title, `memories[${index}].title`),
+      description: parseOptionalString(
+        item.description,
+        `memories[${index}].description`,
+      ),
+      mood: parseOptionalString(item.mood, `memories[${index}].mood`),
+      happenedAt: parseFiniteNumber(
+        item.happenedAt,
+        `memories[${index}].happenedAt`,
+      ),
+    };
+  });
+}
+
+function parseDayRows(value: unknown): ExportDayRow[] {
+  if (!Array.isArray(value)) {
+    throw new Error("Invalid days: expected array");
+  }
+
+  return value.map((item, index) => {
+    if (!isRecord(item)) {
+      throw new Error(`Invalid days[${index}]: expected object`);
+    }
+
+    const dayKey = assertNonEmptyString(item.dayKey, `days[${index}].dayKey`);
+    validateDayKey(dayKey);
+
+    return {
+      dayKey,
+      rating: parseOptionalFiniteNumber(item.rating, `days[${index}].rating`),
+      manualNotes: parseStringArray(
+        item.manualNotes,
+        `days[${index}].manualNotes`,
+      ),
+      peopleTags: parseStringArray(
+        item.peopleTags,
+        `days[${index}].peopleTags`,
+      ),
+    };
+  });
+}
+
+function parseIntegrationRows(value: unknown): ExportIntegrationRow[] {
+  if (!Array.isArray(value)) {
+    throw new Error("Invalid integrationDailyData: expected array");
+  }
+
+  return value.map((item, index) => {
+    if (!isRecord(item)) {
+      throw new Error(
+        `Invalid integrationDailyData[${index}]: expected object`,
+      );
+    }
+
+    const dayKey = assertNonEmptyString(
+      item.dayKey,
+      `integrationDailyData[${index}].dayKey`,
+    );
+    validateDayKey(dayKey);
+
+    const rawContext = item.context;
+    if (
+      rawContext !== undefined &&
+      rawContext !== null &&
+      !isRecord(rawContext)
+    ) {
+      throw new Error(`Invalid integrationDailyData[${index}].context`);
+    }
+
+    const rawSignals = item.signals;
+    const parsedSignals =
+      rawSignals === undefined
+        ? undefined
+        : parseStringArray(
+            rawSignals,
+            `integrationDailyData[${index}].signals`,
+          );
+
+    return {
+      provider: assertNonEmptyString(
+        item.provider,
+        `integrationDailyData[${index}].provider`,
+      ),
+      dayKey,
+      syncedAt: parseFiniteNumber(
+        item.syncedAt,
+        `integrationDailyData[${index}].syncedAt`,
+      ),
+      summary: parseOptionalString(
+        item.summary,
+        `integrationDailyData[${index}].summary`,
+      ),
+      metrics: parseOptionalMetrics(
+        item.metrics,
+        `integrationDailyData[${index}].metrics`,
+      ),
+      signals: parsedSignals,
+      context: rawContext ?? undefined,
+    };
+  });
+}
+
+function parseExportCounts(value: unknown): ExportCounts {
+  if (!isRecord(value)) {
+    throw new Error("Invalid counts: expected object");
+  }
+
+  return {
+    summaries: parseFiniteNumber(value.summaries, "counts.summaries"),
+    memories: parseFiniteNumber(value.memories, "counts.memories"),
+    days: parseFiniteNumber(value.days, "counts.days"),
+    integrationDailyData: parseFiniteNumber(
+      value.integrationDailyData,
+      "counts.integrationDailyData",
+    ),
+  };
+}
+
+function sortObjectForStableJson(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sortObjectForStableJson(item));
+  }
+
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const sortedEntries = Object.entries(value)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, nested]) => [key, sortObjectForStableJson(nested)] as const);
+
+  return Object.fromEntries(sortedEntries);
+}
+
+function normalizeSignedExportPayloadForSigning(
+  payload: SignedDiaryExportPayload,
+): string {
+  return JSON.stringify(sortObjectForStableJson(payload));
+}
+
+function getRestoreSigningSecret(): string {
+  const explicitRestoreSecret =
+    process.env.EXPORT_RESTORE_SIGNING_SECRET?.trim();
+  if (explicitRestoreSecret) {
+    return explicitRestoreSecret;
+  }
+
+  const clerkWebhookSecret = process.env.CLERK_WEBHOOK_SECRET?.trim();
+  if (clerkWebhookSecret) {
+    return clerkWebhookSecret;
+  }
+
+  throw new Error(
+    "Missing restore signing secret. Configure EXPORT_RESTORE_SIGNING_SECRET or CLERK_WEBHOOK_SECRET.",
+  );
+}
+
+async function computeSignedPayloadSignature(
+  payload: SignedDiaryExportPayload,
+): Promise<string> {
+  const signerKey = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(getRestoreSigningSecret()),
+    {
+      name: "HMAC",
+      hash: "SHA-256",
+    },
+    false,
+    ["sign"],
+  );
+
+  const encodedPayload = new TextEncoder().encode(
+    normalizeSignedExportPayloadForSigning(payload),
+  );
+  const signature = await crypto.subtle.sign("HMAC", signerKey, encodedPayload);
+
+  return toHex(new Uint8Array(signature));
+}
+
+function signaturesEqual(left: string, right: string): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  let mismatch = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    mismatch |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+
+  return mismatch === 0;
+}
+
+function ensurePayloadSizeLimit(payloadText: string): void {
+  const sizeBytes = new TextEncoder().encode(payloadText).length;
+  if (sizeBytes > RESTORE_MAX_PAYLOAD_BYTES) {
+    throw new Error(
+      `Backup file is too large (${sizeBytes} bytes). Maximum supported size is ${RESTORE_MAX_PAYLOAD_BYTES} bytes.`,
+    );
+  }
+}
+
+async function parseAndVerifyRestorePayload(
+  payloadText: string,
+): Promise<SignedDiaryExportPayloadWithIntegrity> {
+  ensurePayloadSizeLimit(payloadText);
+
+  let parsedRaw: unknown;
+  try {
+    parsedRaw = JSON.parse(payloadText) as unknown;
+  } catch {
+    throw new Error("Restore file is not valid JSON.");
+  }
+
+  if (!isRecord(parsedRaw)) {
+    throw new Error("Restore file has invalid shape.");
+  }
+
+  if (parsedRaw.schemaVersion !== RESTORE_SCHEMA_VERSION) {
+    throw new Error(
+      "Unsupported backup format. Please create a new export using the latest version.",
+    );
+  }
+
+  const exportedAt = assertNonEmptyString(parsedRaw.exportedAt, "exportedAt");
+  if (!Number.isFinite(Date.parse(exportedAt))) {
+    throw new Error("Invalid exportedAt timestamp in restore file.");
+  }
+
+  if (!isRecord(parsedRaw.owner)) {
+    throw new Error("Restore file is missing owner metadata.");
+  }
+
+  const owner = {
+    clerkUserId: assertNonEmptyString(
+      parsedRaw.owner.clerkUserId,
+      "owner.clerkUserId",
+    ),
+  };
+
+  if (!isRecord(parsedRaw.integrity)) {
+    throw new Error("Restore file is missing integrity metadata.");
+  }
+
+  const integrityAlgorithm = assertNonEmptyString(
+    parsedRaw.integrity.algorithm,
+    "integrity.algorithm",
+  );
+  const integritySignature = assertNonEmptyString(
+    parsedRaw.integrity.signature,
+    "integrity.signature",
+  );
+
+  if (integrityAlgorithm !== RESTORE_SIGNING_ALGORITHM) {
+    throw new Error("Unsupported backup signature algorithm.");
+  }
+
+  const summaries = parseSummaryRows(parsedRaw.summaries);
+  const memories = parseMemoryRows(parsedRaw.memories);
+  const days = parseDayRows(parsedRaw.days);
+  const integrationDailyData = parseIntegrationRows(
+    parsedRaw.integrationDailyData,
+  );
+
+  const parsedCounts = parseExportCounts(parsedRaw.counts);
+  if (parsedCounts.summaries !== summaries.length) {
+    throw new Error("Restore file count mismatch for summaries.");
+  }
+  if (parsedCounts.memories !== memories.length) {
+    throw new Error("Restore file count mismatch for memories.");
+  }
+  if (parsedCounts.days !== days.length) {
+    throw new Error("Restore file count mismatch for days.");
+  }
+  if (parsedCounts.integrationDailyData !== integrationDailyData.length) {
+    throw new Error("Restore file count mismatch for integration daily data.");
+  }
+
+  const signedPayload: SignedDiaryExportPayload = {
+    schemaVersion: RESTORE_SCHEMA_VERSION,
+    exportedAt,
+    owner,
+    counts: parsedCounts,
+    summaries,
+    memories,
+    days,
+    integrationDailyData,
+  };
+
+  const expectedSignature = await computeSignedPayloadSignature(signedPayload);
+  if (!signaturesEqual(expectedSignature, integritySignature)) {
+    throw new Error(
+      "Restore file integrity check failed. The backup may be tampered.",
+    );
+  }
+
+  return {
+    ...signedPayload,
+    integrity: {
+      algorithm: RESTORE_SIGNING_ALGORITHM,
+      signature: integritySignature,
+    },
+  };
+}
+
+function buildSignedExportPayload(input: {
+  exportedAt: number;
+  clerkUserId: string;
+  summaries: ExportSummaryRow[];
+  memories: ExportMemoryRow[];
+  days: ExportDayRow[];
+  integrationDailyData: ExportIntegrationRow[];
+}): SignedDiaryExportPayload {
+  return {
+    schemaVersion: RESTORE_SCHEMA_VERSION,
+    exportedAt: new Date(input.exportedAt).toISOString(),
+    owner: {
+      clerkUserId: input.clerkUserId,
+    },
+    counts: {
+      summaries: input.summaries.length,
+      memories: input.memories.length,
+      days: input.days.length,
+      integrationDailyData: input.integrationDailyData.length,
+    },
+    summaries: input.summaries,
+    memories: input.memories,
+    days: input.days,
+    integrationDailyData: input.integrationDailyData,
+  };
+}
+
+function buildRestoreMemoryClientRequestId(row: ExportMemoryRow): string {
+  const source = `${row.dayKey}|${row.happenedAt}|${row.title}|${row.description ?? ""}|${row.mood ?? ""}`;
+  let hash = 2166136261;
+
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return `restore:${(hash >>> 0).toString(16)}`;
+}
+
+function stringArrayEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((value, index) => value === right[index]);
+}
+
+function optionalStringEqual(
+  left: string | undefined,
+  right: string | undefined,
+): boolean {
+  return (left ?? "") === (right ?? "");
+}
+
+function optionalNumberEqual(
+  left: number | undefined,
+  right: number | undefined,
+): boolean {
+  return left === right || (left === undefined && right === undefined);
+}
+
+function jsonEquivalent(left: unknown, right: unknown): boolean {
+  return (
+    JSON.stringify(sortObjectForStableJson(left)) ===
+    JSON.stringify(sortObjectForStableJson(right))
+  );
+}
+
+function metricsEqual(
+  left: ExportMetrics | undefined,
+  right: ExportMetrics | undefined,
+): boolean {
+  return (
+    optionalNumberEqual(left?.steps, right?.steps) &&
+    optionalNumberEqual(left?.sleepMinutes, right?.sleepMinutes) &&
+    optionalNumberEqual(left?.screenTimeMinutes, right?.screenTimeMinutes) &&
+    optionalNumberEqual(left?.spendingTotal, right?.spendingTotal)
+  );
+}
+
+function memoryRowEquivalent(row: ExportMemoryRow, existing: any): boolean {
+  return (
+    existing.dayKey === row.dayKey &&
+    existing.happenedAt === row.happenedAt &&
+    existing.title === row.title &&
+    optionalStringEqual(existing.description, row.description) &&
+    optionalStringEqual(existing.mood, row.mood)
+  );
+}
+
+function summaryRowEquivalent(row: ExportSummaryRow, existing: any): boolean {
+  return (
+    existing.dayKey === row.dayKey &&
+    existing.story === row.story &&
+    stringArrayEqual(existing.highlights ?? [], row.highlights) &&
+    stringArrayEqual(existing.sourcesUsed ?? [], row.sourcesUsed) &&
+    existing.generatedAt === row.generatedAt &&
+    metricsEqual(existing.metrics, row.metrics)
+  );
+}
+
+function dayRowEquivalent(row: ExportDayRow, existing: any): boolean {
+  return (
+    existing.dayKey === row.dayKey &&
+    optionalNumberEqual(existing.rating, row.rating) &&
+    stringArrayEqual(existing.manualNotes ?? [], row.manualNotes) &&
+    stringArrayEqual(existing.peopleTags ?? [], row.peopleTags)
+  );
+}
+
+function integrationRowEquivalent(
+  row: ExportIntegrationRow,
+  existing: any,
+): boolean {
+  return (
+    existing.provider === row.provider &&
+    existing.dayKey === row.dayKey &&
+    existing.syncedAt === row.syncedAt &&
+    optionalStringEqual(existing.summary, row.summary) &&
+    metricsEqual(existing.metrics, row.metrics) &&
+    stringArrayEqual(existing.signals ?? [], row.signals ?? []) &&
+    jsonEquivalent(existing.context, row.context)
+  );
+}
+
+function splitIntoBatches<TItem>(items: TItem[], batchSize: number): TItem[][] {
+  if (items.length === 0) {
+    return [];
+  }
+
+  const batches: TItem[][] = [];
+  for (let index = 0; index < items.length; index += batchSize) {
+    batches.push(items.slice(index, index + batchSize));
+  }
+
+  return batches;
+}
+
+function selectedRestoreDatasets(input?: ExportDataset[]): ExportDataset[] {
+  const defaults: ExportDataset[] = [
+    "summaries",
+    "memories",
+    "days",
+    "integrationDailyData",
+  ];
+
+  if (!input || input.length === 0) {
+    return defaults;
+  }
+
+  const unique = new Set<ExportDataset>();
+  for (const dataset of input) {
+    unique.add(dataset);
+  }
+
+  return defaults.filter((dataset) => unique.has(dataset));
+}
+
 function sanitizeExportErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message.trim().slice(0, 220);
   }
 
   return "Export generation failed.";
+}
+
+function sanitizeRestoreErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim().slice(0, 220);
+  }
+
+  return "Restore failed for one or more rows.";
 }
 
 const exportMyDiaryDataRef = makeFunctionReference<"query">(
@@ -375,6 +1108,18 @@ const markExportJobReadyInternalRef = makeFunctionReference<"mutation">(
 );
 const markExportJobFailedInternalRef = makeFunctionReference<"mutation">(
   "summaries:markExportJobFailedInternal",
+);
+const restoreDiaryDatasetBatchInternalRef = makeFunctionReference<"mutation">(
+  "summaries:restoreDiaryDatasetBatchInternal",
+);
+const createRestoreJobInternalRef = makeFunctionReference<"mutation">(
+  "summaries:createRestoreJobInternal",
+);
+const markRestoreJobCompletedInternalRef = makeFunctionReference<"mutation">(
+  "summaries:markRestoreJobCompletedInternal",
+);
+const markRestoreJobFailedInternalRef = makeFunctionReference<"mutation">(
+  "summaries:markRestoreJobFailedInternal",
 );
 
 function toTextExport(data: DiaryExportPayload): string {
@@ -464,7 +1209,13 @@ export async function prepareDiaryExportArtifactImpl(
     includeLocationSignals: boolean;
   },
 ) {
-  await ctx.runQuery(getSummaryGenerationIdentityRef, {});
+  const identity = (await ctx.runQuery(
+    getSummaryGenerationIdentityRef,
+    {},
+  )) as {
+    userId: Id<"user">;
+    clerkUserId: string;
+  };
 
   const summaries = await collectDatasetPages<ExportSummaryRow>(ctx, {
     dataset: "summaries",
@@ -494,17 +1245,31 @@ export async function prepareDiaryExportArtifactImpl(
     integrationDailyData,
   };
 
-  const payloadText =
-    args.format === "json"
-      ? JSON.stringify(
-          {
-            ...exportData,
-            exportedAt: new Date(exportData.exportedAt).toISOString(),
-          },
-          null,
-          2,
-        )
-      : toTextExport(exportData);
+  let payloadText = toTextExport(exportData);
+  if (args.format === "json") {
+    const signedPayload = buildSignedExportPayload({
+      exportedAt: exportData.exportedAt,
+      clerkUserId: identity.clerkUserId,
+      summaries,
+      memories,
+      days,
+      integrationDailyData,
+    });
+    const signature = await computeSignedPayloadSignature(signedPayload);
+
+    payloadText = JSON.stringify(
+      {
+        ...signedPayload,
+        integrity: {
+          algorithm: RESTORE_SIGNING_ALGORITHM,
+          signature,
+        },
+      } satisfies SignedDiaryExportPayloadWithIntegrity,
+      null,
+      2,
+    );
+  }
+
   const artifactMimeType =
     args.format === "json"
       ? "application/json; charset=utf-8"
@@ -879,6 +1644,138 @@ export const getMyExportJobDownloadUrl = query({
   },
 });
 
+export const createRestoreJobInternal = internalMutation({
+  args: {
+    userId: v.id("user"),
+    requestedAt: v.number(),
+    conflictMode: restoreConflictModeValidator,
+    allowPartial: v.boolean(),
+    selectedDatasets: v.array(exportDatasetValidator),
+  },
+  handler: async (ctx, args) => {
+    const restoreJobsDb = ctx.db as any;
+    const jobId = await restoreJobsDb.insert("restoreJobs", {
+      userId: args.userId,
+      status: "running" satisfies RestoreJobStatus,
+      requestedAt: args.requestedAt,
+      updatedAt: args.requestedAt,
+      conflictMode: args.conflictMode,
+      allowPartial: args.allowPartial,
+      selectedDatasets: args.selectedDatasets,
+    });
+
+    return {
+      jobId: String(jobId),
+      status: "running" as RestoreJobStatus,
+      requestedAt: args.requestedAt,
+    };
+  },
+});
+
+export const markRestoreJobCompletedInternal = internalMutation({
+  args: {
+    jobId: v.string(),
+    status: v.union(v.literal("succeeded"), v.literal("partial")),
+    completedAt: v.number(),
+    exportedAt: v.string(),
+    sourceCounts: exportCountsObjectValidator,
+    totals: restoreBatchResultObjectValidator,
+    datasetResults: restoreDatasetResultsValidator,
+  },
+  handler: async (ctx, args) => {
+    const restoreJobsDb = ctx.db as any;
+    const job = await restoreJobsDb.get(args.jobId);
+
+    if (!job) {
+      throw new Error("Restore job not found");
+    }
+
+    await restoreJobsDb.patch(job._id, {
+      status: args.status,
+      completedAt: args.completedAt,
+      updatedAt: args.completedAt,
+      exportedAt: args.exportedAt,
+      sourceCounts: args.sourceCounts,
+      totals: args.totals,
+      datasetResults: args.datasetResults,
+    });
+
+    return {
+      jobId: String(job._id),
+      status: args.status,
+      completedAt: args.completedAt,
+    };
+  },
+});
+
+export const markRestoreJobFailedInternal = internalMutation({
+  args: {
+    jobId: v.string(),
+    failedAt: v.number(),
+    error: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const restoreJobsDb = ctx.db as any;
+    const job = await restoreJobsDb.get(args.jobId);
+
+    if (!job) {
+      throw new Error("Restore job not found");
+    }
+
+    await restoreJobsDb.patch(job._id, {
+      status: "failed",
+      failedAt: args.failedAt,
+      updatedAt: args.failedAt,
+      error: args.error,
+    });
+
+    return {
+      jobId: String(job._id),
+      status: "failed" as RestoreJobStatus,
+      failedAt: args.failedAt,
+    };
+  },
+});
+
+export const listMyRestoreJobsPaginated = query({
+  args: {
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    const restoreJobsDb = ctx.db as any;
+    const page = await restoreJobsDb
+      .query("restoreJobs")
+      .withIndex("by_user_requestedAt", (q: any) => q.eq("userId", user._id))
+      .order("desc")
+      .paginate(args.paginationOpts);
+
+    const mappedPage = page.page.map((job: any) => ({
+      jobId: String(job._id),
+      status: job.status,
+      requestedAt: job.requestedAt,
+      completedAt: job.completedAt,
+      failedAt: job.failedAt,
+      updatedAt: job.updatedAt,
+      conflictMode: job.conflictMode,
+      allowPartial: Boolean(job.allowPartial),
+      selectedDatasets: Array.isArray(job.selectedDatasets)
+        ? job.selectedDatasets
+        : [],
+      exportedAt: typeof job.exportedAt === "string" ? job.exportedAt : null,
+      sourceCounts: job.sourceCounts ?? null,
+      totals: job.totals ?? null,
+      datasetResults: job.datasetResults ?? null,
+      error: typeof job.error === "string" ? job.error : null,
+    }));
+
+    return {
+      ...page,
+      page: mappedPage,
+    };
+  },
+});
+
 export const runScheduledExportJobRetentionCleanupInternal = internalMutation({
   args: {
     maxDeletes: v.optional(v.number()),
@@ -924,6 +1821,44 @@ export const runScheduledExportJobRetentionCleanupInternal = internalMutation({
       cutoff,
       deletedJobs,
       deletedArtifacts,
+    };
+  },
+});
+
+export const runScheduledRestoreJobRetentionCleanupInternal = internalMutation({
+  args: {
+    maxDeletes: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const maxDeletes =
+      typeof args.maxDeletes === "number" &&
+      Number.isFinite(args.maxDeletes) &&
+      args.maxDeletes > 0
+        ? Math.min(Math.floor(args.maxDeletes), 5000)
+        : getRetentionDeleteBatchSize();
+
+    const now = Date.now();
+    const retentionDays = getRestoreJobRetentionDays();
+    const cutoff = now - retentionDays * MS_PER_DAY;
+
+    const restoreJobsDb = ctx.db as any;
+    const staleJobs = await restoreJobsDb
+      .query("restoreJobs")
+      .withIndex("by_requestedAt", (q: any) => q.lt("requestedAt", cutoff))
+      .order("asc")
+      .take(maxDeletes);
+
+    let deletedJobs = 0;
+
+    for (const job of staleJobs) {
+      await restoreJobsDb.delete(job._id);
+      deletedJobs += 1;
+    }
+
+    return {
+      retentionDays,
+      cutoff,
+      deletedJobs,
     };
   },
 });
@@ -998,6 +1933,411 @@ export const prepareMyDiaryExportArtifact = action({
         });
       } catch {
         // Preserve original export failure when state update fails.
+      }
+
+      throw error;
+    }
+  },
+});
+
+export const restoreDiaryDatasetBatchInternal = internalMutation({
+  args: {
+    userId: v.id("user"),
+    dataset: exportDatasetValidator,
+    rows: v.array(v.any()),
+    conflictMode: restoreConflictModeValidator,
+    allowPartial: v.boolean(),
+  },
+  handler: async (ctx, args: RestoreBatchDatasetArgs) => {
+    const db = ctx.db as any;
+    const result = createEmptyRestoreBatchResult();
+
+    for (const rawRow of args.rows) {
+      result.processed += 1;
+
+      try {
+        if (args.dataset === "summaries") {
+          const row = rawRow as ExportSummaryRow;
+          const existing = await db
+            .query("daySummaries")
+            .withIndex("by_user_day", (q: any) =>
+              q.eq("userId", args.userId).eq("dayKey", row.dayKey),
+            )
+            .unique();
+
+          if (!existing) {
+            await db.insert("daySummaries", {
+              userId: args.userId,
+              dayKey: row.dayKey,
+              story: row.story,
+              highlights: row.highlights,
+              metrics: row.metrics,
+              sourcesUsed: row.sourcesUsed,
+              generatedAt: row.generatedAt,
+            });
+            result.inserted += 1;
+            continue;
+          }
+
+          if (summaryRowEquivalent(row, existing)) {
+            result.skipped += 1;
+            continue;
+          }
+
+          if (args.conflictMode === "overwrite") {
+            await db.patch(existing._id, {
+              story: row.story,
+              highlights: row.highlights,
+              metrics: row.metrics,
+              sourcesUsed: row.sourcesUsed,
+              generatedAt: row.generatedAt,
+            });
+            result.updated += 1;
+            continue;
+          }
+
+          result.conflicts += 1;
+          result.skipped += 1;
+          continue;
+        }
+
+        if (args.dataset === "days") {
+          const row = rawRow as ExportDayRow;
+          const existing = await db
+            .query("days")
+            .withIndex("by_user_day", (q: any) =>
+              q.eq("userId", args.userId).eq("dayKey", row.dayKey),
+            )
+            .unique();
+
+          if (!existing) {
+            await db.insert("days", {
+              userId: args.userId,
+              dayKey: row.dayKey,
+              rating: row.rating,
+              manualNotes: row.manualNotes,
+              peopleTags: row.peopleTags,
+            });
+            result.inserted += 1;
+            continue;
+          }
+
+          if (dayRowEquivalent(row, existing)) {
+            result.skipped += 1;
+            continue;
+          }
+
+          if (args.conflictMode === "overwrite") {
+            await db.patch(existing._id, {
+              rating: row.rating,
+              manualNotes: row.manualNotes,
+              peopleTags: row.peopleTags,
+            });
+            result.updated += 1;
+            continue;
+          }
+
+          result.conflicts += 1;
+          result.skipped += 1;
+          continue;
+        }
+
+        if (args.dataset === "integrationDailyData") {
+          const row = rawRow as ExportIntegrationRow;
+          const existing = await db
+            .query("integrationDailyData")
+            .withIndex("by_user_provider_day", (q: any) =>
+              q
+                .eq("userId", args.userId)
+                .eq("provider", row.provider)
+                .eq("dayKey", row.dayKey),
+            )
+            .unique();
+
+          if (!existing) {
+            await db.insert("integrationDailyData", {
+              userId: args.userId,
+              provider: row.provider,
+              dayKey: row.dayKey,
+              syncedAt: row.syncedAt,
+              summary: row.summary,
+              metrics: row.metrics,
+              signals: row.signals,
+              context: row.context,
+            });
+            result.inserted += 1;
+            continue;
+          }
+
+          if (integrationRowEquivalent(row, existing)) {
+            result.skipped += 1;
+            continue;
+          }
+
+          if (args.conflictMode === "overwrite") {
+            await db.patch(existing._id, {
+              syncedAt: row.syncedAt,
+              summary: row.summary,
+              metrics: row.metrics,
+              signals: row.signals,
+              context: row.context,
+            });
+            result.updated += 1;
+            continue;
+          }
+
+          result.conflicts += 1;
+          result.skipped += 1;
+          continue;
+        }
+
+        const row = rawRow as ExportMemoryRow;
+        const restoreClientRequestId = buildRestoreMemoryClientRequestId(row);
+
+        const existingByRestoreRequestId = await db
+          .query("memories")
+          .withIndex("by_user_clientRequestId", (q: any) =>
+            q
+              .eq("userId", args.userId)
+              .eq("clientRequestId", restoreClientRequestId),
+          )
+          .unique();
+
+        if (existingByRestoreRequestId) {
+          if (memoryRowEquivalent(row, existingByRestoreRequestId)) {
+            result.skipped += 1;
+            continue;
+          }
+
+          if (args.conflictMode === "overwrite") {
+            await db.patch(existingByRestoreRequestId._id, {
+              dayKey: row.dayKey,
+              title: row.title,
+              description: row.description,
+              mood: row.mood,
+              happenedAt: row.happenedAt,
+            });
+            result.updated += 1;
+            continue;
+          }
+
+          result.conflicts += 1;
+          result.skipped += 1;
+          continue;
+        }
+
+        const rowsByTimestamp = await db
+          .query("memories")
+          .withIndex("by_user_happenedAt", (q: any) =>
+            q.eq("userId", args.userId).eq("happenedAt", row.happenedAt),
+          )
+          .collect();
+
+        const exactDuplicate = rowsByTimestamp.find((existing: any) =>
+          memoryRowEquivalent(row, existing),
+        );
+
+        if (exactDuplicate) {
+          result.skipped += 1;
+          continue;
+        }
+
+        const potentialConflict = rowsByTimestamp.find(
+          (existing: any) =>
+            existing.dayKey === row.dayKey && existing.title === row.title,
+        );
+
+        if (potentialConflict) {
+          if (args.conflictMode === "overwrite") {
+            await db.patch(potentialConflict._id, {
+              dayKey: row.dayKey,
+              title: row.title,
+              description: row.description,
+              mood: row.mood,
+              happenedAt: row.happenedAt,
+            });
+            result.updated += 1;
+            continue;
+          }
+
+          result.conflicts += 1;
+          result.skipped += 1;
+          continue;
+        }
+
+        await db.insert("memories", {
+          userId: args.userId,
+          clientRequestId: restoreClientRequestId,
+          dayKey: row.dayKey,
+          title: row.title,
+          description: row.description,
+          mood: row.mood,
+          happenedAt: row.happenedAt,
+        });
+        result.inserted += 1;
+      } catch (error) {
+        if (!args.allowPartial) {
+          throw error;
+        }
+
+        result.failed += 1;
+        if (result.errorSamples.length < 10) {
+          result.errorSamples.push(sanitizeRestoreErrorMessage(error));
+        }
+      }
+    }
+
+    return result;
+  },
+});
+
+export const validateMyDiaryRestorePayload = action({
+  args: {
+    payloadText: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const identity = (await ctx.runQuery(
+      getSummaryGenerationIdentityRef,
+      {},
+    )) as {
+      userId: Id<"user">;
+      clerkUserId: string;
+    };
+
+    const payload = await parseAndVerifyRestorePayload(args.payloadText);
+    if (payload.owner.clerkUserId !== identity.clerkUserId) {
+      throw new Error(
+        "Backup ownership mismatch. You can only restore backups exported by your account.",
+      );
+    }
+
+    return {
+      valid: true,
+      schemaVersion: payload.schemaVersion,
+      exportedAt: payload.exportedAt,
+      ownerClerkUserId: payload.owner.clerkUserId,
+      counts: payload.counts,
+    };
+  },
+});
+
+export const restoreMyDiaryData = action({
+  args: {
+    payloadText: v.string(),
+    datasets: v.optional(v.array(exportDatasetValidator)),
+    conflictMode: v.optional(restoreConflictModeValidator),
+    allowPartial: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const identity = (await ctx.runQuery(
+      getSummaryGenerationIdentityRef,
+      {},
+    )) as {
+      userId: Id<"user">;
+      clerkUserId: string;
+    };
+
+    const datasets = selectedRestoreDatasets(args.datasets);
+    if (datasets.length === 0) {
+      throw new Error("Select at least one dataset to restore.");
+    }
+
+    const conflictMode = args.conflictMode ?? "skip";
+    const allowPartial = args.allowPartial ?? true;
+    const requestedAt = Date.now();
+
+    const createdJob = (await ctx.runMutation(createRestoreJobInternalRef, {
+      userId: identity.userId,
+      requestedAt,
+      conflictMode,
+      allowPartial,
+      selectedDatasets: datasets,
+    })) as {
+      jobId: string;
+      status: RestoreJobStatus;
+      requestedAt: number;
+    };
+
+    try {
+      const payload = await parseAndVerifyRestorePayload(args.payloadText);
+      if (payload.owner.clerkUserId !== identity.clerkUserId) {
+        throw new Error(
+          "Backup ownership mismatch. You can only restore backups exported by your account.",
+        );
+      }
+
+      const datasetResults: Record<ExportDataset, RestoreBatchResult> = {
+        summaries: createEmptyRestoreBatchResult(),
+        memories: createEmptyRestoreBatchResult(),
+        days: createEmptyRestoreBatchResult(),
+        integrationDailyData: createEmptyRestoreBatchResult(),
+      };
+
+      for (const dataset of datasets) {
+        const rows = payload[dataset] as unknown[];
+        const batches = splitIntoBatches(rows, RESTORE_BATCH_SIZE);
+
+        for (const batchRows of batches) {
+          const batchResult = (await ctx.runMutation(
+            restoreDiaryDatasetBatchInternalRef,
+            {
+              userId: identity.userId,
+              dataset,
+              rows: batchRows,
+              conflictMode,
+              allowPartial,
+            },
+          )) as RestoreBatchResult;
+
+          mergeRestoreBatchResults(datasetResults[dataset], batchResult);
+        }
+      }
+
+      const totals = createEmptyRestoreBatchResult();
+      for (const dataset of [
+        "summaries",
+        "memories",
+        "days",
+        "integrationDailyData",
+      ] as const) {
+        mergeRestoreBatchResults(totals, datasetResults[dataset]);
+      }
+
+      const completedAt = Date.now();
+      const restoreJobStatus: RestoreJobStatus =
+        totals.failed > 0 ? "partial" : "succeeded";
+
+      await ctx.runMutation(markRestoreJobCompletedInternalRef, {
+        jobId: createdJob.jobId,
+        status: restoreJobStatus,
+        completedAt,
+        exportedAt: payload.exportedAt,
+        sourceCounts: payload.counts,
+        totals,
+        datasetResults,
+      });
+
+      return {
+        jobId: createdJob.jobId,
+        status: totals.failed > 0 ? "partial" : "success",
+        requestedAt: createdJob.requestedAt,
+        restoredAt: completedAt,
+        conflictMode,
+        allowPartial,
+        selectedDatasets: datasets,
+        sourceCounts: payload.counts,
+        totals,
+        datasetResults,
+      };
+    } catch (error) {
+      try {
+        await ctx.runMutation(markRestoreJobFailedInternalRef, {
+          jobId: createdJob.jobId,
+          failedAt: Date.now(),
+          error: sanitizeRestoreErrorMessage(error),
+        });
+      } catch {
+        // Preserve original restore failure when status update fails.
       }
 
       throw error;

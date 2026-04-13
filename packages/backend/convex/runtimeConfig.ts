@@ -10,6 +10,7 @@ const RETENTION_LOCATION_SIGNALS_DAYS_ENV = "RETENTION_LOCATION_SIGNALS_DAYS";
 const RETENTION_SUMMARY_EVENTS_DAYS_ENV = "RETENTION_SUMMARY_EVENTS_DAYS";
 const RETENTION_INFO_EVENTS_DAYS_ENV = "RETENTION_INFO_EVENTS_DAYS";
 const RETENTION_EXPORT_JOBS_DAYS_ENV = "RETENTION_EXPORT_JOBS_DAYS";
+const RETENTION_RESTORE_JOBS_DAYS_ENV = "RETENTION_RESTORE_JOBS_DAYS";
 const RETENTION_DELETE_BATCH_SIZE_ENV = "RETENTION_DELETE_BATCH_SIZE";
 const SUMMARY_LOW_QUALITY_THRESHOLD_ENV = "SUMMARY_LOW_QUALITY_THRESHOLD";
 const ENABLE_BACKGROUND_LOCATION_TRACKING_ENV =
@@ -210,6 +211,15 @@ export function getRetentionPolicyDefaults(): Record<
 
 export function getExportJobRetentionDays(): number {
   return getRetentionPolicyDefaults().exportJobs.retentionDays;
+}
+
+export function getRestoreJobRetentionDays(): number {
+  return parseBoundedInt({
+    envName: RETENTION_RESTORE_JOBS_DAYS_ENV,
+    fallback: 30,
+    min: 1,
+    max: 3650,
+  });
 }
 
 export function getRetentionDeleteBatchSize(): number {
