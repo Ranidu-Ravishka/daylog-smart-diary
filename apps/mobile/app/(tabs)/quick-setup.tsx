@@ -25,7 +25,7 @@ import { useRouter } from "expo-router";
 import { useAuth, useUser } from "@clerk/clerk-expo";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "@repo/backend/convex";
-import { SETTINGS_DEFAULTS } from "@repo/ui/lib/constants";
+import { normalizeUserSettings } from "@repo/user-settings/lib/user-settings";
 import { Colors, Radius, Spacing, Typography } from "@/constants/theme";
 import { FocusAreasStep } from "@/components/onboarding/focus-areas-step";
 import { ReminderStep } from "@/components/onboarding/reminder-step";
@@ -70,6 +70,10 @@ export default function QuickSetupScreen() {
     initial.setHours(20, 0, 0, 0);
     return initial;
   });
+  const normalizedSavedSettings = useMemo(
+    () => normalizeUserSettings(savedPreferences),
+    [savedPreferences],
+  );
 
   const buttonAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: buttonScale.value }],
@@ -173,7 +177,7 @@ export default function QuickSetupScreen() {
         dailyTime: dailyTime.toISOString(),
         weeklyDay,
         formattedTime: formatTime(dailyTime),
-        theme: savedPreferences?.theme ?? SETTINGS_DEFAULTS.theme,
+        theme: normalizedSavedSettings.theme,
         notificationsEnabled,
         dailySummaryEnabled:
           savedPreferences?.dailySummaryEnabled ?? reminderType === "daily",
@@ -181,18 +185,19 @@ export default function QuickSetupScreen() {
           savedPreferences?.weeklyInsightsEnabled ?? reminderType === "weekly",
         quietHoursEnabled:
           savedPreferences?.quietHoursEnabled ??
-          SETTINGS_DEFAULTS.quietHoursEnabled,
+          normalizedSavedSettings.quietHoursEnabled,
         quietHoursStart:
           savedPreferences?.quietHoursStart ??
-          SETTINGS_DEFAULTS.quietHoursStart,
+          normalizedSavedSettings.quietHoursStart,
         quietHoursEnd:
-          savedPreferences?.quietHoursEnd ?? SETTINGS_DEFAULTS.quietHoursEnd,
+          savedPreferences?.quietHoursEnd ??
+          normalizedSavedSettings.quietHoursEnd,
         autoSyncIntegrations:
           savedPreferences?.autoSyncIntegrations ??
-          SETTINGS_DEFAULTS.autoSyncIntegrations,
+          normalizedSavedSettings.autoSyncIntegrations,
         defaultMemoryMood:
           savedPreferences?.defaultMemoryMood ??
-          SETTINGS_DEFAULTS.defaultMemoryMood,
+          normalizedSavedSettings.defaultMemoryMood,
       });
 
       await syncReminderNotifications(updatedPreferences);

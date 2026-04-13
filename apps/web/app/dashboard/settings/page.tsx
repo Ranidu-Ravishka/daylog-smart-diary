@@ -3,6 +3,11 @@
 import { useQuery, useMutation, useConvexAuth, useAction } from "convex/react";
 import { api } from "@repo/backend/convex";
 import {
+  normalizeUserSettings,
+  normalizeUserSettingsPatch,
+  type UserSettingsDto,
+} from "@repo/user-settings/lib/user-settings";
+import {
   FOCUS_AREAS,
   INTEGRATION_PROVIDER_META,
   MEMORY_MOOD_OPTIONS,
@@ -98,6 +103,19 @@ type IntegrationSyncRunDoc = {
   lastError?: string;
 };
 
+type WebSettingsPatch = Pick<
+  UserSettingsDto,
+  | "theme"
+  | "notificationsEnabled"
+  | "dailySummaryEnabled"
+  | "weeklyInsightsEnabled"
+  | "quietHoursEnabled"
+  | "quietHoursStart"
+  | "quietHoursEnd"
+  | "autoSyncIntegrations"
+  | "defaultMemoryMood"
+>;
+
 function formatDateTime(timestamp?: number): string {
   if (!timestamp) return "Never";
   return new Date(timestamp).toLocaleString();
@@ -151,7 +169,7 @@ export default function SettingsPage() {
   const [reminderType, setReminderType] = useState<"daily" | "weekly">("daily");
   const [dailyTime, setDailyTime] = useState("20:00");
   const [weeklyDay, setWeeklyDay] = useState("Sunday");
-  const [theme, setTheme] = useState<"light" | "dark" | "system">(
+  const [theme, setTheme] = useState<UserSettingsDto["theme"]>(
     SETTINGS_DEFAULTS.theme,
   );
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(
@@ -175,9 +193,9 @@ export default function SettingsPage() {
   const [autoSyncIntegrations, setAutoSyncIntegrations] = useState<boolean>(
     SETTINGS_DEFAULTS.autoSyncIntegrations,
   );
-  const [defaultMemoryMood, setDefaultMemoryMood] = useState<string>(
-    SETTINGS_DEFAULTS.defaultMemoryMood,
-  );
+  const [defaultMemoryMood, setDefaultMemoryMood] = useState<
+    UserSettingsDto["defaultMemoryMood"]
+  >(SETTINGS_DEFAULTS.defaultMemoryMood);
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [providerPendingAction, setProviderPendingAction] = useState<
@@ -186,6 +204,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (preferences) {
+      const normalizedSettings = normalizeUserSettings(preferences);
       const nextFocusAreas = preferences.focusAreas ?? [];
       setSelectedFocus((prev) =>
         areNumberArraysEqual(prev, nextFocusAreas) ? prev : nextFocusAreas,
@@ -193,35 +212,15 @@ export default function SettingsPage() {
       setReminderType(preferences.reminderType ?? "daily");
       setWeeklyDay(preferences.weeklyDay ?? "Sunday");
       setDailyTime(toTimeInputValue(preferences.dailyTime));
-      setTheme(preferences.theme ?? SETTINGS_DEFAULTS.theme);
-      setNotificationsEnabled(
-        preferences.notificationsEnabled ??
-          SETTINGS_DEFAULTS.notificationsEnabled,
-      );
-      setDailySummaryEnabled(
-        preferences.dailySummaryEnabled ??
-          SETTINGS_DEFAULTS.dailySummaryEnabled,
-      );
-      setWeeklyInsightsEnabled(
-        preferences.weeklyInsightsEnabled ??
-          SETTINGS_DEFAULTS.weeklyInsightsEnabled,
-      );
-      setQuietHoursEnabled(
-        preferences.quietHoursEnabled ?? SETTINGS_DEFAULTS.quietHoursEnabled,
-      );
-      setQuietHoursStart(
-        preferences.quietHoursStart ?? SETTINGS_DEFAULTS.quietHoursStart,
-      );
-      setQuietHoursEnd(
-        preferences.quietHoursEnd ?? SETTINGS_DEFAULTS.quietHoursEnd,
-      );
-      setAutoSyncIntegrations(
-        preferences.autoSyncIntegrations ??
-          SETTINGS_DEFAULTS.autoSyncIntegrations,
-      );
-      setDefaultMemoryMood(
-        preferences.defaultMemoryMood ?? SETTINGS_DEFAULTS.defaultMemoryMood,
-      );
+      setTheme(normalizedSettings.theme);
+      setNotificationsEnabled(normalizedSettings.notificationsEnabled);
+      setDailySummaryEnabled(normalizedSettings.dailySummaryEnabled);
+      setWeeklyInsightsEnabled(normalizedSettings.weeklyInsightsEnabled);
+      setQuietHoursEnabled(normalizedSettings.quietHoursEnabled);
+      setQuietHoursStart(normalizedSettings.quietHoursStart);
+      setQuietHoursEnd(normalizedSettings.quietHoursEnd);
+      setAutoSyncIntegrations(normalizedSettings.autoSyncIntegrations);
+      setDefaultMemoryMood(normalizedSettings.defaultMemoryMood);
     }
   }, [preferences]);
 
@@ -271,13 +270,7 @@ export default function SettingsPage() {
       const fmtH = h! % 12 || 12;
       const ampm = h! >= 12 ? "PM" : "AM";
       const formattedTime = `${fmtH}:${String(m).padStart(2, "0")} ${ampm}`;
-
-      await syncPreferences({
-        focusAreas: selectedFocus,
-        reminderType,
-        dailyTime: timeDate.toISOString(),
-        weeklyDay,
-        formattedTime,
+      const settingsPatch = normalizeUserSettingsPatch({
         theme,
         notificationsEnabled,
         dailySummaryEnabled,
@@ -287,6 +280,15 @@ export default function SettingsPage() {
         quietHoursEnd,
         autoSyncIntegrations,
         defaultMemoryMood,
+      }) as Partial<WebSettingsPatch>;
+
+      await syncPreferences({
+        focusAreas: selectedFocus,
+        reminderType,
+        dailyTime: timeDate.toISOString(),
+        weeklyDay,
+        formattedTime,
+        ...settingsPatch,
       });
       setSaved(true);
       toastSuccess("Preferences saved");

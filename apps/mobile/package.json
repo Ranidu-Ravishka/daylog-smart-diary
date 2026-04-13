@@ -24,6 +24,7 @@
     "@react-navigation/elements": "^2.6.3",
     "@react-navigation/native": "^7.1.8",
     "@repo/backend": "workspace:*",
+    "@repo/user-settings": "workspace:*",
     "@repo/ui": "workspace:*",
     "@sentry/react-native": "^8.7.0",
     "convex": "^1.29.3",

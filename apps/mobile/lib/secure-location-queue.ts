@@ -1,6 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Crypto from "expo-crypto";
-import * as SecureStore from "expo-secure-store";
 import nacl from "tweetnacl";
 import type { LocationTrackPoint } from "./location-stay-points";
 
@@ -8,6 +7,8 @@ const LOCATION_QUEUE_STORAGE_KEY = "daylog.background_location.points";
 const LOCATION_QUEUE_SCOPE_KEY = "daylog.background_location.points.scope.v1";
 const SECURE_KEY_PREFIX = "daylog.background_location.points.key.v1.";
 const SECURE_STORE_SERVICE = "daylog.location.queue";
+const SECURE_STORE_FALLBACK_PREFIX =
+  "daylog.background_location.points.key.fallback.v1.";
 
 const ENCRYPTION_VERSION = 1;
 const ENCRYPTION_KEY_BYTES = 32;
@@ -17,6 +18,22 @@ const DEFAULT_SESSION_SCOPE = "anonymous";
 type QueueKeyMaterial = {
   keyId: string;
   keyBytes: Uint8Array;
+};
+
+type SecureStoreModule = {
+  getItemAsync(
+    key: string,
+    options?: { keychainService?: string },
+  ): Promise<string | null>;
+  setItemAsync(
+    key: string,
+    value: string,
+    options?: { keychainService?: string },
+  ): Promise<void>;
+  deleteItemAsync(
+    key: string,
+    options?: { keychainService?: string },
+  ): Promise<void>;
 };
 
 type EncryptedQueueEnvelope = {
@@ -30,6 +47,80 @@ type EncryptedQueueEnvelope = {
 
 let activeSessionScopeCache: string | null = null;
 let activeKeyMaterialCache: QueueKeyMaterial | null = null;
+let secureStoreModulePromise: Promise<SecureStoreModule | null> | null = null;
+
+function getSecureStoreFallbackKey(secureKeyName: string): string {
+  return `${SECURE_STORE_FALLBACK_PREFIX}${secureKeyName}`;
+}
+
+async function getSecureStoreModule(): Promise<SecureStoreModule | null> {
+  if (!secureStoreModulePromise) {
+    secureStoreModulePromise = (async () => {
+      try {
+        const secureStore = await import("expo-secure-store");
+        const candidate = secureStore as Partial<SecureStoreModule>;
+
+        if (
+          typeof candidate.getItemAsync !== "function" ||
+          typeof candidate.setItemAsync !== "function" ||
+          typeof candidate.deleteItemAsync !== "function"
+        ) {
+          return null;
+        }
+
+        return candidate as SecureStoreModule;
+      } catch {
+        return null;
+      }
+    })();
+  }
+
+  return await secureStoreModulePromise;
+}
+
+async function readStoredKeyHex(secureKeyName: string): Promise<string | null> {
+  const secureStore = await getSecureStoreModule();
+
+  if (!secureStore) {
+    return await AsyncStorage.getItem(getSecureStoreFallbackKey(secureKeyName));
+  }
+
+  return await secureStore.getItemAsync(secureKeyName, {
+    keychainService: SECURE_STORE_SERVICE,
+  });
+}
+
+async function writeStoredKeyHex(
+  secureKeyName: string,
+  keyHex: string,
+): Promise<void> {
+  const secureStore = await getSecureStoreModule();
+
+  if (!secureStore) {
+    await AsyncStorage.setItem(
+      getSecureStoreFallbackKey(secureKeyName),
+      keyHex,
+    );
+    return;
+  }
+
+  await secureStore.setItemAsync(secureKeyName, keyHex, {
+    keychainService: SECURE_STORE_SERVICE,
+  });
+}
+
+async function deleteStoredKeyHex(secureKeyName: string): Promise<void> {
+  const secureStore = await getSecureStoreModule();
+
+  if (!secureStore) {
+    await AsyncStorage.removeItem(getSecureStoreFallbackKey(secureKeyName));
+    return;
+  }
+
+  await secureStore.deleteItemAsync(secureKeyName, {
+    keychainService: SECURE_STORE_SERVICE,
+  });
+}
 
 function normalizeSessionScope(value: string | null | undefined): string {
   const trimmed = value?.trim();
@@ -139,9 +230,7 @@ async function getKeyMaterialForScope(
   const secureKeyName = `${SECURE_KEY_PREFIX}${keyId}`;
 
   try {
-    const storedHex = await SecureStore.getItemAsync(secureKeyName, {
-      keychainService: SECURE_STORE_SERVICE,
-    });
+    const storedHex = await readStoredKeyHex(secureKeyName);
 
     if (storedHex) {
       const parsed = hexToBytes(storedHex);
@@ -164,9 +253,7 @@ async function getKeyMaterialForScope(
     }
 
     const nextKey = Crypto.getRandomBytes(ENCRYPTION_KEY_BYTES);
-    await SecureStore.setItemAsync(secureKeyName, bytesToHex(nextKey), {
-      keychainService: SECURE_STORE_SERVICE,
-    });
+    await writeStoredKeyHex(secureKeyName, bytesToHex(nextKey));
 
     const created = {
       keyId,
@@ -186,9 +273,7 @@ async function getKeyMaterialForScope(
 async function deleteKeyForScope(scope: string): Promise<void> {
   try {
     const keyId = await scopeToKeyId(scope);
-    await SecureStore.deleteItemAsync(`${SECURE_KEY_PREFIX}${keyId}`, {
-      keychainService: SECURE_STORE_SERVICE,
-    });
+    await deleteStoredKeyHex(`${SECURE_KEY_PREFIX}${keyId}`);
   } catch {
     // Best-effort key cleanup only.
   }

@@ -26,6 +26,13 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useAction, useMutation, useQuery, useConvexAuth } from "convex/react";
 import { api } from "@repo/backend/convex";
 import {
+  normalizeLifeContextUserSettingsPatch,
+  normalizeUserSettingsPatch,
+  type LifeContextUserSettingsPatchDto,
+  type UserSettingsDto,
+  type UserSettingsPatchDto,
+} from "@repo/user-settings/lib/user-settings";
+import {
   INTEGRATION_PROVIDER_META,
   MEMORY_MOOD_OPTIONS,
   SETTINGS_DEFAULTS,
@@ -92,6 +99,30 @@ type IntegrationSyncRunDoc = {
 
 type OfflineOutboxSnapshot = Awaited<
   ReturnType<typeof getOfflineOutboxSnapshot>
+>;
+
+type ReminderPreferencePatch = {
+  reminderType?: "daily" | "weekly";
+} & Pick<
+  UserSettingsPatchDto,
+  | "theme"
+  | "notificationsEnabled"
+  | "dailySummaryEnabled"
+  | "weeklyInsightsEnabled"
+  | "quietHoursEnabled"
+  | "quietHoursStart"
+  | "quietHoursEnd"
+  | "autoSyncIntegrations"
+  | "defaultMemoryMood"
+>;
+
+type LifeContextPreferencePatch = Pick<
+  LifeContextUserSettingsPatchDto,
+  | "callLogsTrackingEnabled"
+  | "moodDetectionFaceRecognitionEnabled"
+  | "fitnessTrackingEnabled"
+  | "calendarNotificationsTrackingEnabled"
+  | "backgroundLocationTrackingEnabled"
 >;
 
 function getTodayDayKey(): string {
@@ -244,9 +275,9 @@ const SettingsScreen = () => {
     parseTimeToDate(SETTINGS_DEFAULTS.quietHoursStart),
   );
   const [autoSyncIntegrations, setAutoSyncIntegrations] = useState(true);
-  const [defaultMemoryMood, setDefaultMemoryMood] = useState<string>(
-    SETTINGS_DEFAULTS.defaultMemoryMood,
-  );
+  const [defaultMemoryMood, setDefaultMemoryMood] = useState<
+    UserSettingsDto["defaultMemoryMood"]
+  >(SETTINGS_DEFAULTS.defaultMemoryMood);
   const [locationTrackingEnabled, setLocationTrackingEnabled] =
     useState<boolean>(SETTINGS_DEFAULTS.locationTrackingEnabled);
   const [callLogsTrackingEnabled, setCallLogsTrackingEnabled] =
@@ -445,20 +476,7 @@ const SettingsScreen = () => {
   );
 
   const savePreferencePatch = useCallback(
-    async (
-      patch: Partial<{
-        reminderType: "daily" | "weekly";
-        theme: "light" | "dark" | "system";
-        notificationsEnabled: boolean;
-        dailySummaryEnabled: boolean;
-        weeklyInsightsEnabled: boolean;
-        quietHoursEnabled: boolean;
-        quietHoursStart: string;
-        quietHoursEnd: string;
-        autoSyncIntegrations: boolean;
-        defaultMemoryMood: string;
-      }>,
-    ) => {
+    async (patch: ReminderPreferencePatch) => {
       if (!preferences) {
         Alert.alert("Complete quick setup", "Set your preferences first.", [
           {
@@ -470,27 +488,43 @@ const SettingsScreen = () => {
         return false;
       }
 
+      const settingsPatch = normalizeUserSettingsPatch({
+        theme: patch.theme,
+        notificationsEnabled: patch.notificationsEnabled,
+        dailySummaryEnabled: patch.dailySummaryEnabled,
+        weeklyInsightsEnabled: patch.weeklyInsightsEnabled,
+        quietHoursEnabled: patch.quietHoursEnabled,
+        quietHoursStart: patch.quietHoursStart,
+        quietHoursEnd: patch.quietHoursEnd,
+        autoSyncIntegrations: patch.autoSyncIntegrations,
+        defaultMemoryMood: patch.defaultMemoryMood,
+      });
+
       await syncUserPreferences({
         focusAreas: preferences.focusAreas,
         reminderType: patch.reminderType ?? preferences.reminderType,
         dailyTime: preferences.dailyTime,
         weeklyDay: preferences.weeklyDay,
         formattedTime: preferences.formattedTime,
-        theme: patch.theme ?? preferences.theme,
+        theme: settingsPatch.theme ?? preferences.theme,
         notificationsEnabled:
-          patch.notificationsEnabled ?? preferences.notificationsEnabled,
+          settingsPatch.notificationsEnabled ??
+          preferences.notificationsEnabled,
         dailySummaryEnabled:
-          patch.dailySummaryEnabled ?? preferences.dailySummaryEnabled,
+          settingsPatch.dailySummaryEnabled ?? preferences.dailySummaryEnabled,
         weeklyInsightsEnabled:
-          patch.weeklyInsightsEnabled ?? preferences.weeklyInsightsEnabled,
+          settingsPatch.weeklyInsightsEnabled ??
+          preferences.weeklyInsightsEnabled,
         quietHoursEnabled:
-          patch.quietHoursEnabled ?? preferences.quietHoursEnabled,
-        quietHoursStart: patch.quietHoursStart ?? preferences.quietHoursStart,
-        quietHoursEnd: patch.quietHoursEnd ?? preferences.quietHoursEnd,
+          settingsPatch.quietHoursEnabled ?? preferences.quietHoursEnabled,
+        quietHoursStart:
+          settingsPatch.quietHoursStart ?? preferences.quietHoursStart,
+        quietHoursEnd: settingsPatch.quietHoursEnd ?? preferences.quietHoursEnd,
         autoSyncIntegrations:
-          patch.autoSyncIntegrations ?? preferences.autoSyncIntegrations,
+          settingsPatch.autoSyncIntegrations ??
+          preferences.autoSyncIntegrations,
         defaultMemoryMood:
-          patch.defaultMemoryMood ?? preferences.defaultMemoryMood,
+          settingsPatch.defaultMemoryMood ?? preferences.defaultMemoryMood,
       });
 
       await syncReminderRuntimeFromPreferences({
@@ -499,15 +533,18 @@ const SettingsScreen = () => {
         weeklyDay: preferences.weeklyDay,
         formattedTime: preferences.formattedTime,
         notificationsEnabled:
-          patch.notificationsEnabled ?? preferences.notificationsEnabled,
+          settingsPatch.notificationsEnabled ??
+          preferences.notificationsEnabled,
         dailySummaryEnabled:
-          patch.dailySummaryEnabled ?? preferences.dailySummaryEnabled,
+          settingsPatch.dailySummaryEnabled ?? preferences.dailySummaryEnabled,
         weeklyInsightsEnabled:
-          patch.weeklyInsightsEnabled ?? preferences.weeklyInsightsEnabled,
+          settingsPatch.weeklyInsightsEnabled ??
+          preferences.weeklyInsightsEnabled,
         quietHoursEnabled:
-          patch.quietHoursEnabled ?? preferences.quietHoursEnabled,
-        quietHoursStart: patch.quietHoursStart ?? preferences.quietHoursStart,
-        quietHoursEnd: patch.quietHoursEnd ?? preferences.quietHoursEnd,
+          settingsPatch.quietHoursEnabled ?? preferences.quietHoursEnabled,
+        quietHoursStart:
+          settingsPatch.quietHoursStart ?? preferences.quietHoursStart,
+        quietHoursEnd: settingsPatch.quietHoursEnd ?? preferences.quietHoursEnd,
       });
 
       return true;
@@ -1028,16 +1065,9 @@ const SettingsScreen = () => {
   }, [preferences, router]);
 
   const applyLifeContextPreferencePatch = useCallback(
-    async (
-      patch: Partial<{
-        callLogsTrackingEnabled: boolean;
-        moodDetectionFaceRecognitionEnabled: boolean;
-        fitnessTrackingEnabled: boolean;
-        calendarNotificationsTrackingEnabled: boolean;
-        backgroundLocationTrackingEnabled: boolean;
-      }>,
-    ) => {
-      await updateMyLocationTrackingState(patch);
+    async (patch: LifeContextPreferencePatch) => {
+      const normalizedPatch = normalizeLifeContextUserSettingsPatch(patch);
+      await updateMyLocationTrackingState(normalizedPatch);
     },
     [updateMyLocationTrackingState],
   );
