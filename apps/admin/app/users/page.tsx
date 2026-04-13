@@ -13,6 +13,7 @@ import {
 import Link from "next/link";
 
 type DeletionJobStatus = "requested" | "processing" | "completed" | "failed";
+type RowDeletionStatus = "requested" | "processing" | "failed";
 
 type DeletionJobProgress = {
   deletedMemories: number;
@@ -82,6 +83,14 @@ type TrackedDeletionJob = {
   progress: DeletionJobProgress;
 };
 
+type ActionToastKind = "success" | "error" | "info";
+
+type ActionToast = {
+  id: number;
+  kind: ActionToastKind;
+  message: string;
+};
+
 type DeletionJobSnapshot = {
   status: DeletionJobStatus;
   stage: string;
@@ -141,6 +150,18 @@ function isDeletionJobActive(status: DeletionJobStatus): boolean {
 
 function isDeletionJobTerminal(status: DeletionJobStatus): boolean {
   return status === "completed" || status === "failed";
+}
+
+function getToastClasses(kind: ActionToastKind): string {
+  if (kind === "success") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-800";
+  }
+
+  if (kind === "error") {
+    return "border-red-200 bg-red-50 text-red-800";
+  }
+
+  return "border-blue-200 bg-blue-50 text-blue-800";
 }
 
 function normalizeDeletionJobProgress(
@@ -338,9 +359,39 @@ export default function UsersPage() {
   const [deletingByUserId, setDeletingByUserId] = React.useState<
     Record<string, boolean>
   >({});
+  const [optimisticallyHiddenByUserId, setOptimisticallyHiddenByUserId] =
+    React.useState<Record<string, boolean>>({});
+  const [rowRefreshVersionByUserId, setRowRefreshVersionByUserId] =
+    React.useState<Record<string, number>>({});
+  const [toasts, setToasts] = React.useState<ActionToast[]>([]);
   const [trackedDeletionJobs, setTrackedDeletionJobs] = React.useState<
     TrackedDeletionJob[]
   >([]);
+  const handledTerminalJobIdsRef = React.useRef<Set<string>>(new Set());
+
+  const dismissToast = React.useCallback((toastId: number) => {
+    setToasts((current) => current.filter((toast) => toast.id !== toastId));
+  }, []);
+
+  const pushToast = React.useCallback(
+    (kind: ActionToastKind, message: string) => {
+      const id = Date.now() + Math.floor(Math.random() * 1_000_000);
+
+      setToasts((current) => [{ id, kind, message }, ...current].slice(0, 4));
+
+      window.setTimeout(() => {
+        dismissToast(id);
+      }, 5000);
+    },
+    [dismissToast],
+  );
+
+  const refreshUserRow = React.useCallback((userId: string) => {
+    setRowRefreshVersionByUserId((current) => ({
+      ...current,
+      [userId]: (current[userId] ?? 0) + 1,
+    }));
+  }, []);
 
   const hasInFlightDeletionJobs = trackedDeletionJobs.some((job) =>
     isDeletionJobActive(job.status),
@@ -414,13 +465,51 @@ export default function UsersPage() {
     return statuses;
   }, [trackedDeletionJobs]);
 
+  const rowDeletionStatusByUserId = React.useMemo(() => {
+    const latestJobByUserId = new Map<string, TrackedDeletionJob>();
+    const statuses = new Map<string, RowDeletionStatus>();
+
+    for (const job of trackedDeletionJobs) {
+      if (job.status === "completed") {
+        continue;
+      }
+
+      const previous = latestJobByUserId.get(job.userId);
+      if (!previous || job.updatedAt >= previous.updatedAt) {
+        latestJobByUserId.set(job.userId, job);
+      }
+    }
+
+    for (const [userId, job] of latestJobByUserId) {
+      if (job.status === "requested" || job.status === "processing") {
+        statuses.set(userId, job.status);
+        continue;
+      }
+
+      statuses.set(userId, "failed");
+    }
+
+    return statuses;
+  }, [trackedDeletionJobs]);
+
+  const visibleUsers = React.useMemo(
+    () => users.filter((row) => !optimisticallyHiddenByUserId[String(row._id)]),
+    [optimisticallyHiddenByUserId, users],
+  );
+
   const handleDeletionSnapshot = React.useCallback(
     (jobId: string, snapshot: DeletionJobSnapshot) => {
+      let matchedUserId: string | null = null;
+      let matchedUserEmail: string | null = null;
+
       setTrackedDeletionJobs((current) =>
         current.map((job) => {
           if (job.jobId !== jobId) {
             return job;
           }
+
+          matchedUserId = job.userId;
+          matchedUserEmail = job.userEmail;
 
           return {
             ...job,
@@ -435,8 +524,39 @@ export default function UsersPage() {
           };
         }),
       );
+
+      if (!matchedUserId || !isDeletionJobTerminal(snapshot.status)) {
+        return;
+      }
+
+      if (handledTerminalJobIdsRef.current.has(jobId)) {
+        return;
+      }
+      handledTerminalJobIdsRef.current.add(jobId);
+
+      if (snapshot.status === "completed") {
+        pushToast(
+          "success",
+          `Deletion completed for ${matchedUserEmail ?? "selected user"}.`,
+        );
+      } else {
+        setOptimisticallyHiddenByUserId((current) => {
+          const next = { ...current };
+          delete next[matchedUserId!];
+          return next;
+        });
+
+        pushToast(
+          "error",
+          snapshot.lastError
+            ? `Deletion failed for ${matchedUserEmail ?? "selected user"}: ${snapshot.lastError}`
+            : `Deletion failed for ${matchedUserEmail ?? "selected user"}.`,
+        );
+      }
+
+      refreshUserRow(matchedUserId);
     },
-    [],
+    [pushToast, refreshUserRow],
   );
 
   const dismissDeletionJob = React.useCallback((jobId: string) => {
@@ -449,7 +569,7 @@ export default function UsersPage() {
     async (row: { _id: (typeof users)[number]["_id"]; email: string }) => {
       const rowId = String(row._id);
 
-      if (activeDeletionByUserId.has(rowId)) {
+      if (deletingByUserId[rowId] || activeDeletionByUserId.has(rowId)) {
         return;
       }
 
@@ -458,6 +578,11 @@ export default function UsersPage() {
       }
 
       setDeletingByUserId((current) => ({
+        ...current,
+        [rowId]: true,
+      }));
+
+      setOptimisticallyHiddenByUserId((current) => ({
         ...current,
         [rowId]: true,
       }));
@@ -475,10 +600,23 @@ export default function UsersPage() {
         const jobId = result.jobId;
 
         if (!result.queued || !jobId) {
+          setOptimisticallyHiddenByUserId((current) => {
+            const next = { ...current };
+            delete next[rowId];
+            return next;
+          });
+
+          pushToast(
+            "error",
+            `Failed to queue deletion for ${row.email}. Please try again.`,
+          );
+          refreshUserRow(rowId);
           return;
         }
 
         const now = Date.now();
+        pushToast("info", `Deletion requested for ${row.email}.`);
+
         setTrackedDeletionJobs((current) => {
           const initialStatus: DeletionJobStatus =
             result.status === "processing" ? "processing" : "requested";
@@ -515,6 +653,19 @@ export default function UsersPage() {
         });
 
         setPollToken((value) => value + 1);
+      } catch (error) {
+        setOptimisticallyHiddenByUserId((current) => {
+          const next = { ...current };
+          delete next[rowId];
+          return next;
+        });
+
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Failed to queue user deletion.";
+        pushToast("error", message);
+        refreshUserRow(rowId);
       } finally {
         setDeletingByUserId((current) => {
           const next = { ...current };
@@ -523,7 +674,13 @@ export default function UsersPage() {
         });
       }
     },
-    [activeDeletionByUserId, deleteUser],
+    [
+      activeDeletionByUserId,
+      deleteUser,
+      deletingByUserId,
+      pushToast,
+      refreshUserRow,
+    ],
   );
 
   return (
@@ -580,10 +737,32 @@ export default function UsersPage() {
             </div>
           ) : null}
 
+          {toasts.length > 0 ? (
+            <div className="fixed right-4 top-20 z-50 space-y-2">
+              {toasts.map((toast) => (
+                <div
+                  key={toast.id}
+                  className={`min-w-[300px] max-w-[420px] rounded-lg border px-3 py-2 text-sm shadow ${getToastClasses(toast.kind)}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <p>{toast.message}</p>
+                    <button
+                      type="button"
+                      onClick={() => dismissToast(toast.id)}
+                      className="text-xs font-medium opacity-80 hover:opacity-100"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
             {status === "LoadingFirstPage" ? (
               <div className="p-6 text-sm text-gray-600">Loading...</div>
-            ) : users.length === 0 ? (
+            ) : visibleUsers.length === 0 ? (
               <div className="p-6 text-sm text-gray-600">No users yet.</div>
             ) : (
               <>
@@ -607,67 +786,92 @@ export default function UsersPage() {
                           Created
                         </th>
                         <th className="text-left font-medium px-4 py-3">
+                          Deletion Status
+                        </th>
+                        <th className="text-left font-medium px-4 py-3">
                           Actions
                         </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {users.map((row) => (
-                        <tr key={row._id} className="hover:bg-gray-50">
-                          <td className="px-4 py-3">
-                            <div className="text-sm text-gray-900">
-                              {row.email}
-                            </div>
-                            <div className="font-mono text-xs text-gray-500">
-                              {row.clerkUserId}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-gray-900">
-                            {row.firstName ?? "—"}
-                          </td>
-                          <td className="px-4 py-3 text-gray-900">
-                            {row.lastName ?? "—"}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {row.isAdmin ? "Yes" : "No"}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {new Date(row._creationTime).toLocaleString()}
-                          </td>
-                          <td className="px-4 py-3">
-                            <Link
-                              href={`/users/edit/${row._id}`}
-                              className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-                            >
-                              Edit
-                            </Link>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                void queueUserDeletion({
-                                  _id: row._id,
-                                  email: row.email,
-                                })
-                              }
-                              disabled={
-                                deletingByUserId[String(row._id)] ||
-                                activeDeletionByUserId.has(String(row._id))
-                              }
-                              className="inline-flex items-center rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 ml-2 disabled:opacity-60 disabled:cursor-not-allowed"
-                            >
-                              {activeDeletionByUserId.has(String(row._id))
-                                ? activeDeletionStatusByUserId.get(
-                                    String(row._id),
-                                  ) === "requested"
-                                  ? "Requested"
-                                  : "Processing"
-                                : deletingByUserId[String(row._id)]
-                                  ? "Queueing..."
-                                  : "Delete"}
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                      {visibleUsers.map((row) => {
+                        const rowId = String(row._id);
+                        const rowDeletionStatus =
+                          rowDeletionStatusByUserId.get(rowId) ??
+                          (deletingByUserId[rowId] ? "requested" : undefined);
+
+                        return (
+                          <tr
+                            key={`${row._id}:${rowRefreshVersionByUserId[rowId] ?? 0}`}
+                            className="hover:bg-gray-50"
+                          >
+                            <td className="px-4 py-3">
+                              <div className="text-sm text-gray-900">
+                                {row.email}
+                              </div>
+                              <div className="font-mono text-xs text-gray-500">
+                                {row.clerkUserId}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-gray-900">
+                              {row.firstName ?? "—"}
+                            </td>
+                            <td className="px-4 py-3 text-gray-900">
+                              {row.lastName ?? "—"}
+                            </td>
+                            <td className="px-4 py-3 text-gray-600">
+                              {row.isAdmin ? "Yes" : "No"}
+                            </td>
+                            <td className="px-4 py-3 text-gray-600">
+                              {new Date(row._creationTime).toLocaleString()}
+                            </td>
+                            <td className="px-4 py-3">
+                              {rowDeletionStatus ? (
+                                <span
+                                  className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${getDeletionStatusPillClasses(
+                                    rowDeletionStatus,
+                                  )}`}
+                                >
+                                  {formatDeletionStatusLabel(rowDeletionStatus)}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-gray-400">—</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              <Link
+                                href={`/users/edit/${row._id}`}
+                                className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+                              >
+                                Edit
+                              </Link>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void queueUserDeletion({
+                                    _id: row._id,
+                                    email: row.email,
+                                  })
+                                }
+                                disabled={
+                                  deletingByUserId[rowId] ||
+                                  activeDeletionByUserId.has(rowId)
+                                }
+                                className="inline-flex items-center rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 ml-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                              >
+                                {activeDeletionByUserId.has(rowId)
+                                  ? activeDeletionStatusByUserId.get(rowId) ===
+                                    "requested"
+                                    ? "Requested"
+                                    : "Processing"
+                                  : deletingByUserId[rowId]
+                                    ? "Queueing..."
+                                    : "Delete"}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
