@@ -22,6 +22,26 @@ export default function EditUserPage() {
   );
   const updateUser = useMutation(api.admin.adminUpdateUser);
 
+  const revokeUserSessions = async (clerkUserId: string) => {
+    const response = await fetch("/api/admin/revoke-user-sessions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ clerkUserId }),
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      throw new Error(
+        payload?.error ??
+          "User was demoted, but session revocation failed. Ask the user to sign out manually.",
+      );
+    }
+  };
+
   if (!userId) {
     return (
       <div className="p-6 text-sm text-red-600">Missing user ID parameter.</div>
@@ -46,6 +66,9 @@ export default function EditUserPage() {
         submitLabel="Save Changes"
         successMessage="User updated successfully."
         onSubmit={async (values) => {
+          const wasAdmin = existing.isAdmin === true;
+          const willBeAdmin = values.isAdmin === true;
+
           await updateUser({
             userId,
             email: values.email,
@@ -53,6 +76,10 @@ export default function EditUserPage() {
             lastName: values.lastName,
             isAdmin: values.isAdmin,
           });
+
+          if (wasAdmin && !willBeAdmin) {
+            await revokeUserSessions(existing.clerkUserId);
+          }
         }}
       />
     </AdminGuard>

@@ -6,7 +6,23 @@ import { NextResponse } from "next/server";
 import { adminServerEnv } from "./src/server/env";
 
 const ADMIN_CACHE_COOKIE = "daylog_admin_cache";
-const ADMIN_CACHE_TTL_SECONDS = 60 * 5;
+const ADMIN_CACHE_TTL_SECONDS = 60;
+const ADMIN_CACHE_REFRESH_WINDOW_SECONDS = 15;
+
+type CachedAdminStatus = {
+  adminAuthVersion: number;
+  expiresAt: number;
+};
+
+type AdminCacheState = {
+  isAdmin: boolean;
+  adminAuthVersion: number;
+};
+
+const adminCacheStateQuery =
+  "users:getCurrentUserAdminCacheState" as unknown as Parameters<
+    ConvexHttpClient["query"]
+  >[0];
 
 const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
@@ -41,29 +57,44 @@ async function readCachedAdminStatus(
   req: NextRequest,
   userId: string,
   secret: string,
-): Promise<boolean> {
+): Promise<CachedAdminStatus | null> {
   const raw = req.cookies.get(ADMIN_CACHE_COOKIE)?.value;
-  if (!raw) return false;
+  if (!raw) return null;
 
-  const [cachedUserId, expiresAtRaw, signature] = raw.split(".");
-  if (!cachedUserId || !expiresAtRaw || !signature) return false;
-  if (cachedUserId !== userId) return false;
+  const [cachedUserId, cachedVersionRaw, expiresAtRaw, signature] =
+    raw.split(".");
+  if (!cachedUserId || !cachedVersionRaw || !expiresAtRaw || !signature) {
+    return null;
+  }
+  if (cachedUserId !== userId) return null;
+
+  const cachedVersion = Number.parseInt(cachedVersionRaw, 10);
+  if (!Number.isFinite(cachedVersion) || cachedVersion < 0) return null;
 
   const expiresAt = Number.parseInt(expiresAtRaw, 10);
-  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return false;
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null;
 
-  const payload = `${cachedUserId}.${expiresAtRaw}`;
+  const payload = `${cachedUserId}.${cachedVersionRaw}.${expiresAtRaw}`;
   const expectedSignature = await signPayload(payload, secret);
-  return signature === expectedSignature;
+  if (signature !== expectedSignature) return null;
+
+  return {
+    adminAuthVersion: cachedVersion,
+    expiresAt,
+  };
 }
 
 async function withAdminCacheCookie(
   response: NextResponse,
   userId: string,
+  adminAuthVersion: number,
   secret: string,
 ): Promise<NextResponse> {
+  const normalizedVersion = Number.isFinite(adminAuthVersion)
+    ? Math.max(0, Math.floor(adminAuthVersion))
+    : 0;
   const expiresAt = Date.now() + ADMIN_CACHE_TTL_SECONDS * 1000;
-  const payload = `${userId}.${expiresAt}`;
+  const payload = `${userId}.${normalizedVersion}.${expiresAt}`;
   const signature = await signPayload(payload, secret);
 
   response.cookies.set(ADMIN_CACHE_COOKIE, `${payload}.${signature}`, {
@@ -75,6 +106,63 @@ async function withAdminCacheCookie(
   });
 
   return response;
+}
+
+function withClearedAdminCacheCookie(response: NextResponse): NextResponse {
+  response.cookies.delete(ADMIN_CACHE_COOKIE);
+  return response;
+}
+
+function unauthorizedResponse(req: NextRequest): NextResponse {
+  return withClearedAdminCacheCookie(
+    NextResponse.redirect(new URL("/unauthorized", req.url)),
+  );
+}
+
+function parseAdminCacheState(value: unknown): AdminCacheState | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const candidate = value as {
+    isAdmin?: unknown;
+    adminAuthVersion?: unknown;
+  };
+
+  if (typeof candidate.isAdmin !== "boolean") {
+    return null;
+  }
+
+  const rawVersion = candidate.adminAuthVersion;
+  const adminAuthVersion =
+    typeof rawVersion === "number" && Number.isFinite(rawVersion)
+      ? Math.max(0, Math.floor(rawVersion))
+      : 0;
+
+  return {
+    isAdmin: candidate.isAdmin,
+    adminAuthVersion,
+  };
+}
+
+async function fetchAdminCacheState(
+  client: ConvexHttpClient,
+): Promise<AdminCacheState> {
+  try {
+    const rawState = await client.query(adminCacheStateQuery, {});
+    const parsed = parseAdminCacheState(rawState);
+    if (parsed) {
+      return parsed;
+    }
+  } catch {
+    // Fall through to legacy boolean query for zero-downtime rollout.
+  }
+
+  const legacyIsAdmin = await client.query(api.users.isCurrentUserAdmin, {});
+  return {
+    isAdmin: legacyIsAdmin === true,
+    adminAuthVersion: 0,
+  };
 }
 
 const handler = clerkMiddleware(async (auth, req) => {
@@ -89,39 +177,55 @@ const handler = clerkMiddleware(async (auth, req) => {
   }
 
   if (isPostAuthRoute(req)) {
-    return NextResponse.next();
+    return withClearedAdminCacheCookie(NextResponse.next());
+  }
+
+  const token = await getToken({ template: "convex" });
+  if (!token) {
+    return unauthorizedResponse(req);
   }
 
   const cacheSecret = adminServerEnv.adminCacheSecret;
-  const hasCachedAdminStatus = await readCachedAdminStatus(
+  const cachedAdminStatus = await readCachedAdminStatus(
     req,
     userId,
     cacheSecret,
   );
-  if (hasCachedAdminStatus) {
-    return NextResponse.next();
-  }
 
   const convexUrl = adminServerEnv.convexUrl;
-
-  const token = await getToken({ template: "convex" });
-  if (!token) {
-    return NextResponse.redirect(new URL("/unauthorized", req.url));
-  }
 
   const client = new ConvexHttpClient(convexUrl);
   client.setAuth(token);
 
-  const isAdmin = await client.query(api.users.isCurrentUserAdmin, {});
-  if (isAdmin) {
-    const response = NextResponse.next();
-    return await withAdminCacheCookie(response, userId, cacheSecret);
+  let adminState: AdminCacheState;
+  try {
+    // Strict server verification prevents stale admin access after role changes.
+    adminState = await fetchAdminCacheState(client);
+  } catch {
+    return unauthorizedResponse(req);
   }
 
-  const denied = NextResponse.redirect(new URL("/unauthorized", req.url));
-  denied.cookies.delete(ADMIN_CACHE_COOKIE);
+  if (!adminState.isAdmin) {
+    return unauthorizedResponse(req);
+  }
 
-  return denied;
+  const shouldRefreshCookie =
+    !cachedAdminStatus ||
+    cachedAdminStatus.adminAuthVersion !== adminState.adminAuthVersion ||
+    cachedAdminStatus.expiresAt - Date.now() <=
+      ADMIN_CACHE_REFRESH_WINDOW_SECONDS * 1000;
+
+  if (shouldRefreshCookie) {
+    const response = NextResponse.next();
+    return await withAdminCacheCookie(
+      response,
+      userId,
+      adminState.adminAuthVersion,
+      cacheSecret,
+    );
+  }
+
+  return NextResponse.next();
 });
 
 export async function proxy(req: NextRequest, event: NextFetchEvent) {

@@ -138,6 +138,22 @@ describe("users behavior", () => {
       { clerkUserId: string; isAdmin: boolean },
       { success: boolean }
     >(usersModule.setUserAdminStatus);
+    const getCurrentUserAdminCacheState = handler<
+      Record<string, never>,
+      {
+        isAdmin: boolean;
+        adminAuthVersion: number;
+        adminRoleUpdatedAt: number;
+      }
+    >(usersModule.getCurrentUserAdminCacheState);
+
+    const initialState = await getCurrentUserAdminCacheState(
+      createAuthCtx(db, "clerk_member_001"),
+      {},
+    );
+    expect(initialState.isAdmin).toBe(false);
+    expect(initialState.adminAuthVersion).toBe(0);
+    expect(initialState.adminRoleUpdatedAt).toBe(0);
 
     await expect(
       setUserAdminStatus(createAuthCtx(db, "clerk_member_001"), {
@@ -159,6 +175,8 @@ describe("users behavior", () => {
       )
       .unique();
     expect(promoted?.isAdmin).toBe(true);
+    expect(promoted?.adminAuthVersion).toBe(1);
+    expect(promoted?.adminRoleUpdatedAt).toBeGreaterThan(0);
 
     const result = await setUserAdminStatus(
       createAuthCtx(db, "clerk_admin_001"),
@@ -169,6 +187,24 @@ describe("users behavior", () => {
     );
 
     expect(result.success).toBe(true);
+
+    const demoted = await db
+      .query("user")
+      .withIndex("by_clerkUserId", (q) =>
+        q.eq("clerkUserId", "clerk_member_001"),
+      )
+      .unique();
+    expect(demoted?.isAdmin).toBe(false);
+    expect(demoted?.adminAuthVersion).toBe(2);
+    expect(demoted?.adminRoleUpdatedAt).toBeGreaterThan(0);
+
+    const finalState = await getCurrentUserAdminCacheState(
+      createAuthCtx(db, "clerk_member_001"),
+      {},
+    );
+    expect(finalState.isAdmin).toBe(false);
+    expect(finalState.adminAuthVersion).toBe(2);
+    expect(finalState.adminRoleUpdatedAt).toBeGreaterThan(0);
   });
 
   it("deletes user cascade data by Clerk id and remains idempotent", async () => {

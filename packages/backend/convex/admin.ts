@@ -3,7 +3,7 @@ import { paginationOptsValidator } from "convex/server";
 import { mutation, query, MutationCtx } from "./_generated/server";
 import { requireAdmin } from "./authz";
 import { clampLimit, validateDayKey, validateRating } from "./validators";
-import { Id } from "./_generated/dataModel";
+import { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { assertIntegrationProvider } from "./integrationProviders";
 import {
@@ -19,6 +19,29 @@ import {
 
 const OPAQUE_TOKEN_REF_PREFIX = "tokref_";
 const DELETE_BATCH_SIZE = 256;
+
+function buildAdminRoleStatePatch(
+  user: Pick<
+    Doc<"user">,
+    "isAdmin" | "adminAuthVersion" | "adminRoleUpdatedAt"
+  >,
+  nextIsAdmin: boolean,
+  now = Date.now(),
+): {
+  isAdmin: boolean;
+  adminAuthVersion: number;
+  adminRoleUpdatedAt: number;
+} {
+  const currentIsAdmin = user.isAdmin === true;
+  const currentVersion = user.adminAuthVersion ?? 0;
+  const roleChanged = currentIsAdmin !== nextIsAdmin;
+
+  return {
+    isAdmin: nextIsAdmin,
+    adminAuthVersion: roleChanged ? currentVersion + 1 : currentVersion,
+    adminRoleUpdatedAt: roleChanged ? now : (user.adminRoleUpdatedAt ?? now),
+  };
+}
 
 // ────────────────────────────────────────────────────────────
 // All functions in this file require admin privileges.
@@ -135,12 +158,15 @@ export const adminCreateUser = mutation({
   },
   handler: async (ctx, args) => {
     const admin = await requireAdmin(ctx);
+    const now = Date.now();
     const id = await ctx.db.insert("user", {
       clerkUserId: args.clerkUserId,
       email: args.email,
       firstName: args.firstName,
       lastName: args.lastName,
       isAdmin: args.isAdmin,
+      adminAuthVersion: 0,
+      adminRoleUpdatedAt: now,
     });
 
     await applyDashboardMetricsDelta(ctx.db, {
@@ -223,7 +249,12 @@ export const adminUpdateUser = mutation({
     if (args.email !== undefined) updates.email = args.email;
     if (args.firstName !== undefined) updates.firstName = args.firstName;
     if (args.lastName !== undefined) updates.lastName = args.lastName;
-    if (args.isAdmin !== undefined) updates.isAdmin = args.isAdmin;
+    if (args.isAdmin !== undefined) {
+      const adminRolePatch = buildAdminRoleStatePatch(user, args.isAdmin);
+      updates.isAdmin = adminRolePatch.isAdmin;
+      updates.adminAuthVersion = adminRolePatch.adminAuthVersion;
+      updates.adminRoleUpdatedAt = adminRolePatch.adminRoleUpdatedAt;
+    }
 
     await ctx.db.patch(args.userId, updates);
     await logAdminAction(ctx, admin._id, "update_user", args.userId);
