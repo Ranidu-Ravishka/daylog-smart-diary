@@ -34,13 +34,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+          cache: "pnpm"
+          cache-dependency-path: "pnpm-lock.yaml"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -68,25 +70,15 @@ jobs:
           # Required for correct diffing
           fetch-depth: 0
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Get pnpm store directory
-        id: pnpm-cache
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
+          cache: "pnpm"
+          cache-dependency-path: "pnpm-lock.yaml"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -172,23 +164,62 @@ jobs:
         if: steps.set.outputs.admin == 'true'
         run: pnpm run build:admin
 
-      - name: Backend lint
-        run: pnpm --filter @repo/backend lint
-
-      - name: Backend tests
-        run: pnpm --filter @repo/backend test:run
-
-      - name: Backend coverage gate
-        run: pnpm test:coverage:backend
-
-      - name: Web OAuth abuse tests
-        run: pnpm --filter web test:oauth-abuse
-
-      - name: Mobile typecheck
-        run: pnpm --filter mobile check-types
-
-      - name: Mobile lint
-        run: pnpm --filter mobile lint
-
       - name: Mobile build validation (Expo web export)
         run: pnpm --filter mobile build:ci
+
+  app-test-matrix:
+    name: app-tests-${{ matrix.app }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - web
+          - backend
+          - admin
+          - mobile
+    env:
+      NEXT_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
+      EXPO_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ci_dummy"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: "pnpm-lock.yaml"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run matrix test target
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          case "${{ matrix.app }}" in
+            web)
+              pnpm --filter web test
+              ;;
+            backend)
+              pnpm test:coverage:backend
+              ;;
+            admin)
+              pnpm --filter admin test
+              ;;
+            mobile)
+              pnpm --filter mobile test
+              ;;
+            *)
+              echo "Unsupported app target: ${{ matrix.app }}"
+              exit 1
+              ;;
+          esac

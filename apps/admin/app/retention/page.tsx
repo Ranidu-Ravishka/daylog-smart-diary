@@ -2,6 +2,7 @@
 
 import AdminGuard from "@/components/admin-guard";
 import {
+  buildRetentionCleanupStatusMessage,
   formatRetentionDeletedCounts,
   sumRetentionDeletedCounts,
   type RetentionDeletedCounts,
@@ -143,12 +144,8 @@ export default function RetentionPage() {
 
     try {
       const result = await runCleanup({ dryRun });
-      const total = sumRetentionDeletedCounts(result.deletedCounts);
-
       setStatusMessage(
-        dryRun
-          ? `Dry run complete. ${total} rows would be deleted.`
-          : `Cleanup complete. Deleted ${total} rows.`,
+        buildRetentionCleanupStatusMessage(result.deletedCounts, dryRun),
       );
     } catch (error) {
       setActionError(

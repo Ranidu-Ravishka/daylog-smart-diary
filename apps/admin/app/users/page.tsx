@@ -1,6 +1,13 @@
 "use client";
 
 import AdminGuard from "@/components/admin-guard";
+import {
+  buildActiveDeletionStatusByUserId,
+  buildRowDeletionStatusByUserId,
+  isDeletionJobActive,
+  isDeletionJobTerminal,
+  type DeletionJobStatus,
+} from "@/lib/user-deletion-flow";
 import { api } from "@repo/backend/convex";
 import { makeFunctionReference } from "convex/server";
 import React from "react";
@@ -11,9 +18,6 @@ import {
   useQuery,
 } from "convex/react";
 import Link from "next/link";
-
-type DeletionJobStatus = "requested" | "processing" | "completed" | "failed";
-type RowDeletionStatus = "requested" | "processing" | "failed";
 
 type DeletionJobProgress = {
   deletedMemories: number;
@@ -142,14 +146,6 @@ function formatDeletionStatusLabel(status: DeletionJobStatus): string {
   }
 
   return "Failed";
-}
-
-function isDeletionJobActive(status: DeletionJobStatus): boolean {
-  return status === "requested" || status === "processing";
-}
-
-function isDeletionJobTerminal(status: DeletionJobStatus): boolean {
-  return status === "completed" || status === "failed";
 }
 
 function getToastClasses(kind: ActionToastKind): string {
@@ -444,52 +440,11 @@ export default function UsersPage() {
   }, [trackedDeletionJobs]);
 
   const activeDeletionStatusByUserId = React.useMemo(() => {
-    const latestJobByUserId = new Map<string, TrackedDeletionJob>();
-
-    const statuses = new Map<string, DeletionJobStatus>();
-    for (const job of trackedDeletionJobs) {
-      if (!isDeletionJobActive(job.status)) {
-        continue;
-      }
-
-      const previous = latestJobByUserId.get(job.userId);
-      if (!previous || job.updatedAt >= previous.updatedAt) {
-        latestJobByUserId.set(job.userId, job);
-      }
-    }
-
-    for (const [userId, job] of latestJobByUserId) {
-      statuses.set(userId, job.status);
-    }
-
-    return statuses;
+    return buildActiveDeletionStatusByUserId(trackedDeletionJobs);
   }, [trackedDeletionJobs]);
 
   const rowDeletionStatusByUserId = React.useMemo(() => {
-    const latestJobByUserId = new Map<string, TrackedDeletionJob>();
-    const statuses = new Map<string, RowDeletionStatus>();
-
-    for (const job of trackedDeletionJobs) {
-      if (job.status === "completed") {
-        continue;
-      }
-
-      const previous = latestJobByUserId.get(job.userId);
-      if (!previous || job.updatedAt >= previous.updatedAt) {
-        latestJobByUserId.set(job.userId, job);
-      }
-    }
-
-    for (const [userId, job] of latestJobByUserId) {
-      if (job.status === "requested" || job.status === "processing") {
-        statuses.set(userId, job.status);
-        continue;
-      }
-
-      statuses.set(userId, "failed");
-    }
-
-    return statuses;
+    return buildRowDeletionStatusByUserId(trackedDeletionJobs);
   }, [trackedDeletionJobs]);
 
   const visibleUsers = React.useMemo(
