@@ -2,7 +2,6 @@ import { api } from "@repo/backend/convex";
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { ConvexHttpClient } from "convex/browser";
 import { NextResponse } from "next/server";
-import { adminServerEnv } from "@/server/env";
 
 export const runtime = "nodejs";
 
@@ -21,6 +20,28 @@ function parseClerkUserId(value: unknown): string | null {
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function readConvexUrlFromEnv(): string | null {
+  const rawValue = process.env.NEXT_PUBLIC_CONVEX_URL;
+  if (!rawValue) {
+    return null;
+  }
+
+  const value = rawValue.trim();
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "https:") {
+      return null;
+    }
+    return parsed.toString();
+  } catch {
+    return null;
+  }
 }
 
 async function revokeActiveSessionsForUser(clerkUserId: string) {
@@ -91,7 +112,15 @@ export async function POST(request: Request) {
       return errorResponse("Unauthorized", 401);
     }
 
-    const convexClient = new ConvexHttpClient(adminServerEnv.convexUrl);
+    const convexUrl = readConvexUrlFromEnv();
+    if (!convexUrl) {
+      return errorResponse(
+        "Server configuration is missing NEXT_PUBLIC_CONVEX_URL",
+        500,
+      );
+    }
+
+    const convexClient = new ConvexHttpClient(convexUrl);
     convexClient.setAuth(token);
 
     const adminState = await convexClient.query(
