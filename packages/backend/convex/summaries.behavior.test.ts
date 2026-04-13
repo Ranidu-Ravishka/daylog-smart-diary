@@ -82,6 +82,112 @@ function seededDb() {
   });
 }
 
+async function buildSignedRestorePayloadText(): Promise<string> {
+  let signedPayloadText = "";
+
+  const runQuery = vi.fn(
+    async (_ref: unknown, args: Record<string, unknown>) => {
+      if (Object.keys(args).length === 0) {
+        return {
+          userId: USER_ID,
+          clerkUserId: "clerk_member_001",
+        };
+      }
+
+      const dataset = args.dataset as
+        | "summaries"
+        | "memories"
+        | "days"
+        | "integrationDailyData";
+
+      if (dataset === "summaries") {
+        return {
+          exportedAt: 1,
+          dataset,
+          page: [
+            {
+              dayKey: "2026-04-02",
+              story: "A good day",
+              highlights: ["shipping"],
+              sourcesUsed: ["Memories"],
+              generatedAt: 100,
+            },
+          ],
+          continueCursor: null,
+          isDone: true,
+        };
+      }
+
+      if (dataset === "memories") {
+        return {
+          exportedAt: 1,
+          dataset,
+          page: [
+            {
+              dayKey: "2026-04-02",
+              title: "Memory",
+              happenedAt: 100,
+            },
+          ],
+          continueCursor: null,
+          isDone: true,
+        };
+      }
+
+      if (dataset === "days") {
+        return {
+          exportedAt: 1,
+          dataset,
+          page: [
+            {
+              dayKey: "2026-04-02",
+              manualNotes: [],
+              peopleTags: [],
+            },
+          ],
+          continueCursor: null,
+          isDone: true,
+        };
+      }
+
+      return {
+        exportedAt: 1,
+        dataset,
+        page: [
+          {
+            provider: "spotify",
+            dayKey: "2026-04-02",
+            syncedAt: 100,
+            signals: ["music"],
+          },
+        ],
+        continueCursor: null,
+        isDone: true,
+      };
+    },
+  );
+
+  await summariesModule.prepareDiaryExportArtifactImpl(
+    {
+      runQuery,
+      storage: {
+        store: async (blob: Blob) => {
+          signedPayloadText = await blob.text();
+          return "storage_restore_signed_payload_for_tests";
+        },
+        getUrl: async (storageId: string) =>
+          `https://cdn.example.com/${storageId}`,
+      },
+    } as any,
+    {
+      format: "json",
+      includeLocationSignals: false,
+    },
+  );
+
+  return signedPayloadText;
+}
+
 describe("summaries behavior", () => {
   it("supports get/upsert/list/delete flows with ownership checks", async () => {
     const db = seededDb();
@@ -861,6 +967,724 @@ describe("summaries behavior", () => {
       )
       .unique();
     expect(updatedSummary?.story).toBe("Restored story");
+  });
+
+  it("captures row failures when partial restore is enabled", async () => {
+    const db = seededDb();
+    const restoreDiaryDatasetBatchInternal = handler<
+      {
+        userId: Id<"user">;
+        dataset: "summaries" | "memories" | "days" | "integrationDailyData";
+        rows: unknown[];
+        conflictMode: "skip" | "overwrite";
+        allowPartial: boolean;
+      },
+      {
+        processed: number;
+        inserted: number;
+        updated: number;
+        skipped: number;
+        conflicts: number;
+        failed: number;
+        errorSamples: string[];
+      }
+    >(summariesModule.restoreDiaryDatasetBatchInternal);
+
+    const ctx = createAuthCtx(db, null);
+    vi.spyOn(ctx.db as any, "insert").mockImplementationOnce(() => {
+      throw new Error("row insert failed");
+    });
+
+    const result = await restoreDiaryDatasetBatchInternal(ctx, {
+      userId: USER_ID,
+      dataset: "summaries",
+      rows: [
+        {
+          dayKey: "2026-04-06",
+          story: "Will fail",
+          highlights: ["h1"],
+          sourcesUsed: ["Memories"],
+          generatedAt: 100,
+        },
+      ],
+      conflictMode: "skip",
+      allowPartial: true,
+    });
+
+    expect(result.processed).toBe(1);
+    expect(result.failed).toBe(1);
+    expect(result.errorSamples).toHaveLength(1);
+    expect(result.errorSamples[0]).toContain("row insert failed");
+  });
+
+  it("runs restore action lifecycle and returns success", async () => {
+    const restoreMyDiaryData = handler<
+      {
+        payloadText: string;
+        datasets?: Array<
+          "summaries" | "memories" | "days" | "integrationDailyData"
+        >;
+        conflictMode?: "skip" | "overwrite";
+        allowPartial?: boolean;
+      },
+      {
+        jobId: string;
+        status: "success" | "partial";
+        selectedDatasets: string[];
+        totals: { inserted: number; failed: number };
+      }
+    >(summariesModule.restoreMyDiaryData);
+
+    const payloadText = await buildSignedRestorePayloadText();
+
+    const runMutation = vi.fn(
+      async (_ref: unknown, args: Record<string, unknown>) => {
+        if (
+          "requestedAt" in args &&
+          "selectedDatasets" in args &&
+          !("rows" in args)
+        ) {
+          return {
+            jobId: "restore_job_001",
+            status: "running",
+            requestedAt: args.requestedAt,
+          };
+        }
+
+        if ("dataset" in args && "rows" in args) {
+          const rows = args.rows as unknown[];
+          return {
+            processed: rows.length,
+            inserted: rows.length,
+            updated: 0,
+            skipped: 0,
+            conflicts: 0,
+            failed: 0,
+            errorSamples: [],
+          };
+        }
+
+        if ("completedAt" in args && "datasetResults" in args) {
+          return {
+            jobId: args.jobId,
+            status: args.status,
+            completedAt: args.completedAt,
+          };
+        }
+
+        if ("failedAt" in args && "error" in args) {
+          return {
+            jobId: args.jobId,
+            status: "failed",
+            failedAt: args.failedAt,
+          };
+        }
+
+        throw new Error("Unexpected restore mutation args");
+      },
+    );
+
+    const result = await restoreMyDiaryData(
+      {
+        runQuery: vi.fn(async () => ({
+          userId: USER_ID,
+          clerkUserId: "clerk_member_001",
+        })),
+        runMutation,
+      } as any,
+      {
+        payloadText,
+        datasets: ["memories"],
+        conflictMode: "overwrite",
+        allowPartial: false,
+      },
+    );
+
+    expect(result.jobId).toBe("restore_job_001");
+    expect(result.status).toBe("success");
+    expect(result.selectedDatasets).toEqual(["memories"]);
+    expect(result.totals.inserted).toBe(1);
+    expect(result.totals.failed).toBe(0);
+
+    const completedCall = runMutation.mock.calls.find(
+      ([, mutationArgs]) =>
+        typeof mutationArgs === "object" &&
+        mutationArgs !== null &&
+        "completedAt" in mutationArgs,
+    );
+    expect(completedCall).toBeDefined();
+    expect(
+      (completedCall?.[1] as { status?: "succeeded" | "partial" }).status,
+    ).toBe("succeeded");
+  });
+
+  it("returns partial status when one or more restore rows fail", async () => {
+    const restoreMyDiaryData = handler<
+      {
+        payloadText: string;
+        datasets?: Array<
+          "summaries" | "memories" | "days" | "integrationDailyData"
+        >;
+        conflictMode?: "skip" | "overwrite";
+        allowPartial?: boolean;
+      },
+      {
+        status: "success" | "partial";
+        totals: { failed: number };
+      }
+    >(summariesModule.restoreMyDiaryData);
+
+    const payloadText = await buildSignedRestorePayloadText();
+
+    const runMutation = vi.fn(
+      async (_ref: unknown, args: Record<string, unknown>) => {
+        if (
+          "requestedAt" in args &&
+          "selectedDatasets" in args &&
+          !("rows" in args)
+        ) {
+          return {
+            jobId: "restore_job_002",
+            status: "running",
+            requestedAt: args.requestedAt,
+          };
+        }
+
+        if ("dataset" in args && "rows" in args) {
+          const rows = args.rows as unknown[];
+          return {
+            processed: rows.length,
+            inserted: 0,
+            updated: 0,
+            skipped: 0,
+            conflicts: 0,
+            failed: rows.length,
+            errorSamples: ["sample row failure"],
+          };
+        }
+
+        if ("completedAt" in args && "datasetResults" in args) {
+          return {
+            jobId: args.jobId,
+            status: args.status,
+            completedAt: args.completedAt,
+          };
+        }
+
+        if ("failedAt" in args && "error" in args) {
+          return {
+            jobId: args.jobId,
+            status: "failed",
+            failedAt: args.failedAt,
+          };
+        }
+
+        throw new Error("Unexpected restore mutation args");
+      },
+    );
+
+    const result = await restoreMyDiaryData(
+      {
+        runQuery: vi.fn(async () => ({
+          userId: USER_ID,
+          clerkUserId: "clerk_member_001",
+        })),
+        runMutation,
+      } as any,
+      {
+        payloadText,
+        datasets: ["memories"],
+        conflictMode: "skip",
+        allowPartial: true,
+      },
+    );
+
+    expect(result.status).toBe("partial");
+    expect(result.totals.failed).toBe(1);
+
+    const completedCall = runMutation.mock.calls.find(
+      ([, mutationArgs]) =>
+        typeof mutationArgs === "object" &&
+        mutationArgs !== null &&
+        "completedAt" in mutationArgs,
+    );
+    expect(completedCall).toBeDefined();
+    expect(
+      (completedCall?.[1] as { status?: "succeeded" | "partial" }).status,
+    ).toBe("partial");
+  });
+
+  it("marks restore job failed and rethrows when payload parsing fails", async () => {
+    const restoreMyDiaryData = handler<
+      {
+        payloadText: string;
+        datasets?: Array<
+          "summaries" | "memories" | "days" | "integrationDailyData"
+        >;
+      },
+      unknown
+    >(summariesModule.restoreMyDiaryData);
+
+    const runMutation = vi.fn(
+      async (_ref: unknown, args: Record<string, unknown>) => {
+        if (
+          "requestedAt" in args &&
+          "selectedDatasets" in args &&
+          !("rows" in args)
+        ) {
+          return {
+            jobId: "restore_job_003",
+            status: "running",
+            requestedAt: args.requestedAt,
+          };
+        }
+
+        if ("failedAt" in args && "error" in args) {
+          return {
+            jobId: args.jobId,
+            status: "failed",
+            failedAt: args.failedAt,
+          };
+        }
+
+        throw new Error("Unexpected restore mutation args");
+      },
+    );
+
+    await expect(
+      restoreMyDiaryData(
+        {
+          runQuery: vi.fn(async () => ({
+            userId: USER_ID,
+            clerkUserId: "clerk_member_001",
+          })),
+          runMutation,
+        } as any,
+        {
+          payloadText: "not-json",
+          datasets: ["memories"],
+        },
+      ),
+    ).rejects.toThrow("not valid JSON");
+
+    const failedCall = runMutation.mock.calls.find(
+      ([, mutationArgs]) =>
+        typeof mutationArgs === "object" &&
+        mutationArgs !== null &&
+        "failedAt" in mutationArgs,
+    );
+    expect(failedCall).toBeDefined();
+    expect((failedCall?.[1] as { error?: string }).error).toContain(
+      "Restore file is not valid JSON",
+    );
+  });
+
+  it("preserves original restore failure when failed-status update also throws", async () => {
+    const restoreMyDiaryData = handler<
+      {
+        payloadText: string;
+        datasets?: Array<
+          "summaries" | "memories" | "days" | "integrationDailyData"
+        >;
+      },
+      unknown
+    >(summariesModule.restoreMyDiaryData);
+
+    const runMutation = vi.fn(
+      async (_ref: unknown, args: Record<string, unknown>) => {
+        if (
+          "requestedAt" in args &&
+          "selectedDatasets" in args &&
+          !("rows" in args)
+        ) {
+          return {
+            jobId: "restore_job_004",
+            status: "running",
+            requestedAt: args.requestedAt,
+          };
+        }
+
+        if ("failedAt" in args && "error" in args) {
+          throw new Error("failed status write failed");
+        }
+
+        throw new Error("Unexpected restore mutation args");
+      },
+    );
+
+    await expect(
+      restoreMyDiaryData(
+        {
+          runQuery: vi.fn(async () => ({
+            userId: USER_ID,
+            clerkUserId: "clerk_member_001",
+          })),
+          runMutation,
+        } as any,
+        {
+          payloadText: "not-json",
+          datasets: ["memories"],
+        },
+      ),
+    ).rejects.toThrow("not valid JSON");
+  });
+
+  it("restores days and integration datasets across insert, skip, conflict, and overwrite", async () => {
+    const db = seededDb();
+    const restoreDiaryDatasetBatchInternal = handler<
+      {
+        userId: Id<"user">;
+        dataset: "summaries" | "memories" | "days" | "integrationDailyData";
+        rows: unknown[];
+        conflictMode: "skip" | "overwrite";
+        allowPartial: boolean;
+      },
+      {
+        inserted: number;
+        updated: number;
+        skipped: number;
+        conflicts: number;
+      }
+    >(summariesModule.restoreDiaryDatasetBatchInternal);
+
+    const ctx = createAuthCtx(db, null);
+
+    const dayRow = {
+      dayKey: "2026-04-07",
+      rating: 3,
+      manualNotes: ["n1"],
+      peopleTags: ["Alex"],
+    };
+    const dayInserted = await restoreDiaryDatasetBatchInternal(ctx, {
+      userId: USER_ID,
+      dataset: "days",
+      rows: [dayRow],
+      conflictMode: "skip",
+      allowPartial: false,
+    });
+    expect(dayInserted.inserted).toBe(1);
+
+    const daySkipped = await restoreDiaryDatasetBatchInternal(ctx, {
+      userId: USER_ID,
+      dataset: "days",
+      rows: [dayRow],
+      conflictMode: "skip",
+      allowPartial: false,
+    });
+    expect(daySkipped.skipped).toBe(1);
+
+    const dayConflictRow = {
+      ...dayRow,
+      rating: 5,
+      manualNotes: ["updated"],
+    };
+    const dayConflictSkip = await restoreDiaryDatasetBatchInternal(ctx, {
+      userId: USER_ID,
+      dataset: "days",
+      rows: [dayConflictRow],
+      conflictMode: "skip",
+      allowPartial: false,
+    });
+    expect(dayConflictSkip.conflicts).toBe(1);
+    expect(dayConflictSkip.updated).toBe(0);
+
+    const dayConflictOverwrite = await restoreDiaryDatasetBatchInternal(ctx, {
+      userId: USER_ID,
+      dataset: "days",
+      rows: [dayConflictRow],
+      conflictMode: "overwrite",
+      allowPartial: false,
+    });
+    expect(dayConflictOverwrite.updated).toBe(1);
+
+    const integrationRow = {
+      provider: "spotify",
+      dayKey: "2026-04-08",
+      syncedAt: 100,
+      summary: "original",
+      metrics: {
+        steps: 1000,
+      },
+      signals: ["s1"],
+      context: {
+        source: "seed",
+      },
+    };
+    const integrationInserted = await restoreDiaryDatasetBatchInternal(ctx, {
+      userId: USER_ID,
+      dataset: "integrationDailyData",
+      rows: [integrationRow],
+      conflictMode: "skip",
+      allowPartial: false,
+    });
+    expect(integrationInserted.inserted).toBe(1);
+
+    const integrationSkipped = await restoreDiaryDatasetBatchInternal(ctx, {
+      userId: USER_ID,
+      dataset: "integrationDailyData",
+      rows: [integrationRow],
+      conflictMode: "skip",
+      allowPartial: false,
+    });
+    expect(integrationSkipped.skipped).toBe(1);
+
+    const integrationConflictRow = {
+      ...integrationRow,
+      summary: "updated",
+      signals: ["s2"],
+    };
+    const integrationConflictSkip = await restoreDiaryDatasetBatchInternal(
+      ctx,
+      {
+        userId: USER_ID,
+        dataset: "integrationDailyData",
+        rows: [integrationConflictRow],
+        conflictMode: "skip",
+        allowPartial: false,
+      },
+    );
+    expect(integrationConflictSkip.conflicts).toBe(1);
+    expect(integrationConflictSkip.updated).toBe(0);
+
+    const integrationConflictOverwrite = await restoreDiaryDatasetBatchInternal(
+      ctx,
+      {
+        userId: USER_ID,
+        dataset: "integrationDailyData",
+        rows: [integrationConflictRow],
+        conflictMode: "overwrite",
+        allowPartial: false,
+      },
+    );
+    expect(integrationConflictOverwrite.updated).toBe(1);
+  });
+
+  it("covers memory dedupe and conflict branches during restore", async () => {
+    const db = seededDb();
+    const restoreDiaryDatasetBatchInternal = handler<
+      {
+        userId: Id<"user">;
+        dataset: "summaries" | "memories" | "days" | "integrationDailyData";
+        rows: unknown[];
+        conflictMode: "skip" | "overwrite";
+        allowPartial: boolean;
+      },
+      {
+        inserted: number;
+        updated: number;
+        skipped: number;
+        conflicts: number;
+      }
+    >(summariesModule.restoreDiaryDatasetBatchInternal);
+
+    const ctx = createAuthCtx(db, null);
+
+    const exactDuplicateRow = {
+      dayKey: "2026-04-09",
+      title: "Duplicate",
+      description: "same",
+      mood: "calm",
+      happenedAt: 500,
+    };
+    await db.insert("memories", {
+      userId: USER_ID,
+      clientRequestId: "manual_exact_duplicate",
+      ...exactDuplicateRow,
+    });
+
+    const exactDuplicate = await restoreDiaryDatasetBatchInternal(ctx, {
+      userId: USER_ID,
+      dataset: "memories",
+      rows: [exactDuplicateRow],
+      conflictMode: "skip",
+      allowPartial: false,
+    });
+    expect(exactDuplicate.skipped).toBe(1);
+
+    const potentialConflictExisting = {
+      dayKey: "2026-04-10",
+      title: "Potential",
+      description: "old",
+      mood: "neutral",
+      happenedAt: 600,
+    };
+    await db.insert("memories", {
+      userId: USER_ID,
+      clientRequestId: "manual_potential_conflict",
+      ...potentialConflictExisting,
+    });
+
+    const potentialConflictIncoming = {
+      dayKey: "2026-04-10",
+      title: "Potential",
+      description: "new",
+      mood: "happy",
+      happenedAt: 600,
+    };
+    const potentialConflictSkip = await restoreDiaryDatasetBatchInternal(ctx, {
+      userId: USER_ID,
+      dataset: "memories",
+      rows: [potentialConflictIncoming],
+      conflictMode: "skip",
+      allowPartial: false,
+    });
+    expect(potentialConflictSkip.conflicts).toBe(1);
+
+    const potentialConflictOverwrite = await restoreDiaryDatasetBatchInternal(
+      ctx,
+      {
+        userId: USER_ID,
+        dataset: "memories",
+        rows: [potentialConflictIncoming],
+        conflictMode: "overwrite",
+        allowPartial: false,
+      },
+    );
+    expect(potentialConflictOverwrite.updated).toBe(1);
+
+    const byRequestIdRow = {
+      dayKey: "2026-04-11",
+      title: "By request id",
+      description: "first",
+      mood: "focused",
+      happenedAt: 700,
+    };
+    const byRequestIdInserted = await restoreDiaryDatasetBatchInternal(ctx, {
+      userId: USER_ID,
+      dataset: "memories",
+      rows: [byRequestIdRow],
+      conflictMode: "skip",
+      allowPartial: false,
+    });
+    expect(byRequestIdInserted.inserted).toBe(1);
+
+    const insertedMemory = db
+      .getTable("memories")
+      .find(
+        (row) => row.dayKey === "2026-04-11" && row.title === "By request id",
+      );
+    expect(insertedMemory?._id).toBeDefined();
+
+    await db.patch(insertedMemory!._id, {
+      description: "mutated-existing-row",
+    });
+
+    const byRequestIdConflictSkip = await restoreDiaryDatasetBatchInternal(
+      ctx,
+      {
+        userId: USER_ID,
+        dataset: "memories",
+        rows: [byRequestIdRow],
+        conflictMode: "skip",
+        allowPartial: false,
+      },
+    );
+    expect(byRequestIdConflictSkip.conflicts).toBe(1);
+
+    const byRequestIdConflictOverwrite = await restoreDiaryDatasetBatchInternal(
+      ctx,
+      {
+        userId: USER_ID,
+        dataset: "memories",
+        rows: [byRequestIdRow],
+        conflictMode: "overwrite",
+        allowPartial: false,
+      },
+    );
+    expect(byRequestIdConflictOverwrite.updated).toBe(1);
+  });
+
+  it("rethrows row errors when partial restore is disabled", async () => {
+    const db = seededDb();
+    const restoreDiaryDatasetBatchInternal = handler<
+      {
+        userId: Id<"user">;
+        dataset: "summaries" | "memories" | "days" | "integrationDailyData";
+        rows: unknown[];
+        conflictMode: "skip" | "overwrite";
+        allowPartial: boolean;
+      },
+      unknown
+    >(summariesModule.restoreDiaryDatasetBatchInternal);
+
+    const ctx = createAuthCtx(db, null);
+    vi.spyOn(ctx.db as any, "insert").mockImplementationOnce(() => {
+      throw new Error("hard row insert failure");
+    });
+
+    await expect(
+      restoreDiaryDatasetBatchInternal(ctx, {
+        userId: USER_ID,
+        dataset: "summaries",
+        rows: [
+          {
+            dayKey: "2026-04-12",
+            story: "Will throw",
+            highlights: ["h1"],
+            sourcesUsed: ["Memories"],
+            generatedAt: 120,
+          },
+        ],
+        conflictMode: "skip",
+        allowPartial: false,
+      }),
+    ).rejects.toThrow("hard row insert failure");
+  });
+
+  it("fails restore when signed payload owner does not match caller identity", async () => {
+    const restoreMyDiaryData = handler<
+      {
+        payloadText: string;
+        datasets?: Array<
+          "summaries" | "memories" | "days" | "integrationDailyData"
+        >;
+      },
+      unknown
+    >(summariesModule.restoreMyDiaryData);
+
+    const payloadText = await buildSignedRestorePayloadText();
+
+    const runMutation = vi.fn(
+      async (_ref: unknown, args: Record<string, unknown>) => {
+        if (
+          "requestedAt" in args &&
+          "selectedDatasets" in args &&
+          !("rows" in args)
+        ) {
+          return {
+            jobId: "restore_job_005",
+            status: "running",
+            requestedAt: args.requestedAt,
+          };
+        }
+
+        if ("failedAt" in args && "error" in args) {
+          return {
+            jobId: args.jobId,
+            status: "failed",
+            failedAt: args.failedAt,
+          };
+        }
+
+        throw new Error("Unexpected restore mutation args");
+      },
+    );
+
+    await expect(
+      restoreMyDiaryData(
+        {
+          runQuery: vi.fn(async () => ({
+            userId: OTHER_USER_ID,
+            clerkUserId: "clerk_other_001",
+          })),
+          runMutation,
+        } as any,
+        {
+          payloadText,
+          datasets: ["memories"],
+        },
+      ),
+    ).rejects.toThrow("ownership mismatch");
   });
 
   it("tracks export job status history and provides re-download links", async () => {
