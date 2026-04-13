@@ -62,6 +62,16 @@ const summaryQualityScoresValidator = v.object({
   failure: v.number(),
 });
 
+const restoreBatchResultValidator = v.object({
+  processed: v.number(),
+  inserted: v.number(),
+  updated: v.number(),
+  skipped: v.number(),
+  conflicts: v.number(),
+  failed: v.number(),
+  errorSamples: v.array(v.string()),
+});
+
 const userDeletionStageValidator = v.union(
   v.literal("memoryMedia"),
   v.literal("memories"),
@@ -315,6 +325,53 @@ export default defineSchema(
           integrationDailyData: v.number(),
         }),
       ),
+    })
+      .index("by_user_requestedAt", ["userId", "requestedAt"])
+      .index("by_requestedAt", ["requestedAt"])
+      .index("by_status_requestedAt", ["status", "requestedAt"]),
+
+    // ── Restore jobs (history + restore lifecycle) ──────────
+    restoreJobs: defineTable({
+      userId: v.id("user"),
+      status: v.union(
+        v.literal("running"),
+        v.literal("succeeded"),
+        v.literal("partial"),
+        v.literal("failed"),
+      ),
+      requestedAt: v.number(),
+      completedAt: v.optional(v.number()),
+      failedAt: v.optional(v.number()),
+      updatedAt: v.number(),
+      conflictMode: v.union(v.literal("skip"), v.literal("overwrite")),
+      allowPartial: v.boolean(),
+      selectedDatasets: v.array(
+        v.union(
+          v.literal("summaries"),
+          v.literal("memories"),
+          v.literal("days"),
+          v.literal("integrationDailyData"),
+        ),
+      ),
+      exportedAt: v.optional(v.string()),
+      sourceCounts: v.optional(
+        v.object({
+          summaries: v.number(),
+          memories: v.number(),
+          days: v.number(),
+          integrationDailyData: v.number(),
+        }),
+      ),
+      totals: v.optional(restoreBatchResultValidator),
+      datasetResults: v.optional(
+        v.object({
+          summaries: restoreBatchResultValidator,
+          memories: restoreBatchResultValidator,
+          days: restoreBatchResultValidator,
+          integrationDailyData: restoreBatchResultValidator,
+        }),
+      ),
+      error: v.optional(v.string()),
     })
       .index("by_user_requestedAt", ["userId", "requestedAt"])
       .index("by_requestedAt", ["requestedAt"])
