@@ -75,3 +75,16 @@ export function formatRetentionDeletedCounts(
     `exportJobs=${normalized.exportJobs}`,
   ].join(", ");
 }
+
+export function buildRetentionCleanupStatusMessage(
+  counts: RetentionDeletedCounts | null | undefined,
+  dryRun: boolean,
+): string {
+  const total = sumRetentionDeletedCounts(counts);
+
+  if (dryRun) {
+    return `Dry run complete. ${total} rows would be deleted.`;
+  }
+
+  return `Cleanup complete. Deleted ${total} rows.`;
+}
