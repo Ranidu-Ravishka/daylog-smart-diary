@@ -156,6 +156,8 @@ export default defineSchema(
         ),
       ),
       isAdmin: v.optional(v.boolean()),
+      adminAuthVersion: v.optional(v.number()),
+      adminRoleUpdatedAt: v.optional(v.number()),
     })
       .index("by_clerkUserId", ["clerkUserId"])
       .index("by_email", ["email"]),

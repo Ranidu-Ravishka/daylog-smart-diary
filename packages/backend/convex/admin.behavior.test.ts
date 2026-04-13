@@ -119,6 +119,13 @@ describe("admin behavior", () => {
     });
     const createdUserId = createdUser?._id as Id<"user">;
 
+    const createdUserRow = await db
+      .query("user")
+      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", "clerk_new_001"))
+      .unique();
+    expect(createdUserRow?.adminAuthVersion).toBe(0);
+    expect(createdUserRow?.adminRoleUpdatedAt).toBeGreaterThan(0);
+
     const allUsers = await listAllUsers(ctx, {});
     expect(allUsers.map((user) => user._id)).toContain(createdUserId);
 
@@ -136,6 +143,13 @@ describe("admin behavior", () => {
       isAdmin: true,
     });
     expect(updatedUser?.email).toBe("updated@example.com");
+
+    const updatedUserRow = await db
+      .query("user")
+      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", "clerk_new_001"))
+      .unique();
+    expect(updatedUserRow?.adminAuthVersion).toBe(1);
+    expect(updatedUserRow?.adminRoleUpdatedAt).toBeGreaterThan(0);
 
     const adminCreateUserPreference = handler<
       {

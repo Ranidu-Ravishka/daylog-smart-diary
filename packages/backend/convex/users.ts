@@ -25,6 +25,48 @@ import { applyDashboardMetricsDelta } from "./dashboardMetrics";
 
 const DEFAULT_USER_DELETION_BATCH_SIZE = 128;
 
+function buildAdminRoleStatePatch(
+  user: Pick<
+    Doc<"user">,
+    "isAdmin" | "adminAuthVersion" | "adminRoleUpdatedAt"
+  >,
+  nextIsAdmin: boolean,
+  now = Date.now(),
+): {
+  isAdmin: boolean;
+  adminAuthVersion: number;
+  adminRoleUpdatedAt: number;
+} {
+  const currentIsAdmin = user.isAdmin === true;
+  const currentVersion = user.adminAuthVersion ?? 0;
+  const roleChanged = currentIsAdmin !== nextIsAdmin;
+
+  return {
+    isAdmin: nextIsAdmin,
+    adminAuthVersion: roleChanged ? currentVersion + 1 : currentVersion,
+    adminRoleUpdatedAt: roleChanged ? now : (user.adminRoleUpdatedAt ?? now),
+  };
+}
+
+function buildAdminRoleBootstrapPatch(
+  user: Pick<Doc<"user">, "adminAuthVersion" | "adminRoleUpdatedAt">,
+  now = Date.now(),
+): Partial<Pick<Doc<"user">, "adminAuthVersion" | "adminRoleUpdatedAt">> {
+  const patch: Partial<
+    Pick<Doc<"user">, "adminAuthVersion" | "adminRoleUpdatedAt">
+  > = {};
+
+  if (user.adminAuthVersion === undefined) {
+    patch.adminAuthVersion = 0;
+  }
+
+  if (user.adminRoleUpdatedAt === undefined) {
+    patch.adminRoleUpdatedAt = now;
+  }
+
+  return patch;
+}
+
 type UserDeletionJobStatus =
   | "requested"
   | "processing"
@@ -504,16 +546,20 @@ async function syncUserRecord(
     .unique();
 
   if (existing) {
+    const adminRoleBootstrapPatch = buildAdminRoleBootstrapPatch(existing);
+
     await ctx.db.patch(existing._id, {
       email: args.email,
       firstName: args.firstName,
       lastName: args.lastName,
       imageUrl: args.imageUrl,
+      ...adminRoleBootstrapPatch,
     });
 
     return await ctx.db.get(existing._id);
   }
 
+  const now = Date.now();
   const id = await ctx.db.insert("user", {
     clerkUserId: args.clerkUserId,
     email: args.email,
@@ -522,6 +568,8 @@ async function syncUserRecord(
     imageUrl: args.imageUrl,
     planTier: "free",
     isAdmin: false,
+    adminAuthVersion: 0,
+    adminRoleUpdatedAt: now,
   });
 
   await applyDashboardMetricsDelta(ctx.db, {
@@ -537,6 +585,18 @@ export const isCurrentUserAdmin = query({
   handler: async (ctx) => {
     const user = await getCurrentUser(ctx);
     return user?.isAdmin === true;
+  },
+});
+
+export const getCurrentUserAdminCacheState = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await getCurrentUser(ctx);
+    return {
+      isAdmin: user?.isAdmin === true,
+      adminAuthVersion: user?.adminAuthVersion ?? 0,
+      adminRoleUpdatedAt: user?.adminRoleUpdatedAt ?? 0,
+    };
   },
 });
 
@@ -580,7 +640,8 @@ export const bootstrapMakeMeAdmin = mutation({
       throw new Error("Forbidden: not in bootstrap admin list");
     }
 
-    await ctx.db.patch(user._id, { isAdmin: true });
+    const adminRolePatch = buildAdminRoleStatePatch(user, true);
+    await ctx.db.patch(user._id, adminRolePatch);
     return { success: true };
   },
 });
@@ -603,7 +664,8 @@ export const setUserAdminStatus = mutation({
       throw new Error("User not found");
     }
 
-    await ctx.db.patch(targetUser._id, { isAdmin: args.isAdmin });
+    const adminRolePatch = buildAdminRoleStatePatch(targetUser, args.isAdmin);
+    await ctx.db.patch(targetUser._id, adminRolePatch);
     return { success: true };
   },
 });
