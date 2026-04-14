@@ -22,6 +22,7 @@ import {
   type UserCascadeDeleteProgress,
 } from "./cascadeCleanup";
 import { applyDashboardMetricsDelta } from "./dashboardMetrics";
+import { captureException, logInfo } from "./observability";
 
 const DEFAULT_USER_DELETION_BATCH_SIZE = 128;
 
@@ -309,6 +310,11 @@ export const runUserDeletionCascadeJobStepInternal = internalMutation({
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
     if (!job) {
+      logInfo("deletion.user_job_step.skipped_missing_job", {
+        status: "skipped",
+        jobId: args.jobId,
+      });
+
       return {
         success: false,
         done: true,
@@ -316,7 +322,24 @@ export const runUserDeletionCascadeJobStepInternal = internalMutation({
       } as const;
     }
 
+    logInfo("deletion.user_job_step.started", {
+      status: "started",
+      jobId: job._id,
+      userId: job.userId,
+      stage: job.stage,
+      currentStatus: job.status,
+      processedBatches: job.processedBatches,
+      checkpoints: job.checkpoints,
+    });
+
     if (job.status === "completed") {
+      logInfo("deletion.user_job_step.already_completed", {
+        status: "succeeded",
+        jobId: job._id,
+        userId: job.userId,
+        stage: job.stage,
+      });
+
       return {
         success: true,
         done: true,
@@ -330,6 +353,14 @@ export const runUserDeletionCascadeJobStepInternal = internalMutation({
     }
 
     if (job.status === "failed") {
+      logInfo("deletion.user_job_step.already_failed", {
+        status: "failed",
+        jobId: job._id,
+        userId: job.userId,
+        stage: job.stage,
+        errorMessage: job.lastError,
+      });
+
       return {
         success: false,
         done: true,
@@ -373,6 +404,16 @@ export const runUserDeletionCascadeJobStepInternal = internalMutation({
 
         await scheduleUserDeletionStep(ctx, job._id);
 
+        logInfo("deletion.user_job_step.checkpoint", {
+          status: "processing",
+          jobId: job._id,
+          userId: job.userId,
+          stage: job.stage,
+          nextCursor: batch.nextCursor,
+          processedBatches: nextProcessedBatches,
+          checkpoints: nextCheckpoints,
+        });
+
         return {
           success: true,
           done: false,
@@ -400,6 +441,16 @@ export const runUserDeletionCascadeJobStepInternal = internalMutation({
         });
 
         await scheduleUserDeletionStep(ctx, job._id);
+
+        logInfo("deletion.user_job_step.stage_advanced", {
+          status: "processing",
+          jobId: job._id,
+          userId: job.userId,
+          previousStage: job.stage,
+          nextStage,
+          processedBatches: nextProcessedBatches,
+          checkpoints: nextCheckpoints,
+        });
 
         return {
           success: true,
@@ -448,6 +499,16 @@ export const runUserDeletionCascadeJobStepInternal = internalMutation({
         lastError: undefined,
       });
 
+      logInfo("deletion.user_job.completed", {
+        status: "succeeded",
+        jobId: job._id,
+        userId: job.userId,
+        stage: job.stage,
+        processedBatches: nextProcessedBatches,
+        checkpoints: nextCheckpoints,
+        durationMs: Math.max(now - job.startedAt, 0),
+      });
+
       return {
         success: true,
         done: true,
@@ -470,6 +531,16 @@ export const runUserDeletionCascadeJobStepInternal = internalMutation({
         updatedAt: now,
         failedAt: now,
         lastError: message,
+      });
+
+      captureException("deletion.user_job.failed", error, {
+        status: "failed",
+        jobId: job._id,
+        userId: job.userId,
+        stage: job.stage,
+        processedBatches: job.processedBatches,
+        checkpoints: job.checkpoints,
+        errorMessage: message,
       });
 
       return {
@@ -677,43 +748,80 @@ export const deleteUserAndRelatedDataByClerkId = internalMutation({
     clerkUserId: v.string(),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("user")
-      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", args.clerkUserId))
-      .unique();
-
-    if (!user) {
-      const existingJob = await findActiveUserDeletionJobByClerkId(
-        ctx,
-        args.clerkUserId,
-      );
-      if (existingJob) {
-        return {
-          success: true,
-          deleted: true,
-          jobId: existingJob.jobId,
-          status: existingJob.status,
-          stage: existingJob.stage,
-          queued: true,
-        };
-      }
-
-      return { success: true, deleted: false, queued: false };
-    }
-
-    const job = await enqueueUserDeletionJob(ctx, {
-      userId: user._id,
-      clerkUserId: user.clerkUserId,
+    logInfo("deletion.user.started", {
+      status: "started",
+      clerkUserId: args.clerkUserId,
     });
 
-    return {
-      success: true,
-      deleted: true,
-      queued: true,
-      jobId: job.jobId,
-      status: job.status,
-      stage: job.stage,
-      created: job.created,
-    };
+    try {
+      const user = await ctx.db
+        .query("user")
+        .withIndex("by_clerkUserId", (q) =>
+          q.eq("clerkUserId", args.clerkUserId),
+        )
+        .unique();
+
+      if (!user) {
+        const existingJob = await findActiveUserDeletionJobByClerkId(
+          ctx,
+          args.clerkUserId,
+        );
+        if (existingJob) {
+          logInfo("deletion.user.enqueued", {
+            status: "queued",
+            clerkUserId: args.clerkUserId,
+            jobId: existingJob.jobId,
+            stage: existingJob.stage,
+            created: false,
+          });
+
+          return {
+            success: true,
+            deleted: true,
+            jobId: existingJob.jobId,
+            status: existingJob.status,
+            stage: existingJob.stage,
+            queued: true,
+          };
+        }
+
+        logInfo("deletion.user.skipped_missing_user", {
+          status: "skipped",
+          clerkUserId: args.clerkUserId,
+        });
+
+        return { success: true, deleted: false, queued: false };
+      }
+
+      const job = await enqueueUserDeletionJob(ctx, {
+        userId: user._id,
+        clerkUserId: user.clerkUserId,
+      });
+
+      logInfo("deletion.user.enqueued", {
+        status: "queued",
+        userId: user._id,
+        clerkUserId: user.clerkUserId,
+        jobId: job.jobId,
+        stage: job.stage,
+        created: job.created,
+      });
+
+      return {
+        success: true,
+        deleted: true,
+        queued: true,
+        jobId: job.jobId,
+        status: job.status,
+        stage: job.stage,
+        created: job.created,
+      };
+    } catch (error) {
+      captureException("deletion.user.failed", error, {
+        status: "failed",
+        clerkUserId: args.clerkUserId,
+      });
+      throw error;
+    }
   },
 });

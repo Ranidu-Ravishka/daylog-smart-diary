@@ -1,5 +1,19 @@
 type StructuredContext = Record<string, unknown>;
 type LogLevel = "info" | "warn" | "error";
+type SentryLevel = "info" | "warning" | "error";
+
+const BACKEND_INFO_EVENT_SAMPLE_RATE_DEFAULT = 0.1;
+const backendEnvironment = process.env.NODE_ENV ?? "development";
+const backendInfoEventSampleRate = toSampleRate(
+  process.env.SENTRY_INFO_EVENT_SAMPLE_RATE,
+  BACKEND_INFO_EVENT_SAMPLE_RATE_DEFAULT,
+);
+const backendSentryDsn = process.env.SENTRY_DSN?.trim();
+const backendSentryTracesSampleRate = toSampleRate(
+  process.env.SENTRY_TRACES_SAMPLE_RATE,
+  BACKEND_INFO_EVENT_SAMPLE_RATE_DEFAULT,
+);
+const BACKEND_SENTRY_MODULE = ["@sentry", "node"].join("/");
 
 type SerializableError = {
   name: string;
@@ -14,11 +28,63 @@ type StructuredLogEnvelope = {
   level: LogLevel;
   event: string;
   timestamp: string;
+  userId: string | null;
+  status: string;
+  errorMessage: string | null;
   context: StructuredContext;
   error?: SerializableError;
 };
 
-function toSerializableError(error: unknown) {
+type BackendSentryCaptureContext = {
+  level?: SentryLevel;
+  tags?: Record<string, string>;
+  extra?: StructuredContext;
+};
+
+type BackendSentryModule = {
+  init: (options: Record<string, unknown>) => void;
+  addBreadcrumb: (breadcrumb: {
+    category: string;
+    message: string;
+    level: SentryLevel;
+    data: StructuredContext;
+  }) => void;
+  captureException: (
+    error: unknown,
+    context?: BackendSentryCaptureContext,
+  ) => void;
+  captureMessage: (
+    message: string,
+    context?: BackendSentryCaptureContext,
+  ) => void;
+};
+
+let backendSentry: BackendSentryModule | null = null;
+let backendSentryInitStarted = false;
+let backendSentryInitPromise: Promise<void> | null = null;
+
+function toSampleRate(raw: string | undefined, fallback: number): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  if (parsed <= 0) return 0;
+  if (parsed >= 1) return 1;
+  return parsed;
+}
+
+function shouldSample(rate: number): boolean {
+  if (rate <= 0) return false;
+  if (rate >= 1) return true;
+  return Math.random() < rate;
+}
+
+function isLifecycleEvent(event: string): boolean {
+  return /(^|[._-])(started|succeeded|failed)($|[._-])/.test(event);
+}
+
+function toSerializableError(error: unknown): SerializableError {
   if (error instanceof Error) {
     return {
       name: error.name,
@@ -34,12 +100,220 @@ function toSerializableError(error: unknown) {
   };
 }
 
+function toStringOrNull(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  if (typeof value === "number" || typeof value === "bigint") {
+    return String(value);
+  }
+
+  return null;
+}
+
+function resolveUserId(context: StructuredContext): string | null {
+  return (
+    toStringOrNull(context.userId) ??
+    toStringOrNull(context.clerkUserId) ??
+    toStringOrNull(context.actorUserId) ??
+    null
+  );
+}
+
+function resolveStatus(level: LogLevel, context: StructuredContext): string {
+  const explicit = toStringOrNull(context.status);
+  if (explicit) {
+    return explicit;
+  }
+
+  if (level === "error") {
+    return "failed";
+  }
+
+  if (level === "warn") {
+    return "warning";
+  }
+
+  return "info";
+}
+
+function resolveErrorMessage(
+  serializedError: SerializableError | undefined,
+  context: StructuredContext,
+): string | null {
+  return serializedError?.message ?? toStringOrNull(context.errorMessage);
+}
+
+function toSentryLevel(level: LogLevel): SentryLevel {
+  if (level === "warn") {
+    return "warning";
+  }
+
+  return level;
+}
+
+async function ensureBackendSentryInitialized(): Promise<void> {
+  if (backendSentryInitStarted) {
+    return backendSentryInitPromise ?? Promise.resolve();
+  }
+
+  backendSentryInitStarted = true;
+  backendSentryInitPromise = (async () => {
+    if (!backendSentryDsn) {
+      return;
+    }
+
+    try {
+      const module =
+        ((await import(BACKEND_SENTRY_MODULE)) as BackendSentryModule) ?? null;
+
+      if (!module) {
+        return;
+      }
+
+      module.init({
+        dsn: backendSentryDsn,
+        environment: backendEnvironment,
+        tracesSampleRate: backendSentryTracesSampleRate,
+        enabled: true,
+      });
+
+      backendSentry = module;
+    } catch (error) {
+      backendSentry = null;
+
+      const serializedError = toSerializableError(error);
+      const fallbackContext: StructuredContext = {
+        status: "failed",
+        dsnConfigured: Boolean(backendSentryDsn),
+      };
+
+      const fallbackPayload: StructuredLogEnvelope = {
+        schemaVersion: 1,
+        app: "daylog",
+        surface: "backend",
+        level: "error",
+        event: "sentry.init_failed",
+        timestamp: new Date().toISOString(),
+        userId: null,
+        status: "failed",
+        errorMessage: serializedError.message,
+        context: fallbackContext,
+        error: serializedError,
+      };
+
+      console.error(JSON.stringify(fallbackPayload));
+    }
+  })();
+
+  return backendSentryInitPromise;
+}
+
+void ensureBackendSentryInitialized();
+
+function emitSentryEvent(
+  level: LogLevel,
+  event: string,
+  error: unknown,
+  context: StructuredContext,
+  userId: string | null,
+  status: string,
+  errorMessage: string | null,
+) {
+  const send = (module: BackendSentryModule) => {
+    const extraContext: StructuredContext = {
+      ...context,
+      userId,
+      status,
+      errorMessage,
+    };
+
+    module.addBreadcrumb({
+      category: "observability",
+      message: event,
+      level: toSentryLevel(level),
+      data: extraContext,
+    });
+
+    if (level === "error") {
+      if (typeof error !== "undefined") {
+        module.captureException(error, {
+          tags: {
+            surface: "backend",
+            event,
+            status,
+          },
+          extra: extraContext,
+        });
+        return;
+      }
+
+      module.captureMessage(event, {
+        level: "error",
+        tags: {
+          surface: "backend",
+          status,
+        },
+        extra: extraContext,
+      });
+      return;
+    }
+
+    if (level === "warn") {
+      module.captureMessage(event, {
+        level: "warning",
+        tags: {
+          surface: "backend",
+          status,
+        },
+        extra: extraContext,
+      });
+      return;
+    }
+
+    if (
+      backendEnvironment === "production" &&
+      (isLifecycleEvent(event) || shouldSample(backendInfoEventSampleRate))
+    ) {
+      module.captureMessage(event, {
+        level: "info",
+        tags: {
+          surface: "backend",
+          status,
+        },
+        extra: extraContext,
+      });
+    }
+  };
+
+  if (backendSentry) {
+    send(backendSentry);
+    return;
+  }
+
+  void ensureBackendSentryInitialized().then(() => {
+    if (!backendSentry) {
+      return;
+    }
+
+    send(backendSentry);
+  });
+}
+
 function writeStructured(
   level: LogLevel,
   event: string,
   context: StructuredContext = {},
-  error?: SerializableError,
+  error?: unknown,
 ) {
+  const serializedError =
+    typeof error === "undefined" ? undefined : toSerializableError(error);
+  const userId = resolveUserId(context);
+  const status = resolveStatus(level, context);
+  const errorMessage = resolveErrorMessage(serializedError, context);
+
   const payload: StructuredLogEnvelope = {
     schemaVersion: 1,
     app: "daylog",
@@ -47,23 +321,24 @@ function writeStructured(
     level,
     event,
     timestamp: new Date().toISOString(),
+    userId,
+    status,
+    errorMessage,
     context,
-    ...(error ? { error } : {}),
+    ...(serializedError ? { error: serializedError } : {}),
   };
 
   const line = JSON.stringify(payload);
 
   if (level === "error") {
     console.error(line);
-    return;
-  }
-
-  if (level === "warn") {
+  } else if (level === "warn") {
     console.warn(line);
-    return;
+  } else if (backendEnvironment !== "production") {
+    console.info(line);
   }
 
-  console.info(line);
+  emitSentryEvent(level, event, error, context, userId, status, errorMessage);
 }
 
 export function logInfo(event: string, context: StructuredContext = {}) {
@@ -83,11 +358,5 @@ export function captureException(
   error: unknown,
   context: StructuredContext = {},
 ) {
-  const serialized = toSerializableError(error);
-
-  writeStructured("error", event, context, {
-    name: serialized.name,
-    message: serialized.message,
-    stack: serialized.stack,
-  });
+  writeStructured("error", event, context, error);
 }

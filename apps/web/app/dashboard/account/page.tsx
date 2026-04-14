@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import { captureException } from "@/lib/observability";
+import { captureException, logInfo } from "@/lib/observability";
 import { toastError, toastSuccess } from "@/lib/toast";
 
 export default function AccountPage() {
@@ -25,13 +25,24 @@ export default function AccountPage() {
 
   const handleDeleteAccount = async () => {
     if (confirmText !== "DELETE") return;
+
+    logInfo("web_account_deletion_started", {
+      status: "started",
+      hasUser: Boolean(user),
+    });
+
     setIsDeleting(true);
     try {
       await user?.delete();
       await signOut();
+      logInfo("web_account_deletion_succeeded", {
+        status: "succeeded",
+        hasUser: Boolean(user),
+      });
       toastSuccess("Account deleted successfully.");
     } catch (err) {
       captureException("web_account_delete_failed", err, {
+        status: "failed",
         hasUser: Boolean(user),
       });
       toastError("Failed to delete account. Please try again.");

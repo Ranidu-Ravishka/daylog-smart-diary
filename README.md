@@ -1,45 +1,95 @@
-# DayLog Monorepo
+# DayLog
 
-DayLog is a multi-app journaling platform with a shared Convex backend.
+> Status: Active
+> Last Updated: 2026-04-14
+> Audience: All engineers
+> Standard: [CONTRIBUTING.md](CONTRIBUTING.md)
 
-## Current capability boundaries
+DayLog is a production-grade, cross-platform life journaling system built as a pnpm/turbo monorepo.
+It combines personal memory capture, daily AI summaries, integrations, and privacy-aware life context signals.
 
-- Implemented: memory journaling, mood tracking, day ratings, OpenAI day summaries, integrations for Google Calendar, Google Fit, Spotify, and Apple Health daily uploads.
-- Implemented (mobile): optional foreground location tracking and controlled background location tracking with coarse location signals.
-- Implemented (mobile, Android-only): optional communication summary from aggregate call count/duration when the native call-activity bridge is available and permission is granted.
+## 1. Project Overview
 
-## Apps and packages
+### What DayLog is
 
-- `apps/web` — User-facing Next.js app (port `3000`)
-- `apps/admin` — Admin Next.js app (port `3001`)
-- `apps/mobile` — Expo app
-- `packages/backend` — Shared Convex backend
-- `packages/ui` — Shared UI/hooks/constants
+DayLog helps users track what happened during the day, connect external data sources, and generate high-quality day summaries.
+The same backend powers web, admin, and mobile clients.
 
-## Documentation map
+### Core features
 
-- Setup: [CONVEX_SETUP.md](CONVEX_SETUP.md)
-- Day-to-day workflow: [workflow.md](workflow.md)
-- Deploy + operations runbook: [DEPLOY_RUNBOOK.md](DEPLOY_RUNBOOK.md)
-- Security + secret handling: [SECURITY.md](SECURITY.md)
+- Memory tracking
+  - Create, edit, list, and delete day-scoped memories.
+  - Mood tagging and day ratings.
+- Daily summaries
+  - OpenAI-backed summary generation from memories and integration context.
+- Integrations
+  - OAuth-backed providers currently implemented in this repository:
+    - Google Calendar
+    - Google Fit
+    - Spotify
+    - Apple Health daily uploads
+- Life context tracking
+  - Optional and privacy-gated contextual signals (for example location/activity summaries).
+  - Designed around data minimization and retention controls.
+- Cross-platform support
+  - Web app (Next.js)
+  - Admin app (Next.js)
+  - Mobile app (Expo / React Native)
 
-## Prerequisites
+## 2. Tech Stack
 
-- Node.js `>=18`
-- pnpm `10.x`
-- Convex account/project
-- Clerk app (publishable + secret keys, webhook)
-- OpenAI API key (for summary generation)
+- Web: Next.js 16, React 19, TypeScript
+- Admin: Next.js 16, React 19, TypeScript
+- Mobile: Expo 54, React Native 0.81, Expo Router
+- Backend: Convex (TypeScript functions, schema, scheduled jobs)
+- Auth: Clerk (client auth + webhook sync + Convex JWT template)
+- AI: OpenAI API (summary generation)
+- Observability: Sentry + structured JSON logging
+- Tooling: pnpm workspaces, Turbo, Vitest, ESLint, Prettier
 
-## Local setup
+## 3. Monorepo Structure
 
-1. Install dependencies:
+Core production surfaces:
+
+- `apps/web`
+  - User-facing Next.js application.
+  - Runs on port `3000` by default.
+- `apps/admin`
+  - Internal/admin Next.js application.
+  - Runs on port `3001`.
+- `apps/mobile`
+  - Expo / React Native client.
+  - Uses the same backend contracts as web/admin.
+- `packages/backend`
+  - Shared Convex backend for all surfaces.
+  - Owns schema, auth boundaries, integrations, summaries, export flows, retention jobs.
+
+Supporting shared packages:
+
+- `packages/ui`: shared UI primitives/utilities
+- `packages/user-settings`: shared user settings contracts
+- `packages/eslint-config`, `packages/typescript-config`: workspace standards
+
+## Getting Started (Step-by-step)
+
+### 1. Clone repo
+
+```bash
+git clone <repo-url>
+cd <repo>
+```
+
+Replace `<repo-url>` with your actual DayLog repository URL.
+
+### 2. Install dependencies
 
 ```bash
 pnpm install
 ```
 
-1. Copy env files:
+### 3. Setup environment variables
+
+Create local env files:
 
 ```bash
 cp apps/web/.env.example apps/web/.env.local
@@ -48,101 +98,213 @@ cp apps/mobile/.env.example apps/mobile/.env.local
 cp packages/backend/.env.example packages/backend/.env.local
 ```
 
-1. Configure Convex and set Convex dashboard env vars.
+DayLog uses app-specific variable names. If your team manages a single shared `CONVEX_URL` secret, copy it into:
 
-See [CONVEX_SETUP.md](CONVEX_SETUP.md) for full steps.
+- `NEXT_PUBLIC_CONVEX_URL` (web/admin)
+- `EXPO_PUBLIC_CONVEX_URL` (mobile)
 
-Startup now uses strict server env validation for critical backend/admin vars.
-If boot fails with env errors, see the troubleshooting section in
-[CONVEX_SETUP.md](CONVEX_SETUP.md).
+Required variables by surface:
 
-## Run locally
+`apps/web/.env.local`
 
-Terminal 1 (Convex):
-
-```bash
-cd packages/backend
-npx convex dev
+```dotenv
+NEXT_PUBLIC_CONVEX_URL=
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
+CLERK_SECRET_KEY=
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+SPOTIFY_CLIENT_ID=
+SPOTIFY_CLIENT_SECRET=
+NEXT_PUBLIC_SENTRY_DSN=
+# Optional fallback for server-side web Sentry
+SENTRY_DSN=
 ```
 
-Terminal 2 (apps):
+`apps/admin/.env.local`
 
-```bash
-pnpm dev
+```dotenv
+NEXT_PUBLIC_CONVEX_URL=
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
+CLERK_SECRET_KEY=
+ADMIN_CACHE_SECRET=
 ```
 
-Or run individually:
+`apps/mobile/.env.local`
+
+```dotenv
+EXPO_PUBLIC_CONVEX_URL=
+EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=
+EXPO_PUBLIC_WEB_APP_URL=http://localhost:3000
+EXPO_PUBLIC_SENTRY_DSN=
+```
+
+Convex deployment environment variables (set in Convex dashboard):
+
+```dotenv
+CLERK_JWT_ISSUER_DOMAIN=
+CLERK_WEBHOOK_SECRET=
+OPENAI_API_KEY=
+SUMMARY_DAILY_GENERATION_LIMIT=5
+
+# OAuth refresh + server-side provider sync
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+SPOTIFY_CLIENT_ID=
+SPOTIFY_CLIENT_SECRET=
+
+# Backend observability
+SENTRY_DSN=
+
+# Integration secret encryption (required for production OAuth token encryption)
+INTEGRATION_SECRETS_KEYRING_JSON=
+INTEGRATION_SECRETS_ACTIVE_KEY_ID=
+```
+
+Mapping for common names requested by teams:
+
+- `CONVEX_URL` -> copy to `NEXT_PUBLIC_CONVEX_URL` and `EXPO_PUBLIC_CONVEX_URL`
+- `BACKEND_SENTRY_DSN` -> set as Convex `SENTRY_DSN`
+
+Where to get each variable:
+
+- Clerk
+  - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`: Clerk dashboard -> API Keys.
+  - `CLERK_JWT_ISSUER_DOMAIN`: Clerk instance domain used by Convex JWT auth.
+  - `CLERK_WEBHOOK_SECRET`: Clerk webhook endpoint signing secret.
+- Convex
+  - `NEXT_PUBLIC_CONVEX_URL`, `EXPO_PUBLIC_CONVEX_URL`: your Convex deployment URL.
+  - Get this when you run `convex dev` or from Convex deployment settings.
+- OpenAI
+  - `OPENAI_API_KEY`: OpenAI dashboard -> API keys.
+- Sentry
+  - `NEXT_PUBLIC_SENTRY_DSN`: Sentry project DSN for web client.
+  - `EXPO_PUBLIC_SENTRY_DSN`: Sentry project DSN for mobile client.
+  - `SENTRY_DSN` (backend): Sentry DSN for Convex/backend runtime.
+- Google OAuth
+  - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`: Google Cloud Console -> OAuth 2.0 Client ID credentials.
+- Spotify OAuth
+  - `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`: Spotify Developer Dashboard -> app credentials.
+
+### 4. Run backend
+
+```bash
+pnpm dev:backend
+```
+
+### 5. Run web
 
 ```bash
 pnpm dev:web
+```
+
+### 6. Run mobile
+
+```bash
+pnpm --filter mobile start
+```
+
+### 7. Run admin
+
+```bash
 pnpm dev:admin
-pnpm dev:mobile
 ```
 
-## Build and lint
+## Integrations Setup
+
+### Google OAuth setup
+
+1. Create an OAuth app in Google Cloud Console.
+2. Set OAuth consent screen (test users for non-published app).
+3. Add redirect URIs for DayLog callback routes:
+   - `http://localhost:3000/api/integrations/oauth/google_calendar/callback`
+   - `http://localhost:3000/api/integrations/oauth/google_fit/callback`
+4. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in both:
+   - `apps/web/.env.local`
+   - Convex deployment environment
+
+### Spotify OAuth setup
+
+1. Create app at Spotify Developer Dashboard.
+2. Add redirect URI:
+   - `http://localhost:3000/api/integrations/oauth/spotify/callback`
+3. Set `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` in both:
+   - `apps/web/.env.local`
+   - Convex deployment environment
+
+### Common OAuth issues and exact fixes
+
+- "redirect URI not secure"
+  - Provider requires `https` for non-local domains.
+  - Use `https://<your-domain>/api/integrations/oauth/<provider>/callback` in production.
+- Localhost callback mismatch
+  - `NEXT_PUBLIC_APP_URL` must match the host you used to start web locally.
+  - If web is not on `3000`, update provider redirect URI to the active local port.
+- Callback mismatch/400 during token exchange
+  - Ensure provider redirect URI exactly matches:
+    `NEXT_PUBLIC_APP_URL + /api/integrations/oauth/<provider>/callback`
+  - Verify client ID/secret pair matches the same OAuth app.
+- Google `access_denied` on test accounts
+  - Add your account in OAuth consent screen -> Audience -> Test users.
+
+## Observability
+
+### Sentry setup by surface
+
+- Web
+  - Uses `NEXT_PUBLIC_SENTRY_DSN` (client).
+  - Server/edge paths can use `SENTRY_DSN` fallback.
+- Mobile
+  - Uses `EXPO_PUBLIC_SENTRY_DSN`.
+  - Optional test flag: `EXPO_PUBLIC_SENTRY_FORCE_TEST_EXCEPTION=true`.
+- Backend (Convex)
+  - Uses `SENTRY_DSN`.
+  - If your secrets manager uses `BACKEND_SENTRY_DSN`, map it to `SENTRY_DSN`.
+
+### Structured logging format (required)
+
+Structured logs are emitted as JSON and must include:
+
+- `event`
+- `userId`
+- `status`
+- `errorMessage`
+
+Additional envelope fields include app/surface/level/timestamp/context.
+
+### Where to view logs and errors
+
+- Backend logs: `pnpm --filter @repo/backend logs` or Convex dashboard logs.
+- Web/Admin runtime logs: hosting platform logs (for example Vercel logs).
+- Mobile runtime logs: Expo logs/dev client logs.
+- Cross-surface error monitoring: Sentry projects/dashboards.
+
+## Testing
 
 ```bash
-pnpm build
-pnpm lint
-pnpm typecheck
+pnpm test
+pnpm test:coverage
 ```
 
-Targeted:
+What is tested:
 
-```bash
-pnpm build:web
-pnpm build:admin
-pnpm lint:web
-pnpm lint:admin
-pnpm lint:mobile
-```
+- Backend: Convex behavior tests, integration logic, summary/export paths.
+- Web: OAuth abuse protection and integration callback behavior tests.
+- Admin: UI/server behavior tests configured in `apps/admin/vitest.config.ts`.
+- Mobile: app/library behavior tests configured in `apps/mobile/vitest.config.ts`.
 
-## CI required PR checks
+Coverage note:
 
-PR validation runs in [.github/workflows/backend-validation.yml](.github/workflows/backend-validation.yml) and should require these job checks in branch protection:
+- `pnpm test:coverage` currently runs backend coverage (`@repo/backend`).
 
-- `backend-validation`
+## Deployment (High Level)
 
-Run the same gates locally before opening a PR:
+- Web -> Vercel (or equivalent Next.js host)
+- Mobile -> Expo / EAS
+- Backend -> Convex deployment
 
-```bash
-pnpm lint
-pnpm typecheck
-pnpm --filter @repo/backend lint
-pnpm --filter @repo/backend test:run
-pnpm --filter mobile check-types
-pnpm --filter mobile lint
-pnpm --filter mobile build:ci
-```
+For release operations, use:
 
-`mobile build:ci` uses Expo web export as the strongest reliable CI build-level validation in this stack (without requiring native macOS/iOS build infrastructure in GitHub-hosted runners).
-
-## Admin scalability notes
-
-- Admin list pages now use server-backed pagination instead of unbounded full-table loads.
-- Backend admin list queries include indexed pagination endpoints for users, memories, days, summaries, integrations, preferences, and audit logs.
-- Integrations status filter and audit-log actor/action/date filters now run server-side via indexed query paths.
-
-Run the same validation locally after admin/backend changes:
-
-```bash
-pnpm --filter @repo/backend lint
-pnpm --filter @repo/backend test:run
-pnpm --filter admin lint
-pnpm --filter admin build
-```
-
-Branch protection rules are configured in GitHub repository settings and are not versioned in this repository. Keep the required status checks set to only `backend-validation`.
-
-## App-specific docs
-
-- Web app setup and commands: [apps/web/README.md](apps/web/README.md)
-- Admin app setup and commands: [apps/admin/README.md](apps/admin/README.md)
-- Mobile app setup and commands: [apps/mobile/README.md](apps/mobile/README.md)
-- Backend package docs: [packages/backend/README.md](packages/backend/README.md)
-
-## Security and secrets
-
-- Never commit `.env` or `.env.local` files with real credentials.
-- Keep only placeholder values in `.env.example` files.
-- Follow the rotation checklist in [SECURITY.md](SECURITY.md).
+- [workflow.md](workflow.md)
+- [DEPLOY_RUNBOOK.md](DEPLOY_RUNBOOK.md)
+- [SECURITY.md](SECURITY.md)

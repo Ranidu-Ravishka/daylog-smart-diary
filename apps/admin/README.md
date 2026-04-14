@@ -1,56 +1,68 @@
 # DayLog Admin App (`apps/admin`)
 
-Admin Next.js application for managing users, content, memories, days, summaries,
-integrations, preferences, and audit logs.
+> Status: Active
+> Last Updated: 2026-04-14
+> Audience: Admin and platform engineers
+> Standard: [../../CONTRIBUTING.md](../../CONTRIBUTING.md)
 
-## Required environment variables
+Internal Next.js admin application for operational and governance workflows.
 
-Create `apps/admin/.env.local` from `apps/admin/.env.example`.
+Canonical onboarding and monorepo setup:
+
+- [../../README.md](../../README.md)
+
+## Required Environment Variables
+
+Create from example:
+
+```bash
+cp apps/admin/.env.example apps/admin/.env.local
+```
 
 Required:
 
 - `NEXT_PUBLIC_CONVEX_URL`
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
 - `CLERK_SECRET_KEY`
-- `ADMIN_CACHE_SECRET` (used only for admin middleware cache signing)
+- `ADMIN_CACHE_SECRET` (minimum 32 characters)
 
-## Local development
+Validation notes:
 
-From repo root:
+- Startup fails fast for missing/placeholder values.
+- `CLERK_SECRET_KEY` must start with `sk_test_` or `sk_live_`.
+- `NEXT_PUBLIC_CONVEX_URL` must be valid `https` URL.
+
+## Local Development
+
+From repository root:
 
 ```bash
 pnpm dev:admin
 ```
 
-Admin runs on port `3001`.
-
 ## Commands
 
-From repo root:
+From repository root:
 
 ```bash
 pnpm --filter admin dev
 pnpm --filter admin lint
+pnpm --filter admin test
 pnpm --filter admin build
 pnpm --filter admin start
 ```
 
-## Admin access bootstrap
+## First Admin Bootstrap
 
-For first-time admin access:
-
-1. Set `ADMIN_BOOTSTRAP_CLERK_USER_IDS` in Convex environment variables.
-2. Sign in with one of those Clerk user IDs.
+1. Set Convex env variable `ADMIN_BOOTSTRAP_CLERK_USER_IDS` (comma-separated Clerk user IDs).
+2. Sign in with one of those user IDs.
 3. Call mutation `users:bootstrapMakeMeAdmin`.
-
-## Runtime notes
-
-- Admin list pages use server-backed pagination endpoints.
-- Integration status and audit log filters are server-side.
-- Startup env validation fails fast for missing/invalid critical env vars.
 
 ## Troubleshooting
 
-- `Unauthorized` errors: verify user is admin in backend `user` table.
-- Startup env errors: verify required variables and value formats.
-- Data load errors: verify shared `NEXT_PUBLIC_CONVEX_URL` matches backend deployment.
+- `Unauthorized` in admin pages:
+  - Verify target user is admin in backend.
+- Startup env validation failure:
+  - Fix invalid env values and restart app.
+- Data load failure:
+  - Ensure `NEXT_PUBLIC_CONVEX_URL` matches current backend deployment URL.

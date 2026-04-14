@@ -2,7 +2,7 @@ import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Webhook } from "svix";
 import { convexServerEnv } from "./env";
-import { captureException, logWarn } from "./observability";
+import { captureException, logInfo, logWarn } from "./observability";
 
 type ClerkWebhookEmailAddress = {
   id?: string;
@@ -90,6 +90,11 @@ export const clerkWebhook = httpAction(async (ctx, request) => {
     return new Response("Method not allowed", { status: 405 });
   }
 
+  logInfo("webhook.started", {
+    status: "started",
+    path: "/clerk/webhook",
+  });
+
   const payloadText = await request.text();
 
   // Verify webhook signature when CLERK_WEBHOOK_SECRET is set
@@ -98,6 +103,7 @@ export const clerkWebhook = httpAction(async (ctx, request) => {
     isValid = verifyWebhookSignature(payloadText, request.headers);
   } catch (error) {
     captureException("webhook.configuration_error", error, {
+      status: "failed",
       path: "/clerk/webhook",
     });
     return new Response("Webhook not configured", { status: 500 });
@@ -105,6 +111,7 @@ export const clerkWebhook = httpAction(async (ctx, request) => {
 
   if (!isValid) {
     logWarn("webhook.signature_verification_failed", {
+      status: "failed",
       path: "/clerk/webhook",
     });
     return new Response("Unauthorized: invalid signature", { status: 401 });
@@ -136,13 +143,16 @@ export const clerkWebhook = httpAction(async (ctx, request) => {
         });
       } catch (err) {
         captureException("webhook.user_sync_failed", err, {
+          status: "failed",
           eventType,
           clerkUserId,
+          userId: clerkUserId,
         });
         return new Response("Internal error", { status: 500 });
       }
     } else {
       logWarn("webhook.user_sync_skipped_missing_identity", {
+        status: "skipped",
         eventType,
       });
     }
@@ -152,8 +162,16 @@ export const clerkWebhook = httpAction(async (ctx, request) => {
     const clerkUserId: string | undefined = user.id;
     if (!clerkUserId) {
       logWarn("webhook.user_delete_skipped_missing_identity", {
+        status: "skipped",
         eventType,
       });
+
+      logInfo("webhook.succeeded", {
+        status: "succeeded",
+        path: "/clerk/webhook",
+        eventType,
+      });
+
       return new Response(null, { status: 204 });
     }
 
@@ -163,12 +181,20 @@ export const clerkWebhook = httpAction(async (ctx, request) => {
       });
     } catch (err) {
       captureException("webhook.user_delete_failed", err, {
+        status: "failed",
         eventType,
         clerkUserId,
+        userId: clerkUserId,
       });
       return new Response("Internal error", { status: 500 });
     }
   }
+
+  logInfo("webhook.succeeded", {
+    status: "succeeded",
+    path: "/clerk/webhook",
+    eventType,
+  });
 
   return new Response(null, { status: 204 });
 });

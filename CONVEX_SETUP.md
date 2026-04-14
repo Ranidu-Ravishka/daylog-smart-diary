@@ -1,281 +1,214 @@
-# Convex Multi-App Setup Guide
+# DayLog Convex Setup Guide
 
-This monorepo shares a single Convex backend (`packages/backend`) across three applications:
+> Status: Active
+> Last Updated: 2026-04-14
+> Audience: Engineers onboarding backend and auth
+> Standard: [CONTRIBUTING.md](CONTRIBUTING.md)
 
-- **Web** (Next.js on port 3000)
-- **Admin** (Next.js on port 3001)
-- **Mobile** (Expo/React Native)
+This guide covers backend setup for the shared Convex deployment used by:
 
-## 🔐 Authentication Strategy (Final)
+- `apps/web`
+- `apps/admin`
+- `apps/mobile`
 
-DayLog is standardized on **Clerk** for all clients (**Web + Admin + Mobile**) and Convex JWT verification.
+For full project onboarding, start with [README.md](README.md).
 
-- Provider used across apps: **Clerk only**
-- Convex auth provider: `packages/backend/convex/auth.config.ts` (Clerk JWT issuer)
-- Admin and web sign-in/sign-up routes use Clerk components
-- User sync happens via:
-  - Client-side sync mutation after sign-in
-  - Server webhook at `POST /clerk/webhook` for Clerk user events
+## 1) Prerequisites
 
-## 🚀 Initial Setup
+- Node.js `>=18`
+- pnpm `10.x`
+- Convex account
+- Clerk app configured for DayLog
 
-### 1. Install dependencies
+## 2) Install Dependencies
+
+From repository root:
 
 ```bash
 pnpm install
 ```
 
-### 2. Setup Convex
+## 3) Start Convex Dev
 
-Navigate to the backend package and initialize Convex:
+From repository root:
+
+```bash
+pnpm dev:backend
+```
+
+Equivalent command:
 
 ```bash
 pnpm --filter @repo/backend dev
 ```
 
-This will:
+This initializes Convex project linkage (if needed) and starts backend dev.
 
-- Prompt you to login to Convex (or create an account)
-- Create a new Convex project
-- Generate your deployment URL
-- Create `convex.json` file with your project configuration
-- Start the Convex dev server
-
-**Important:** Keep this terminal running during development!
-
-### 3. Configure Environment Variables
-
-After `convex dev` runs, you'll get a deployment URL. Copy it and update these files:
-
-Copy each example file first:
+## 4) Configure Local App Env Files
 
 ```bash
 cp apps/web/.env.example apps/web/.env.local
 cp apps/admin/.env.example apps/admin/.env.local
 cp apps/mobile/.env.example apps/mobile/.env.local
+cp packages/backend/.env.example packages/backend/.env.local
 ```
 
-Never commit `.env.local` files or real credentials to git. Keep real values only in local env files and platform secret stores.
+Set these minimum local values:
 
-**`apps/web/.env.local`:**
+`apps/web/.env.local`
 
 ```dotenv
-NEXT_PUBLIC_CONVEX_URL=https://your-project.convex.cloud
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
-CLERK_SECRET_KEY=your_clerk_secret_key
+NEXT_PUBLIC_CONVEX_URL=
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
+CLERK_SECRET_KEY=
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+SPOTIFY_CLIENT_ID=
+SPOTIFY_CLIENT_SECRET=
 ```
 
-**`apps/admin/.env.local`:**
+`apps/admin/.env.local`
 
 ```dotenv
-NEXT_PUBLIC_CONVEX_URL=https://your-project.convex.cloud
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
-CLERK_SECRET_KEY=your_clerk_secret_key
+NEXT_PUBLIC_CONVEX_URL=
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
+CLERK_SECRET_KEY=
+ADMIN_CACHE_SECRET=
 ```
 
-**`apps/mobile/.env.local`:**
+`apps/mobile/.env.local`
 
 ```dotenv
-EXPO_PUBLIC_CONVEX_URL=https://your-project.convex.cloud
-EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
+EXPO_PUBLIC_CONVEX_URL=
+EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=
+EXPO_PUBLIC_WEB_APP_URL=http://localhost:3000
 ```
 
-**Convex Dashboard Environment Variables:**
+Important:
 
-```bash
-CLERK_JWT_ISSUER_DOMAIN=https://your-instance.clerk.accounts.dev
-CLERK_WEBHOOK_SECRET=your_clerk_webhook_secret
-OPENAI_API_KEY=your_openai_api_key
+- Use the same Convex deployment URL for all clients.
+- Do not commit `.env.local` files.
+
+## 5) Configure Convex Deployment Environment Variables
+
+Set in Convex dashboard for the active deployment.
+
+Required:
+
+```dotenv
+CLERK_JWT_ISSUER_DOMAIN=
+CLERK_WEBHOOK_SECRET=
+OPENAI_API_KEY=
 SUMMARY_DAILY_GENERATION_LIMIT=5
 ```
 
-These Convex variables are validated in backend entry points:
+OAuth and integration sync (required for durable provider sync and refresh):
 
-- `CLERK_JWT_ISSUER_DOMAIN` (must be a real https URL)
-- `CLERK_WEBHOOK_SECRET` (must start with `whsec_`)
-- `OPENAI_API_KEY` (must start with `sk-`)
-- `SUMMARY_DAILY_GENERATION_LIMIT` (recommended positive integer, e.g. `5`; defaults to `5` if missing or invalid)
+```dotenv
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+SPOTIFY_CLIENT_ID=
+SPOTIFY_CLIENT_SECRET=
+```
 
-`OPENAI_API_KEY` is required for manual AI summary generation from the web dashboard.
+Backend observability:
 
-Admin middleware also validates at startup:
+```dotenv
+SENTRY_DSN=
+SENTRY_TRACES_SAMPLE_RATE=0.1
+SENTRY_INFO_EVENT_SAMPLE_RATE=0.1
+```
 
-- `CLERK_SECRET_KEY` (must start with `sk_test_` or `sk_live_`)
-- `NEXT_PUBLIC_CONVEX_URL` (must be a real https URL)
+Integration secret encryption (required for production OAuth token encryption):
 
-Placeholder/example values are rejected for these startup-validated variables.
+```dotenv
+INTEGRATION_SECRETS_KEYRING_JSON=
+INTEGRATION_SECRETS_ACTIVE_KEY_ID=
+```
 
-⚠️ **All three apps must use the SAME Convex URL**
+Validation behavior already enforced in code:
 
-## 🪝 Clerk Webhook Setup (Required)
+- `CLERK_JWT_ISSUER_DOMAIN` must be valid `https` URL.
+- `CLERK_WEBHOOK_SECRET` must start with `whsec_`.
+- `OPENAI_API_KEY` must start with `sk-`.
+- Placeholder values are rejected by backend/admin env validation.
 
-1. In Clerk Dashboard, create a webhook endpoint pointing to:
+## 6) Configure Clerk Webhook
+
+Create Clerk webhook endpoint:
 
 - `https://<your-convex-deployment>.convex.site/clerk/webhook`
 
-1. Subscribe at minimum to events:
+Subscribe to at least:
 
 - `user.created`
 - `user.updated`
 - `user.deleted`
 
-1. Copy the signing secret from Clerk and set it as:
+Set webhook signing secret as Convex env var:
 
-- `CLERK_WEBHOOK_SECRET` in Convex environment variables
+- `CLERK_WEBHOOK_SECRET`
 
-The webhook implementation verifies Svix signature headers and rejects invalid signatures.
+## 7) Run Applications Against Backend
 
-## 🏃 Running the Apps
-
-### Option 1: Run all apps with Turbo
+Terminal 1:
 
 ```bash
-# From root directory
-pnpm dev
+pnpm dev:backend
 ```
 
-In a separate terminal, run Convex dev:
+Terminal 2:
 
 ```bash
-pnpm --filter @repo/backend dev
-```
-
-### Option 2: Run Apps Individually
-
-```bash
-# Web app (port 3000)
 pnpm dev:web
+```
 
-# Admin app (port 3001)
+Terminal 3:
+
+```bash
 pnpm dev:admin
-
-# Mobile app
-pnpm dev:mobile
 ```
 
-**Don't forget:** Keep `convex dev` running in `packages/backend`!
+Terminal 4:
 
-## 📁 Project Structure
-
-```text
-packages/
-  backend/              # Shared Convex backend
-    convex/
-      memories.ts       # Memory CRUD functions
-      days.ts           # Daily metadata functions
-      summaryGeneration.ts  # AI summary actions
-      schema.ts         # Database schema
-      _generated/       # Auto-generated types and API
-        api.d.ts
-        api.js
-
-apps/
-  web/                  # Next.js web app
-    app/
-      providers.tsx     # Convex provider setup
-      dashboard/        # Main authenticated experience
-
-  admin/                # Next.js admin app
-    app/
-      providers.tsx     # Convex provider setup
-      admin/            # Admin pages
-
-  mobile/               # Expo mobile app
-    app/
-      _layout.tsx       # Convex provider setup
-      (tabs)/           # Main mobile experience
+```bash
+pnpm --filter mobile start
 ```
 
-## 💡 Using Convex in Your Apps
+## 8) Verification Checklist
 
-### Import the API
+1. Web sign-in works and dashboard loads data.
+2. Admin sign-in works and protected pages load.
+3. Mobile sign-in works and API-backed tabs load.
+4. Clerk webhook events are accepted by Convex.
+5. Summary generation works with OpenAI key configured.
+6. OAuth connect flow returns to settings with success state.
 
-```typescript
-import { api } from "@repo/backend/convex";
-import { useQuery, useMutation, useAction } from "convex/react";
-```
+## 9) Troubleshooting
 
-### Query Data
+### Backend startup fails with env error
 
-```typescript
-const memories = useQuery(api.memories.listRecentMemories, {
-  limit: 10,
-});
-```
+- Error prefix `[env:convex]` means required Convex vars are missing/invalid.
+- Fix values in Convex dashboard, then restart backend dev.
 
-### Mutate Data
+### Admin startup fails with env error
 
-```typescript
-const updateDayRating = useMutation(api.days.updateDayRating);
+- Error prefix `[env:admin]` means missing/invalid `ADMIN_CACHE_SECRET`, `CLERK_SECRET_KEY`, or `NEXT_PUBLIC_CONVEX_URL`.
 
-const handleClick = () => {
-  updateDayRating({ dayKey: "2026-03-23", rating: 4 });
-};
-```
+### OAuth callback fails with 400
 
-### Run Actions
+- Verify provider redirect URI matches exactly:
+  - `${NEXT_PUBLIC_APP_URL}/api/integrations/oauth/<provider>/callback`
+- Verify client ID/client secret pair belongs to that OAuth app.
 
-```typescript
-const generateSummary = useAction(api.summaryGeneration.generateSummaryForDay);
+### OAuth token refresh fails later (400)
 
-const handleAction = () => {
-  generateSummary({ dayKey: "2026-03-23" });
-};
-```
+- Reconnect provider from app settings.
+- For Google testing-mode apps, refresh tokens may expire quickly; publish app when appropriate.
 
-## 🧪 Testing the Setup
+### Integration secret crypto error
 
-After starting all apps, verify authenticated flows load Convex-backed data:
-
-1. **Web:** [http://localhost:3000](http://localhost:3000) → sign in and open dashboard
-2. **Admin:** [http://localhost:3001](http://localhost:3001) → sign in and open admin pages
-3. **Mobile:** Use Expo Go/simulator → sign in and open tab screens
-
-## 📝 Adding New Convex Functions
-
-1. Edit files in `packages/backend/convex/`
-2. Convex dev server auto-regenerates types in `_generated/`
-3. All apps automatically get updated TypeScript types
-4. Import and use: `api.yourFile.yourFunction`
-
-## 🔑 Key Points
-
-- **One Backend, Multiple Clients:** All apps connect to the same Convex deployment
-- **Type Safety:** Generated TypeScript types shared across all apps
-- **Hot Reload:** Changes in Convex functions automatically update in all apps
-- **Monorepo Benefits:** Shared code, consistent APIs, single source of truth
-
-## 🐛 Troubleshooting
-
-### Module not found errors
-
-Run `pnpm install` from the root directory.
-
-### Convex connection errors
-
-1. Ensure `convex dev` is running in `packages/backend`
-2. Verify all `.env.local` files have the correct `CONVEX_URL`
-3. Check that the URL is the same in all three apps
-
-### Startup env validation errors
-
-If startup fails with an `[env:convex]` or `[env:admin]` error:
-
-1. Ensure every listed variable exists and is not empty.
-2. Replace placeholder/example values with real secrets/URLs.
-3. Verify expected formats (`whsec_` for Clerk webhook secret, `sk-` for OpenAI, `sk_test_`/`sk_live_` for Clerk secret key).
-4. Restart `npx convex dev` and Next.js dev servers after updating env values.
-
-### Type errors
-
-1. Make sure `convex dev` regenerated the `_generated/` files
-2. Restart your TypeScript server in VS Code
-3. Run `pnpm install` again
-
-## 📚 Resources
-
-- [Convex Documentation](https://docs.convex.dev)
-- [Convex with Next.js](https://docs.convex.dev/quickstart/nextjs)
-- [Convex with React Native](https://docs.convex.dev/quickstart/react-native)
-- [Developer workflow](workflow.md)
-- [Deploy + operations runbook](DEPLOY_RUNBOOK.md)
+- If callback or sync fails with integration secret encryption config error, set:
+  - `INTEGRATION_SECRETS_KEYRING_JSON`
+  - `INTEGRATION_SECRETS_ACTIVE_KEY_ID`

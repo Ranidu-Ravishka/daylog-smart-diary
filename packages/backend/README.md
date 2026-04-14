@@ -1,120 +1,88 @@
-# DayLog Backend Package (`packages/backend`)
+# DayLog Backend (`packages/backend`)
 
-Shared Convex backend for web, admin, and mobile apps.
+> Status: Active
+> Last Updated: 2026-04-14
+> Audience: Backend engineers
+> Standard: [../../CONTRIBUTING.md](../../CONTRIBUTING.md)
 
-## Local commands
+Shared Convex backend for web, admin, and mobile.
 
-From repo root:
+Canonical onboarding:
+
+- [../../README.md](../../README.md)
+- [../../CONVEX_SETUP.md](../../CONVEX_SETUP.md)
+
+## Local Commands
+
+From repository root:
 
 ```bash
 pnpm --filter @repo/backend dev
 pnpm --filter @repo/backend logs
 pnpm --filter @repo/backend lint
 pnpm --filter @repo/backend test:run
+pnpm --filter @repo/backend test:coverage:backend
 ```
 
-## Backend CI gate
+## Required Convex Environment Variables
 
-The canonical `backend-validation` CI check executes:
-
-```bash
-pnpm --filter @repo/backend lint
-pnpm --filter @repo/backend test:run
-```
-
-Keep these commands green locally before opening a PR with backend changes.
-
-## Backend structure
-
-- Convex functions: `packages/backend/convex/*.ts`
-- Schema: `packages/backend/convex/schema.ts`
-- Auth config: `packages/backend/convex/auth.config.ts`
-- Generated API/types: `packages/backend/convex/_generated/*`
-
-## Required Convex environment variables
+Core required:
 
 - `CLERK_JWT_ISSUER_DOMAIN`
 - `CLERK_WEBHOOK_SECRET`
 - `OPENAI_API_KEY`
 - `SUMMARY_DAILY_GENERATION_LIMIT`
 
-Optional:
+OAuth sync credentials (recommended and required for durable provider refresh flows):
+
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `SPOTIFY_CLIENT_ID`
+- `SPOTIFY_CLIENT_SECRET`
+
+Observability:
+
+- `SENTRY_DSN`
+- optional `SENTRY_TRACES_SAMPLE_RATE`
+- optional `SENTRY_INFO_EVENT_SAMPLE_RATE`
+
+Integration token encryption (production critical):
+
+- `INTEGRATION_SECRETS_KEYRING_JSON`
+- `INTEGRATION_SECRETS_ACTIVE_KEY_ID`
+
+Optional operational env:
 
 - `ADMIN_BOOTSTRAP_CLERK_USER_IDS`
-- `RETENTION_MEMORIES_DAYS`
-- `RETENTION_DAY_SUMMARIES_DAYS`
-- `RETENTION_INTEGRATION_DATA_DAYS`
-- `RETENTION_LOCATION_SIGNALS_DAYS`
-- `RETENTION_SUMMARY_EVENTS_DAYS`
-- `RETENTION_DELETE_BATCH_SIZE`
-- `SUMMARY_LOW_QUALITY_THRESHOLD`
+- retention policy overrides (`RETENTION_*`)
 
-## Admin bootstrap (Clerk)
+## Validation Behavior
 
-To create your first admin user (so you can access the admin app), set this
-Convex environment variable (in the Convex Dashboard) to a comma-separated list
-of Clerk user IDs allowed to self-promote:
+Backend startup validates required env values and fails fast when invalid.
 
-- `ADMIN_BOOTSTRAP_CLERK_USER_IDS=clerk_user_id_1,clerk_user_id_2`
+Examples:
 
-Then call the mutation `users:bootstrapMakeMeAdmin` while signed in.
+- non-https issuer domain rejected
+- invalid webhook secret format rejected
+- placeholder/example values rejected
 
-## AI summary generation environment
+## Important Operational Paths
 
-Set the OpenAI API key in Convex dashboard environment variables:
+- Summary generation:
+  - `summaryGeneration:generateSummaryForDay`
+- Export artifacts and jobs:
+  - `summaries:prepareMyDiaryExportArtifact`
+  - `summaries:listMyExportJobsPaginated`
+  - `summaries:getMyExportJobDownloadUrl`
+- Integration secret migration/audit:
+  - `integrations:adminAuditIntegrationSecretsEncryptionStatus`
+  - `integrations:adminMigrateLegacyIntegrationSecretsAll`
 
-- `OPENAI_API_KEY=your_openai_api_key`
+## Troubleshooting
 
-This key is used by `summaryGeneration:generateSummaryForDay` via an internal Convex action.
-
-## Startup env validation
-
-Convex backend startup now fails fast when required env variables are missing,
-empty, malformed, or placeholder values:
-
-- `CLERK_JWT_ISSUER_DOMAIN` (required https URL)
-- `CLERK_WEBHOOK_SECRET` (required, must start with `whsec_`)
-- `OPENAI_API_KEY` (required, must start with `sk-`)
-
-Optional:
-
-- `ADMIN_BOOTSTRAP_CLERK_USER_IDS` (if set, must contain real Clerk IDs)
-
-If you see an `[env:convex]` startup error, fix the listed variables in Convex
-dashboard environment settings and restart `convex dev`.
-
-## Integration sync notes
-
-- Supported providers currently include `google_calendar`, `google_fit`, `spotify`, `apple_health`.
-- Provider daily sync data is normalized into `integrationDailyData`.
-- Summary generation consumes integration daily data as additional model context.
-
-## Integration secret encryption operations
-
-- Encryption status audit (no secret values returned): `integrations:adminAuditIntegrationSecretsEncryptionStatus`
-- Full migration sweep (paginated, resumable): `integrations:adminMigrateLegacyIntegrationSecretsAll`
-- Single-page migration (manual paging): `integrations:adminMigrateLegacyIntegrationSecretsPage`
-
-Production readiness target for secrets at rest:
-
-- `legacyPlaintextRows = 0`
-- `missingEncryptedAccessRows = 0`
-
-## Maturity layer modules
-
-- Integration provider adapters: `packages/backend/convex/providerAdapters.ts`
-- Integration health snapshots/events: `packages/backend/convex/integrationHealth.ts`
-- Retention policies + cleanup jobs: `packages/backend/convex/retention.ts`
-- Summary quality harness: `packages/backend/convex/summaryQuality.ts`
-- Scheduled cleanup registration: `packages/backend/convex/crons.ts`
-
-### Retention operations
-
-- Scheduled cleanup: every 6 hours via `retention:runScheduledRetentionCleanupInternal`.
-- Manual admin trigger: `retention:runRetentionCleanupNow`.
-- Admin policy override: `retention:upsertRetentionPolicy`.
-
-### Summary quality operations
-
-- Automatic generation logging + scoring is wired into `summaryGeneration:generateSummaryForDay`.
-- Admin backlog evaluation for historical data: `summaryQuality:backfillSummaryQualityEvaluations`.
+- `[env:convex]` startup errors:
+  - Fix missing/invalid Convex env vars and restart backend dev.
+- OAuth callback/integration connect crypto errors:
+  - Verify integration encryption env vars are present.
+- Token refresh failures (`400`):
+  - Reconnect provider and verify provider OAuth app status/settings.

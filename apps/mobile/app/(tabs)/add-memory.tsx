@@ -31,7 +31,7 @@ import {
   enqueueOfflineMemoryMediaUpload,
   isLikelyTransientNetworkError,
 } from "@/lib/offline-outbox";
-import { captureException } from "@/lib/observability";
+import { captureException, logInfo } from "@/lib/observability";
 
 const c = Colors.light;
 
@@ -171,6 +171,13 @@ export default function AddMemoryScreen() {
       .toString()
       .padStart(6, "0")}`;
 
+    logInfo("mobile_memory_create_started", {
+      status: "started",
+      dayKey,
+      selectedImageCount: selectedImages.length,
+      hasDescription: Boolean(description.trim()),
+    });
+
     setIsSubmitting(true);
     setError(null);
 
@@ -217,6 +224,13 @@ export default function AddMemoryScreen() {
       );
       hasSelectedMoodManually.current = false;
 
+      logInfo("mobile_memory_create_succeeded", {
+        status: "succeeded",
+        dayKey,
+        memoryId: memory?._id,
+        selectedImageCount: selectedImages.length,
+      });
+
       Alert.alert("Memory Saved", "Your memory has been captured!", [
         { text: "OK", onPress: () => router.replace("/(tabs)") },
       ]);
@@ -261,6 +275,12 @@ export default function AddMemoryScreen() {
           );
           hasSelectedMoodManually.current = false;
 
+          logInfo("mobile_memory_create_queued_offline", {
+            status: "queued",
+            dayKey,
+            queuedPhotoCount,
+          });
+
           Alert.alert(
             "Saved Offline",
             queuedPhotoCount > 0
@@ -280,6 +300,7 @@ export default function AddMemoryScreen() {
       }
 
       captureException("mobile_memory_create_failed", err, {
+        status: "failed",
         dayKey,
         selectedImageCount: selectedImages.length,
       });

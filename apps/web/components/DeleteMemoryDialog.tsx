@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { captureException } from "@/lib/observability";
+import { captureException, logInfo } from "@/lib/observability";
 import { toastError, toastSuccess } from "@/lib/toast";
 
 interface DeleteMemoryDialogProps {
@@ -35,15 +35,25 @@ export function DeleteMemoryDialog({
   const deleteMemory = useMutation(api.memories.deleteMemory);
 
   const handleDelete = async () => {
+    logInfo("web_memory_delete_started", {
+      status: "started",
+      memoryId,
+    });
+
     setIsDeleting(true);
     try {
       await deleteMemory({ memoryId });
+      logInfo("web_memory_delete_succeeded", {
+        status: "succeeded",
+        memoryId,
+      });
       toastSuccess("Memory deleted");
       onOpenChange(false);
       onDeleteSuccess?.();
     } catch (error) {
       toastError("Failed to delete memory");
       captureException("web_memory_delete_failed", error, {
+        status: "failed",
         memoryId,
       });
     } finally {

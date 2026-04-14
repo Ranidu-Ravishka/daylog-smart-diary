@@ -27,7 +27,7 @@ import {
   enqueueOfflineAppendDayLog,
   isLikelyTransientNetworkError,
 } from "@/lib/offline-outbox";
-import { captureException } from "@/lib/observability";
+import { captureException, logInfo, logWarn } from "@/lib/observability";
 
 const c = Colors.light;
 
@@ -489,11 +489,24 @@ const DailyDetailView = () => {
 
   const handleGenerateSummary = useCallback(async () => {
     if (!hasSummaryInputs) {
+      logInfo("mobile_summary_generation_skipped", {
+        status: "skipped",
+        dayKey,
+        reason: "no_input_data",
+      });
       setSummaryGenerationError(
         "Add at least one memory, day note/rating/tag, or synced integration data before generating a summary.",
       );
       return;
     }
+
+    logInfo("mobile_summary_generation_started", {
+      status: "started",
+      dayKey,
+      memoryCount: resolvedMemories.length,
+      hasDayMetadataForSummary,
+      integrationDataCount: integrationDailyData.length,
+    });
 
     setIsGeneratingSummary(true);
     setSummaryGenerationError(null);
@@ -502,14 +515,37 @@ const DailyDetailView = () => {
       const result = await generateSummaryForDay({ dayKey });
       const failureMessage = getSummaryGenerationFailureResultMessage(result);
       if (failureMessage) {
+        logWarn("mobile_summary_generation_result_failed", {
+          status: "failed",
+          dayKey,
+          errorMessage: failureMessage,
+        });
         setSummaryGenerationError(failureMessage);
+      } else {
+        logInfo("mobile_summary_generation_succeeded", {
+          status: "succeeded",
+          dayKey,
+        });
       }
     } catch (error) {
-      setSummaryGenerationError(getSummaryGenerationErrorMessage(error));
+      const message = getSummaryGenerationErrorMessage(error);
+      captureException("mobile_summary_generation_failed", error, {
+        status: "failed",
+        dayKey,
+        errorMessage: message,
+      });
+      setSummaryGenerationError(message);
     } finally {
       setIsGeneratingSummary(false);
     }
-  }, [dayKey, generateSummaryForDay, hasSummaryInputs]);
+  }, [
+    dayKey,
+    generateSummaryForDay,
+    hasDayMetadataForSummary,
+    hasSummaryInputs,
+    integrationDailyData.length,
+    resolvedMemories.length,
+  ]);
 
   const handleJumpToManualNotes = useCallback(() => {
     const targetY = Math.max(0, manualNotesSectionYRef.current - Spacing.xl);

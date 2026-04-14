@@ -13,7 +13,7 @@ import {
   normalizeUserSettings,
   normalizeUserSettingsPatch,
   type UserSettingsDto,
-} from "@repo/user-settings/lib/user-settings";
+} from "../../user-settings/lib/user-settings";
 
 const preferenceThemeValidator = v.union(
   v.literal(USER_SETTINGS_THEME_VALUES[0]),

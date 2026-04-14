@@ -26,6 +26,7 @@ import { DayRating } from "@/components/DayRating";
 import { MemoryForm } from "@/components/MemoryForm";
 import { MemoryCard, type MemoryData } from "@/components/MemoryCard";
 import { DashboardDatePicker } from "@/components/DashboardDatePicker";
+import { captureException, logInfo, logWarn } from "@/lib/observability";
 import { toastError, toastSuccess } from "@/lib/toast";
 
 function LoadingSkeleton() {
@@ -239,6 +240,12 @@ export default function DashboardPage() {
   };
 
   const handleGenerateSummary = async () => {
+    logInfo("web_summary_generation_started", {
+      status: "started",
+      dayKey,
+      hasSummarySourceData,
+    });
+
     setSummaryGenerationError(null);
     setIsGeneratingSummary(true);
 
@@ -247,14 +254,29 @@ export default function DashboardPage() {
       const failureMessage = getSummaryGenerationFailureResultMessage(result);
 
       if (failureMessage) {
+        logWarn("web_summary_generation_result_failed", {
+          status: "failed",
+          dayKey,
+          errorMessage: failureMessage,
+        });
         setSummaryGenerationError(failureMessage);
         toastError(failureMessage);
         return;
       }
 
+      logInfo("web_summary_generation_succeeded", {
+        status: "succeeded",
+        dayKey,
+      });
+
       toastSuccess("Summary generated successfully");
     } catch (error) {
       const message = getSummaryGenerationErrorMessage(error);
+      captureException("web_summary_generation_failed", error, {
+        status: "failed",
+        dayKey,
+        errorMessage: message,
+      });
       setSummaryGenerationError(message);
       toastError(message);
     } finally {

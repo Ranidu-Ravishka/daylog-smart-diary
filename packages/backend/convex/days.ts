@@ -4,6 +4,7 @@ import { requireUser, requireOwnership } from "./authz";
 import { validateDayKey, validateRating, clampLimit } from "./validators";
 import { deleteDayCascadeData } from "./cascadeCleanup";
 import { applyDashboardMetricsDelta } from "./dashboardMetrics";
+import { captureException, logInfo } from "./observability";
 
 function normalizeStringArray(items: string[] | undefined): string[] {
   if (!items || items.length === 0) {
@@ -243,27 +244,55 @@ export const deleteDay = mutation({
   args: { dayId: v.id("days") },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
-    const day = await ctx.db.get(args.dayId);
+    const startedAt = Date.now();
 
-    if (!day) {
-      throw new Error("Day not found");
+    logInfo("deletion.day.started", {
+      status: "started",
+      userId: user._id,
+      dayId: args.dayId,
+    });
+
+    try {
+      const day = await ctx.db.get(args.dayId);
+
+      if (!day) {
+        throw new Error("Day not found");
+      }
+
+      requireOwnership(user, day.userId);
+
+      const deleted = await deleteDayCascadeData(ctx, {
+        userId: day.userId,
+        dayKey: day.dayKey,
+      });
+
+      await ctx.db.delete(args.dayId);
+
+      await applyDashboardMetricsDelta(ctx.db, {
+        totalDays: -1,
+        totalMemories: -deleted.deletedMemories,
+        totalSummaries: -deleted.deletedSummaries,
+      });
+
+      logInfo("deletion.day.succeeded", {
+        status: "succeeded",
+        userId: user._id,
+        dayId: args.dayId,
+        dayKey: day.dayKey,
+        deletedMemories: deleted.deletedMemories,
+        deletedSummaries: deleted.deletedSummaries,
+        durationMs: Date.now() - startedAt,
+      });
+
+      return { success: true };
+    } catch (error) {
+      captureException("deletion.day.failed", error, {
+        status: "failed",
+        userId: user._id,
+        dayId: args.dayId,
+        durationMs: Date.now() - startedAt,
+      });
+      throw error;
     }
-
-    requireOwnership(user, day.userId);
-
-    const deleted = await deleteDayCascadeData(ctx, {
-      userId: day.userId,
-      dayKey: day.dayKey,
-    });
-
-    await ctx.db.delete(args.dayId);
-
-    await applyDashboardMetricsDelta(ctx.db, {
-      totalDays: -1,
-      totalMemories: -deleted.deletedMemories,
-      totalSummaries: -deleted.deletedSummaries,
-    });
-
-    return { success: true };
   },
 });
