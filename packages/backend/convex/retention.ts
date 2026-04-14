@@ -13,12 +13,21 @@ import {
 
 const POLICY_KEYS: RetentionPolicyKey[] = [
   "memories",
+  "days",
   "daySummaries",
   "integrationDailyData",
+  "integrationSyncRuns",
   "locationSignals",
   "summaryGenerationEvents",
+  "summaryQualityEvaluations",
+  "summaryGenerationQuotas",
   "infoEvents",
+  "integrationHealthEvents",
+  "auditLogs",
+  "platformAuditEvents",
   "exportJobs",
+  "restoreJobs",
+  "userDeletionJobs",
 ];
 
 type EffectiveRetentionPolicy = {
@@ -32,12 +41,21 @@ type EffectiveRetentionPolicy = {
 
 type RetentionDeleteCounts = {
   memories: number;
+  days: number;
   daySummaries: number;
   integrationDailyData: number;
+  integrationSyncRuns: number;
   locationSignals: number;
   summaryGenerationEvents: number;
+  summaryQualityEvaluations: number;
+  summaryGenerationQuotas: number;
   infoEvents: number;
+  integrationHealthEvents: number;
+  auditLogs: number;
+  platformAuditEvents: number;
   exportJobs: number;
+  restoreJobs: number;
+  userDeletionJobs: number;
 };
 
 type CleanupExecutionArgs = {
@@ -53,6 +71,12 @@ function isRetentionPolicyKey(value: string): value is RetentionPolicyKey {
 
 function retentionCutoff(now: number, retentionDays: number): number {
   return now - retentionDays * 24 * 60 * 60 * 1000;
+}
+
+function retentionCutoffDayKey(now: number, retentionDays: number): string {
+  return new Date(retentionCutoff(now, retentionDays))
+    .toISOString()
+    .slice(0, 10);
 }
 
 function toRetentionDays(value: number): number {
@@ -174,6 +198,27 @@ async function purgeDaySummaries(
   return staleSummaries.length;
 }
 
+async function purgeDays(
+  ctx: Pick<MutationCtx, "db">,
+  cutoffDayKey: string,
+  maxDeletes: number,
+  dryRun: boolean,
+): Promise<number> {
+  const staleDays = await ctx.db
+    .query("days")
+    .withIndex("by_dayKey", (q) => q.lt("dayKey", cutoffDayKey))
+    .order("asc")
+    .take(maxDeletes);
+
+  if (dryRun) return staleDays.length;
+
+  for (const day of staleDays) {
+    await ctx.db.delete(day._id);
+  }
+
+  return staleDays.length;
+}
+
 async function purgeLocationSignals(
   ctx: Pick<MutationCtx, "db">,
   cutoff: number,
@@ -254,6 +299,132 @@ async function purgeSummaryGenerationEvents(
   return staleEvents.length;
 }
 
+async function purgeSummaryQualityEvaluations(
+  ctx: Pick<MutationCtx, "db">,
+  cutoff: number,
+  maxDeletes: number,
+  dryRun: boolean,
+): Promise<number> {
+  const staleEvaluations = await ctx.db
+    .query("summaryQualityEvaluations")
+    .withIndex("by_evaluatedAt", (q) => q.lt("evaluatedAt", cutoff))
+    .order("asc")
+    .take(maxDeletes);
+
+  if (dryRun) return staleEvaluations.length;
+
+  for (const evaluation of staleEvaluations) {
+    await ctx.db.delete(evaluation._id);
+  }
+
+  return staleEvaluations.length;
+}
+
+async function purgeSummaryGenerationQuotas(
+  ctx: Pick<MutationCtx, "db">,
+  cutoffDayKey: string,
+  maxDeletes: number,
+  dryRun: boolean,
+): Promise<number> {
+  const staleQuotas = await (ctx.db as any)
+    .query("summaryGenerationQuotas")
+    .withIndex("by_quotaDayKey", (q: any) => q.lt("quotaDayKey", cutoffDayKey))
+    .order("asc")
+    .take(maxDeletes);
+
+  if (dryRun) return staleQuotas.length;
+
+  for (const quota of staleQuotas) {
+    await (ctx.db as any).delete(quota._id);
+  }
+
+  return staleQuotas.length;
+}
+
+async function purgeIntegrationSyncRuns(
+  ctx: Pick<MutationCtx, "db">,
+  cutoff: number,
+  maxDeletes: number,
+  dryRun: boolean,
+): Promise<number> {
+  const staleRuns = await (ctx.db as any)
+    .query("integrationSyncRuns")
+    .withIndex("by_updatedAt", (q: any) => q.lt("updatedAt", cutoff))
+    .order("asc")
+    .take(maxDeletes);
+
+  if (dryRun) return staleRuns.length;
+
+  for (const run of staleRuns) {
+    await (ctx.db as any).delete(run._id);
+  }
+
+  return staleRuns.length;
+}
+
+async function purgeIntegrationHealthEvents(
+  ctx: Pick<MutationCtx, "db">,
+  cutoff: number,
+  maxDeletes: number,
+  dryRun: boolean,
+): Promise<number> {
+  const staleEvents = await (ctx.db as any)
+    .query("integrationHealthEvents")
+    .withIndex("by_at", (q: any) => q.lt("at", cutoff))
+    .order("asc")
+    .take(maxDeletes);
+
+  if (dryRun) return staleEvents.length;
+
+  for (const event of staleEvents) {
+    await (ctx.db as any).delete(event._id);
+  }
+
+  return staleEvents.length;
+}
+
+async function purgeAuditLogs(
+  ctx: Pick<MutationCtx, "db">,
+  cutoff: number,
+  maxDeletes: number,
+  dryRun: boolean,
+): Promise<number> {
+  const staleLogs = await ctx.db
+    .query("auditLogs")
+    .withIndex("by_createdAt", (q) => q.lt("at", cutoff))
+    .order("asc")
+    .take(maxDeletes);
+
+  if (dryRun) return staleLogs.length;
+
+  for (const log of staleLogs) {
+    await ctx.db.delete(log._id);
+  }
+
+  return staleLogs.length;
+}
+
+async function purgePlatformAuditEvents(
+  ctx: Pick<MutationCtx, "db">,
+  cutoff: number,
+  maxDeletes: number,
+  dryRun: boolean,
+): Promise<number> {
+  const staleEvents = await (ctx.db as any)
+    .query("platformAuditEvents")
+    .withIndex("by_at", (q: any) => q.lt("at", cutoff))
+    .order("asc")
+    .take(maxDeletes);
+
+  if (dryRun) return staleEvents.length;
+
+  for (const event of staleEvents) {
+    await (ctx.db as any).delete(event._id);
+  }
+
+  return staleEvents.length;
+}
+
 async function purgeExportJobs(
   ctx: Pick<MutationCtx, "db" | "storage">,
   cutoff: number,
@@ -281,6 +452,52 @@ async function purgeExportJobs(
   }
 
   return staleJobs.length;
+}
+
+async function purgeRestoreJobs(
+  ctx: Pick<MutationCtx, "db">,
+  cutoff: number,
+  maxDeletes: number,
+  dryRun: boolean,
+): Promise<number> {
+  const staleJobs = await (ctx.db as any)
+    .query("restoreJobs")
+    .withIndex("by_requestedAt", (q: any) => q.lt("requestedAt", cutoff))
+    .order("asc")
+    .take(maxDeletes);
+
+  if (dryRun) return staleJobs.length;
+
+  for (const job of staleJobs) {
+    await (ctx.db as any).delete(job._id);
+  }
+
+  return staleJobs.length;
+}
+
+async function purgeUserDeletionJobs(
+  ctx: Pick<MutationCtx, "db">,
+  cutoff: number,
+  maxDeletes: number,
+  dryRun: boolean,
+): Promise<number> {
+  const staleJobs = await ctx.db
+    .query("userDeletionJobs")
+    .withIndex("by_updatedAt", (q) => q.lt("updatedAt", cutoff))
+    .order("asc")
+    .take(maxDeletes * 3);
+
+  const terminalJobs = staleJobs
+    .filter((job) => job.status === "completed" || job.status === "failed")
+    .slice(0, maxDeletes);
+
+  if (dryRun) return terminalJobs.length;
+
+  for (const job of terminalJobs) {
+    await ctx.db.delete(job._id);
+  }
+
+  return terminalJobs.length;
 }
 
 async function purgeInfoEvents(
@@ -313,12 +530,21 @@ async function runRetentionCleanupInternal(
 
   const deletedCounts: RetentionDeleteCounts = {
     memories: 0,
+    days: 0,
     daySummaries: 0,
     integrationDailyData: 0,
+    integrationSyncRuns: 0,
     locationSignals: 0,
     summaryGenerationEvents: 0,
+    summaryQualityEvaluations: 0,
+    summaryGenerationQuotas: 0,
     infoEvents: 0,
+    integrationHealthEvents: 0,
+    auditLogs: 0,
+    platformAuditEvents: 0,
     exportJobs: 0,
+    restoreJobs: 0,
+    userDeletionJobs: 0,
   };
 
   try {
@@ -326,6 +552,15 @@ async function runRetentionCleanupInternal(
       deletedCounts.memories = await purgeMemories(
         ctx,
         retentionCutoff(startedAt, effectivePolicies.memories.retentionDays),
+        args.maxDeletesPerPolicy,
+        args.dryRun,
+      );
+    }
+
+    if (effectivePolicies.days.enabled) {
+      deletedCounts.days = await purgeDays(
+        ctx,
+        retentionCutoffDayKey(startedAt, effectivePolicies.days.retentionDays),
         args.maxDeletesPerPolicy,
         args.dryRun,
       );
@@ -367,6 +602,31 @@ async function runRetentionCleanupInternal(
       );
     }
 
+    if (effectivePolicies.integrationSyncRuns.enabled) {
+      deletedCounts.integrationSyncRuns = await purgeIntegrationSyncRuns(
+        ctx,
+        retentionCutoff(
+          startedAt,
+          effectivePolicies.integrationSyncRuns.retentionDays,
+        ),
+        args.maxDeletesPerPolicy,
+        args.dryRun,
+      );
+    }
+
+    if (effectivePolicies.summaryQualityEvaluations.enabled) {
+      deletedCounts.summaryQualityEvaluations =
+        await purgeSummaryQualityEvaluations(
+          ctx,
+          retentionCutoff(
+            startedAt,
+            effectivePolicies.summaryQualityEvaluations.retentionDays,
+          ),
+          args.maxDeletesPerPolicy,
+          args.dryRun,
+        );
+    }
+
     if (effectivePolicies.summaryGenerationEvents.enabled) {
       deletedCounts.summaryGenerationEvents =
         await purgeSummaryGenerationEvents(
@@ -374,6 +634,19 @@ async function runRetentionCleanupInternal(
           retentionCutoff(
             startedAt,
             effectivePolicies.summaryGenerationEvents.retentionDays,
+          ),
+          args.maxDeletesPerPolicy,
+          args.dryRun,
+        );
+    }
+
+    if (effectivePolicies.summaryGenerationQuotas.enabled) {
+      deletedCounts.summaryGenerationQuotas =
+        await purgeSummaryGenerationQuotas(
+          ctx,
+          retentionCutoffDayKey(
+            startedAt,
+            effectivePolicies.summaryGenerationQuotas.retentionDays,
           ),
           args.maxDeletesPerPolicy,
           args.dryRun,
@@ -389,10 +662,65 @@ async function runRetentionCleanupInternal(
       );
     }
 
+    if (effectivePolicies.integrationHealthEvents.enabled) {
+      deletedCounts.integrationHealthEvents =
+        await purgeIntegrationHealthEvents(
+          ctx,
+          retentionCutoff(
+            startedAt,
+            effectivePolicies.integrationHealthEvents.retentionDays,
+          ),
+          args.maxDeletesPerPolicy,
+          args.dryRun,
+        );
+    }
+
+    if (effectivePolicies.auditLogs.enabled) {
+      deletedCounts.auditLogs = await purgeAuditLogs(
+        ctx,
+        retentionCutoff(startedAt, effectivePolicies.auditLogs.retentionDays),
+        args.maxDeletesPerPolicy,
+        args.dryRun,
+      );
+    }
+
+    if (effectivePolicies.platformAuditEvents.enabled) {
+      deletedCounts.platformAuditEvents = await purgePlatformAuditEvents(
+        ctx,
+        retentionCutoff(
+          startedAt,
+          effectivePolicies.platformAuditEvents.retentionDays,
+        ),
+        args.maxDeletesPerPolicy,
+        args.dryRun,
+      );
+    }
+
     if (effectivePolicies.exportJobs.enabled) {
       deletedCounts.exportJobs = await purgeExportJobs(
         ctx,
         retentionCutoff(startedAt, effectivePolicies.exportJobs.retentionDays),
+        args.maxDeletesPerPolicy,
+        args.dryRun,
+      );
+    }
+
+    if (effectivePolicies.restoreJobs.enabled) {
+      deletedCounts.restoreJobs = await purgeRestoreJobs(
+        ctx,
+        retentionCutoff(startedAt, effectivePolicies.restoreJobs.retentionDays),
+        args.maxDeletesPerPolicy,
+        args.dryRun,
+      );
+    }
+
+    if (effectivePolicies.userDeletionJobs.enabled) {
+      deletedCounts.userDeletionJobs = await purgeUserDeletionJobs(
+        ctx,
+        retentionCutoff(
+          startedAt,
+          effectivePolicies.userDeletionJobs.retentionDays,
+        ),
         args.maxDeletesPerPolicy,
         args.dryRun,
       );

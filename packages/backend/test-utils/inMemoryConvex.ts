@@ -78,6 +78,7 @@ const INDEX_FIELDS: Record<TableName, Record<string, string[]>> = {
   },
   summaryGenerationQuotas: {
     by_user_day: ["userId", "quotaDayKey"],
+    by_quotaDayKey: ["quotaDayKey"],
   },
   exportJobs: {
     by_user_requestedAt: ["userId", "requestedAt"],
@@ -116,6 +117,7 @@ const INDEX_FIELDS: Record<TableName, Record<string, string[]>> = {
     by_user_provider_day: ["userId", "provider", "dayKey"],
     by_user_provider: ["userId", "provider"],
     by_user_day_updatedAt: ["userId", "dayKey", "updatedAt"],
+    by_updatedAt: ["updatedAt"],
   },
   integrationDailyData: {
     by_user_day: ["userId", "dayKey"],
@@ -132,6 +134,8 @@ const INDEX_FIELDS: Record<TableName, Record<string, string[]>> = {
     by_provider_at: ["provider", "at"],
     by_status_at: ["status", "at"],
     by_outcome_at: ["outcome", "at"],
+    by_at: ["at"],
+    by_userId_at: ["userId", "at"],
   },
   observabilityInfoEvents: {
     by_receivedAt: ["receivedAt"],
@@ -140,12 +144,14 @@ const INDEX_FIELDS: Record<TableName, Record<string, string[]>> = {
   },
   summaryGenerationEvents: {
     by_createdAt: ["createdAt"],
+    by_user_day_createdAt: ["userId", "dayKey", "createdAt"],
     by_success_createdAt: ["success", "createdAt"],
   },
   summaryQualityEvaluations: {
     by_evaluatedAt: ["evaluatedAt"],
     by_lowQuality_evaluatedAt: ["lowQuality", "evaluatedAt"],
     by_generationEventId: ["generationEventId"],
+    by_user_day_evaluatedAt: ["userId", "dayKey", "evaluatedAt"],
   },
   dataRetentionPolicies: {
     by_key: ["key"],
@@ -154,7 +160,12 @@ const INDEX_FIELDS: Record<TableName, Record<string, string[]>> = {
     by_startedAt: ["startedAt"],
     by_status_startedAt: ["status", "startedAt"],
   },
-  platformAuditEvents: {},
+  platformAuditEvents: {
+    by_category_at: ["category", "at"],
+    by_actor_at: ["actorType", "at"],
+    by_at: ["at"],
+    by_actorUserId_at: ["actorUserId", "at"],
+  },
   adminDashboardMetrics: {
     by_key: ["key"],
   },

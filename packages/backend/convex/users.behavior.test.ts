@@ -210,6 +210,8 @@ describe("users behavior", () => {
   it("deletes user cascade data by Clerk id and remains idempotent", async () => {
     const targetUserId = "user_target_001" as Id<"user">;
     const targetMemoryId = "memory_target_001" as Id<"memories">;
+    const targetSummaryEventId =
+      "summary_event_target_001" as Id<"summaryGenerationEvents">;
 
     const db = createInMemoryDb({
       ...baseSeed(),
@@ -339,6 +341,90 @@ describe("users behavior", () => {
           updatedAt: 1,
         },
       ],
+      exportJobs: [
+        {
+          _id: "export_target_001",
+          _creationTime: 15,
+          userId: targetUserId,
+          status: "ready",
+          format: "json",
+          includeLocationSignals: false,
+          requestedAt: 1,
+          updatedAt: 1,
+          expiresAt: 1,
+          artifactStorageId: "export_storage_target_001",
+        },
+      ],
+      restoreJobs: [
+        {
+          _id: "restore_target_001",
+          _creationTime: 16,
+          userId: targetUserId,
+          status: "failed",
+          requestedAt: 1,
+          updatedAt: 1,
+          conflictMode: "skip",
+          allowPartial: false,
+          selectedDatasets: ["memories"],
+        },
+      ],
+      summaryGenerationEvents: [
+        {
+          _id: targetSummaryEventId,
+          _creationTime: 17,
+          userId: targetUserId,
+          dayKey: "2026-04-01",
+          createdAt: 1,
+          success: true,
+          modelProvider: "openai",
+          modelName: "gpt-5",
+          modelInput: "input",
+        },
+      ],
+      summaryQualityEvaluations: [
+        {
+          _id: "quality_target_001",
+          _creationTime: 18,
+          userId: targetUserId,
+          dayKey: "2026-04-01",
+          generationEventId: targetSummaryEventId,
+          lowQuality: false,
+          evaluatedAt: 1,
+          scores: {
+            overall: 0.9,
+            length: 0.9,
+            coherence: 0.9,
+            duplication: 0,
+            failure: 0,
+          },
+          wordCount: 100,
+          duplicateLineRatio: 0,
+          flags: [],
+        },
+      ],
+      integrationHealthEvents: [
+        {
+          _id: "health_target_001",
+          _creationTime: 19,
+          provider: "spotify",
+          userId: targetUserId,
+          outcome: "error",
+          status: "degraded",
+          tokenValidityStatus: "unknown",
+          at: 1,
+        },
+      ],
+      platformAuditEvents: [
+        {
+          _id: "platform_audit_target_001",
+          _creationTime: 20,
+          category: "retention",
+          action: "target",
+          actorType: "user",
+          actorUserId: targetUserId,
+          at: 1,
+        },
+      ],
     });
 
     const storageDelete = vi.fn(async () => undefined);
@@ -418,7 +504,8 @@ describe("users behavior", () => {
     expect(afterSteps?.checkpoints).toBeGreaterThan(0);
     expect(afterSteps?.processedBatches).toBe(afterSteps?.checkpoints);
 
-    expect(storageDelete).toHaveBeenCalledTimes(1);
+    // Deletes both the memory media artifact and export artifact storage object.
+    expect(storageDelete).toHaveBeenCalledTimes(2);
     expect(db.getTable("user").map((row) => row._id)).not.toContain(
       targetUserId,
     );
@@ -429,9 +516,19 @@ describe("users behavior", () => {
     expect(db.getTable("integrationDailyData")).toHaveLength(0);
     expect(db.getTable("integrationSecrets")).toHaveLength(0);
     expect(db.getTable("integrationSyncRuns")).toHaveLength(0);
+    expect(db.getTable("exportJobs")).toHaveLength(0);
+    expect(db.getTable("restoreJobs")).toHaveLength(0);
+    expect(db.getTable("summaryGenerationEvents")).toHaveLength(0);
+    expect(db.getTable("summaryQualityEvaluations")).toHaveLength(0);
+    expect(db.getTable("integrationHealthEvents")).toHaveLength(0);
     expect(db.getTable("userPreferences")).toHaveLength(0);
     expect(db.getTable("auditLogs")).toHaveLength(0);
     expect(db.getTable("summaryGenerationQuotas")).toHaveLength(0);
+    expect(
+      db
+        .getTable("platformAuditEvents")
+        .every((row) => row.actorUserId !== targetUserId),
+    ).toBe(true);
 
     const replay = await runUserDeletionCascadeJobStepInternal(ctx, {
       jobId,
@@ -481,10 +578,16 @@ describe("users behavior", () => {
             deletedIntegrations: 0,
             deletedPreferences: 0,
             deletedAuditLogs: 0,
+            deletedPlatformAuditEvents: 0,
             deletedMemoryMedia: 0,
             deletedIntegrationDailyData: 0,
             deletedIntegrationSecrets: 0,
             deletedIntegrationSyncRuns: 0,
+            deletedIntegrationHealthEvents: 0,
+            deletedExportJobs: 0,
+            deletedRestoreJobs: 0,
+            deletedSummaryGenerationEvents: 0,
+            deletedSummaryQualityEvaluations: 0,
             deletedSummaryGenerationQuotas: 0,
           },
           startedAt: 1,

@@ -26,10 +26,16 @@ type DeletionJobProgress = {
   deletedIntegrations: number;
   deletedPreferences: number;
   deletedAuditLogs: number;
+  deletedPlatformAuditEvents: number;
   deletedMemoryMedia: number;
   deletedIntegrationDailyData: number;
   deletedIntegrationSecrets: number;
   deletedIntegrationSyncRuns: number;
+  deletedIntegrationHealthEvents: number;
+  deletedExportJobs: number;
+  deletedRestoreJobs: number;
+  deletedSummaryGenerationEvents: number;
+  deletedSummaryQualityEvaluations: number;
   deletedSummaryGenerationQuotas: number;
 };
 
@@ -40,10 +46,16 @@ const EMPTY_DELETION_JOB_PROGRESS: DeletionJobProgress = {
   deletedIntegrations: 0,
   deletedPreferences: 0,
   deletedAuditLogs: 0,
+  deletedPlatformAuditEvents: 0,
   deletedMemoryMedia: 0,
   deletedIntegrationDailyData: 0,
   deletedIntegrationSecrets: 0,
   deletedIntegrationSyncRuns: 0,
+  deletedIntegrationHealthEvents: 0,
+  deletedExportJobs: 0,
+  deletedRestoreJobs: 0,
+  deletedSummaryGenerationEvents: 0,
+  deletedSummaryQualityEvaluations: 0,
   deletedSummaryGenerationQuotas: 0,
 };
 
@@ -65,8 +77,26 @@ const DELETION_PROGRESS_COUNTERS: Array<{
     key: "deletedIntegrationSyncRuns",
     label: "Deleted integration sync runs",
   },
+  {
+    key: "deletedIntegrationHealthEvents",
+    label: "Deleted integration health events",
+  },
+  { key: "deletedExportJobs", label: "Deleted export jobs" },
+  { key: "deletedRestoreJobs", label: "Deleted restore jobs" },
+  {
+    key: "deletedSummaryGenerationEvents",
+    label: "Deleted summary generation events",
+  },
+  {
+    key: "deletedSummaryQualityEvaluations",
+    label: "Deleted summary quality evaluations",
+  },
   { key: "deletedPreferences", label: "Deleted preferences" },
   { key: "deletedAuditLogs", label: "Deleted audit logs" },
+  {
+    key: "deletedPlatformAuditEvents",
+    label: "Deleted platform audit events",
+  },
   {
     key: "deletedSummaryGenerationQuotas",
     label: "Deleted summary quotas",
@@ -172,8 +202,9 @@ function normalizeDeletionJobProgress(
 
   for (const counter of DELETION_PROGRESS_COUNTERS) {
     const raw = candidate[counter.key];
-    if (typeof raw !== "number") {
-      return undefined;
+    if (typeof raw !== "number" || !Number.isFinite(raw)) {
+      normalized[counter.key] = 0;
+      continue;
     }
     normalized[counter.key] = Math.max(0, Math.floor(raw));
   }

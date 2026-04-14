@@ -295,6 +295,17 @@ describe("cascade cleanup behavior", () => {
       deletedIntegrations: 1,
       deletedPreferences: 1,
       deletedAuditLogs: 1,
+      deletedPlatformAuditEvents: 0,
+      deletedMemoryMedia: 1,
+      deletedIntegrationDailyData: 1,
+      deletedIntegrationSecrets: 1,
+      deletedIntegrationSyncRuns: 1,
+      deletedIntegrationHealthEvents: 0,
+      deletedExportJobs: 0,
+      deletedRestoreJobs: 0,
+      deletedSummaryGenerationEvents: 0,
+      deletedSummaryQualityEvaluations: 0,
+      deletedSummaryGenerationQuotas: 1,
     });
 
     expect(storageDelete).toHaveBeenCalledWith("storage_user_001");
