@@ -390,6 +390,25 @@ export default defineSchema(
       updatedAt: v.number(),
     }).index("by_key", ["key"]),
 
+    // ── Runtime feature flags (remote rollout controls) ───
+    featureFlags: defineTable({
+      key: v.string(),
+      description: v.optional(v.string()),
+      defaultEnabled: v.boolean(),
+      rolloutPercentage: v.number(),
+      killSwitch: v.boolean(),
+      enabledInDevelopment: v.optional(v.boolean()),
+      enabledInStaging: v.optional(v.boolean()),
+      enabledInProduction: v.optional(v.boolean()),
+      includeClerkUserIds: v.optional(v.array(v.string())),
+      excludeClerkUserIds: v.optional(v.array(v.string())),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+      updatedByUserId: v.optional(v.id("user")),
+    })
+      .index("by_key", ["key"])
+      .index("by_updatedAt", ["updatedAt"]),
+
     // ── Integrations (external data-source connections) ──────
     integrations: defineTable({
       userId: v.id("user"),

@@ -49,6 +49,7 @@ import {
   getBackgroundLocationMaxUpdatesPerHour,
   getEnableBackgroundLocationTracking,
 } from "./runtimeConfig";
+import { evaluateFeatureFlagForIdentity } from "./featureFlags";
 
 const OPAQUE_TOKEN_REF_PREFIX = "tokref_";
 const PROVIDER_SYNC_MAX_ATTEMPTS = 3;
@@ -1882,10 +1883,20 @@ export const listSupportedProviders = query({
 export const getMyLocationTrackingRuntimeConfig = query({
   args: {},
   handler: async (ctx) => {
-    await requireUser(ctx);
+    const user = await requireUser(ctx);
+
+    const backgroundTrackingFlag = await evaluateFeatureFlagForIdentity(
+      ctx.db,
+      "backgroundTrackingEnabled",
+      {
+        userId: user._id,
+        clerkUserId: user.clerkUserId,
+      },
+    );
 
     return {
-      enableBackgroundLocationTracking: getEnableBackgroundLocationTracking(),
+      enableBackgroundLocationTracking:
+        getEnableBackgroundLocationTracking() && backgroundTrackingFlag.enabled,
       batchMaxPoints: getBackgroundLocationBatchMaxPoints(),
       maxUpdatesPerHour: getBackgroundLocationMaxUpdatesPerHour(),
       batchFlushIntervalMinutes:

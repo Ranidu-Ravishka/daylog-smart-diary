@@ -16,6 +16,7 @@ import type * as crons from "../crons.js";
 import type * as dashboardMetrics from "../dashboardMetrics.js";
 import type * as days from "../days.js";
 import type * as env from "../env.js";
+import type * as featureFlags from "../featureFlags.js";
 import type * as http from "../http.js";
 import type * as integrationHealth from "../integrationHealth.js";
 import type * as integrationProviders from "../integrationProviders.js";
@@ -51,6 +52,7 @@ declare const fullApi: ApiFromModules<{
   dashboardMetrics: typeof dashboardMetrics;
   days: typeof days;
   env: typeof env;
+  featureFlags: typeof featureFlags;
   http: typeof http;
   integrationHealth: typeof integrationHealth;
   integrationProviders: typeof integrationProviders;

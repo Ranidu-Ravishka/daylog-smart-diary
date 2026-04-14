@@ -37,6 +37,7 @@ type TableName =
   | "dataRetentionRuns"
   | "platformAuditEvents"
   | "adminDashboardMetrics"
+  | "featureFlags"
   | "userDeletionJobs";
 
 type SeedData = Partial<Record<TableName, GenericDoc[]>>;
@@ -156,6 +157,10 @@ const INDEX_FIELDS: Record<TableName, Record<string, string[]>> = {
   platformAuditEvents: {},
   adminDashboardMetrics: {
     by_key: ["key"],
+  },
+  featureFlags: {
+    by_key: ["key"],
+    by_updatedAt: ["updatedAt"],
   },
   userDeletionJobs: {
     by_user_status: ["userId", "status"],
@@ -407,6 +412,7 @@ export class InMemoryDb {
       dataRetentionRuns: [...(seed?.dataRetentionRuns ?? [])],
       platformAuditEvents: [...(seed?.platformAuditEvents ?? [])],
       adminDashboardMetrics: [...(seed?.adminDashboardMetrics ?? [])],
+      featureFlags: [...(seed?.featureFlags ?? [])],
       userDeletionJobs: [...(seed?.userDeletionJobs ?? [])],
     };
   }

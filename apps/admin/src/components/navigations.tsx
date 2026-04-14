@@ -4,6 +4,7 @@ import { SignedIn, SignedOut, SignOutButton, useUser } from "@clerk/nextjs";
 
 const navLinks = [
   { href: "/admin/dashboard", label: "Dashboard" },
+  { href: "/feature-flags", label: "Feature Flags" },
   { href: "/content", label: "Content" },
   { href: "/users", label: "Users" },
   { href: "/memories", label: "Memories" },
