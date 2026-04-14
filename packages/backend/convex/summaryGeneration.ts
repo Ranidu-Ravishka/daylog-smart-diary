@@ -1,10 +1,15 @@
 import { v } from "convex/values";
 import { action, internalAction } from "./_generated/server";
 import { api, internal } from "./_generated/api";
+import { makeFunctionReference } from "convex/server";
 import { validateDayKey } from "./validators";
 import { convexServerEnv } from "./env";
 import { resolveSummaryModelAdapter } from "./providerAdapters";
 import { captureException, logInfo, logWarn } from "./observability";
+
+const getMyResolvedFeatureFlagsRef = makeFunctionReference<"query">(
+  "featureFlags:getMyResolvedFeatureFlags",
+);
 
 export class OpenAiRequestError extends Error {
   status: number;
@@ -334,6 +339,24 @@ export const generateSummaryForDay = action({
   handler: async (ctx, args): Promise<SummaryGenerationResult> => {
     const startedAt = Date.now();
     validateDayKey(args.dayKey);
+
+    const runtimeFlags = (await ctx.runQuery(
+      getMyResolvedFeatureFlagsRef,
+      {},
+    )) as {
+      flags?: {
+        aiSummaryEnabled?: boolean;
+      };
+    };
+
+    if (!runtimeFlags.flags?.aiSummaryEnabled) {
+      return {
+        success: false,
+        errorCode: "model_generation_failed",
+        message:
+          "AI summaries are temporarily unavailable. Please try again later.",
+      };
+    }
 
     logInfo("summary_generation.started", {
       dayKey: args.dayKey,

@@ -130,6 +130,11 @@ describe("summary generation behavior", () => {
 
     const runQuery = vi
       .fn()
+      .mockResolvedValueOnce({
+        flags: {
+          aiSummaryEnabled: true,
+        },
+      })
       .mockResolvedValueOnce([
         {
           title: "Memory one",
@@ -209,6 +214,11 @@ describe("summary generation behavior", () => {
 
     const noDataRunQuery = vi
       .fn()
+      .mockResolvedValueOnce({
+        flags: {
+          aiSummaryEnabled: true,
+        },
+      })
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce([]);
@@ -238,6 +248,11 @@ describe("summary generation behavior", () => {
 
     const failingRunQuery = vi
       .fn()
+      .mockResolvedValueOnce({
+        flags: {
+          aiSummaryEnabled: true,
+        },
+      })
       .mockResolvedValueOnce([{ title: "Memory", happenedAt: 1 }])
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce([])
@@ -263,5 +278,43 @@ describe("summary generation behavior", () => {
     });
 
     expect(runMutation).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns unavailable when ai summary feature flag is disabled", async () => {
+    const generateSummaryForDay = handler<
+      { dayKey: string },
+      {
+        success: boolean;
+        summaryId?: string;
+        generatedAt?: number;
+        errorCode?: string;
+        message?: string;
+      }
+    >(summaryGenerationModule.generateSummaryForDay);
+
+    const runQuery = vi.fn().mockResolvedValueOnce({
+      flags: {
+        aiSummaryEnabled: false,
+      },
+    });
+    const runMutation = vi.fn();
+
+    await expect(
+      generateSummaryForDay(
+        {
+          runQuery,
+          runMutation,
+        },
+        { dayKey: "2026-04-02" },
+      ),
+    ).resolves.toEqual({
+      success: false,
+      errorCode: "model_generation_failed",
+      message:
+        "AI summaries are temporarily unavailable. Please try again later.",
+    });
+
+    expect(runQuery).toHaveBeenCalledTimes(1);
+    expect(runMutation).not.toHaveBeenCalled();
   });
 });
