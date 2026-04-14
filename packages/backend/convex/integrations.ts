@@ -1378,6 +1378,7 @@ export const connectIntegration = mutation({
     const provider = assertIntegrationProvider(args.provider);
 
     logInfo("integration_connect.started", {
+      status: "started",
       userId: user._id,
       provider,
       scopesCount: args.scopes?.length ?? 0,
@@ -1417,6 +1418,7 @@ export const connectIntegration = mutation({
       });
 
       logInfo("integration_connect.succeeded", {
+        status: "succeeded",
         userId: user._id,
         provider,
         integrationId: existing._id,
@@ -1442,6 +1444,7 @@ export const connectIntegration = mutation({
     });
 
     logInfo("integration_connect.succeeded", {
+      status: "succeeded",
       userId: user._id,
       provider,
       integrationId: id,
@@ -1819,57 +1822,89 @@ export const deleteIntegration = mutation({
   args: { integrationId: v.id("integrations") },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
-    const integration = await ctx.db.get(args.integrationId);
+    const startedAt = Date.now();
 
-    if (!integration) {
-      throw new Error("Integration not found");
-    }
-
-    requireOwnership(user, integration.userId);
-
-    while (true) {
-      const linkedDailyRows = await ctx.db
-        .query("integrationDailyData")
-        .withIndex("by_user_provider", (q) =>
-          q
-            .eq("userId", integration.userId)
-            .eq("provider", integration.provider),
-        )
-        .take(DELETE_BATCH_SIZE);
-
-      if (linkedDailyRows.length === 0) break;
-
-      for (const row of linkedDailyRows) {
-        await ctx.db.delete(row._id);
-      }
-    }
-
-    await deleteIntegrationSecretByRef(ctx.db as never, integration.tokenRef);
-
-    while (true) {
-      const syncRuns = await ctx.db
-        .query("integrationSyncRuns")
-        .withIndex("by_user_provider", (q) =>
-          q
-            .eq("userId", integration.userId)
-            .eq("provider", integration.provider),
-        )
-        .take(DELETE_BATCH_SIZE);
-
-      if (syncRuns.length === 0) break;
-
-      for (const run of syncRuns) {
-        await ctx.db.delete(run._id);
-      }
-    }
-
-    await ctx.db.delete(args.integrationId);
-
-    await applyDashboardMetricsDelta(ctx.db, {
-      totalIntegrations: -1,
+    logInfo("deletion.integration.started", {
+      status: "started",
+      userId: user._id,
+      integrationId: args.integrationId,
     });
 
-    return { success: true };
+    try {
+      const integration = await ctx.db.get(args.integrationId);
+
+      if (!integration) {
+        throw new Error("Integration not found");
+      }
+
+      requireOwnership(user, integration.userId);
+
+      let deletedDailyRows = 0;
+      while (true) {
+        const linkedDailyRows = await ctx.db
+          .query("integrationDailyData")
+          .withIndex("by_user_provider", (q) =>
+            q
+              .eq("userId", integration.userId)
+              .eq("provider", integration.provider),
+          )
+          .take(DELETE_BATCH_SIZE);
+
+        if (linkedDailyRows.length === 0) break;
+
+        for (const row of linkedDailyRows) {
+          await ctx.db.delete(row._id);
+          deletedDailyRows += 1;
+        }
+      }
+
+      await deleteIntegrationSecretByRef(ctx.db as never, integration.tokenRef);
+
+      let deletedSyncRuns = 0;
+      while (true) {
+        const syncRuns = await ctx.db
+          .query("integrationSyncRuns")
+          .withIndex("by_user_provider", (q) =>
+            q
+              .eq("userId", integration.userId)
+              .eq("provider", integration.provider),
+          )
+          .take(DELETE_BATCH_SIZE);
+
+        if (syncRuns.length === 0) break;
+
+        for (const run of syncRuns) {
+          await ctx.db.delete(run._id);
+          deletedSyncRuns += 1;
+        }
+      }
+
+      await ctx.db.delete(args.integrationId);
+
+      await applyDashboardMetricsDelta(ctx.db, {
+        totalIntegrations: -1,
+      });
+
+      logInfo("deletion.integration.succeeded", {
+        status: "succeeded",
+        userId: user._id,
+        integrationId: args.integrationId,
+        provider: integration.provider,
+        deletedDailyRows,
+        deletedSyncRuns,
+        durationMs: Date.now() - startedAt,
+      });
+
+      return { success: true };
+    } catch (error) {
+      captureException("deletion.integration.failed", error, {
+        status: "failed",
+        userId: user._id,
+        integrationId: args.integrationId,
+        durationMs: Date.now() - startedAt,
+      });
+      throw error;
+    }
   },
 });
 
@@ -2349,6 +2384,7 @@ export async function syncMyIntegrationForDayImpl(
   const syncTimeZone = resolveTimeZone(args.timeZone, getResolvedTimeZone());
 
   logInfo("integration_sync.started", {
+    status: "started",
     provider,
     dayKey: args.dayKey,
     timeZone: syncTimeZone,
@@ -2399,6 +2435,7 @@ export async function syncMyIntegrationForDayImpl(
     });
 
     logInfo("integration_sync.skipped", {
+      status: "skipped",
       provider,
       dayKey: args.dayKey,
       userId: integration.userId,
@@ -2623,6 +2660,7 @@ export async function syncMyIntegrationForDayImpl(
     });
 
     logInfo("integration_sync.succeeded", {
+      status: "succeeded",
       provider,
       dayKey: args.dayKey,
       userId: integration.userId,
@@ -2666,6 +2704,7 @@ export async function syncMyIntegrationForDayImpl(
     });
 
     captureException("integration_sync.failed", error, {
+      status: "failed",
       provider,
       dayKey: args.dayKey,
       userId: integration.userId,

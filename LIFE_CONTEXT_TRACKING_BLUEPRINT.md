@@ -1,6 +1,9 @@
 # DayLog Life Context Tracking Blueprint
 
-Last updated: 2026-04-06
+> Status: Active
+> Last Updated: 2026-04-14
+> Audience: Mobile and backend engineers
+> Standard: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 This document defines the production architecture and implementation plan for privacy-aware contextual tracking in DayLog.
 

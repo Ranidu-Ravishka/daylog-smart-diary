@@ -7,7 +7,7 @@ import { v } from "convex/values";
 import {
   LOCATION_PERMISSION_STATUS_VALUES,
   USER_SETTINGS_THEME_VALUES,
-} from "@repo/user-settings/lib/user-settings";
+} from "../../user-settings/lib/user-settings";
 
 const userSettingsThemeValidator = v.union(
   v.literal(USER_SETTINGS_THEME_VALUES[0]),

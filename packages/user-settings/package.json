@@ -6,6 +6,9 @@
   "exports": {
     "./lib/*": "./lib/*.ts"
   },
+  "devDependencies": {
+    "@repo/typescript-config": "workspace:*"
+  },
   "dependencies": {
     "zod": "^3.23.8"
   }

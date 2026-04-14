@@ -12,6 +12,7 @@ import {
 import type { Id } from "./_generated/dataModel";
 import type { ActionCtx, MutationCtx } from "./_generated/server";
 import { applyDashboardMetricsDelta } from "./dashboardMetrics";
+import { captureException, logInfo } from "./observability";
 
 export function getUtcDayKey(timestamp: number): string {
   return new Date(timestamp).toISOString().slice(0, 10);
@@ -201,21 +202,47 @@ export const deleteSummary = mutation({
   args: { summaryId: v.id("daySummaries") },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
-    const summary = await ctx.db.get(args.summaryId);
+    const startedAt = Date.now();
 
-    if (!summary) {
-      throw new Error("Summary not found");
-    }
-
-    requireOwnership(user, summary.userId);
-
-    await ctx.db.delete(args.summaryId);
-
-    await applyDashboardMetricsDelta(ctx.db, {
-      totalSummaries: -1,
+    logInfo("deletion.summary.started", {
+      status: "started",
+      userId: user._id,
+      summaryId: args.summaryId,
     });
 
-    return { success: true };
+    try {
+      const summary = await ctx.db.get(args.summaryId);
+
+      if (!summary) {
+        throw new Error("Summary not found");
+      }
+
+      requireOwnership(user, summary.userId);
+
+      await ctx.db.delete(args.summaryId);
+
+      await applyDashboardMetricsDelta(ctx.db, {
+        totalSummaries: -1,
+      });
+
+      logInfo("deletion.summary.succeeded", {
+        status: "succeeded",
+        userId: user._id,
+        summaryId: args.summaryId,
+        dayKey: summary.dayKey,
+        durationMs: Date.now() - startedAt,
+      });
+
+      return { success: true };
+    } catch (error) {
+      captureException("deletion.summary.failed", error, {
+        status: "failed",
+        userId: user._id,
+        summaryId: args.summaryId,
+        durationMs: Date.now() - startedAt,
+      });
+      throw error;
+    }
   },
 });
 

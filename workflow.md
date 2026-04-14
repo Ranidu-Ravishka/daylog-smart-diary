@@ -1,6 +1,9 @@
 # DayLog Production Engineering Workflow
 
-Last updated: 2026-04-08
+> Status: Active
+> Last Updated: 2026-04-14
+> Audience: Engineers, reviewers, release drivers
+> Standard: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## 1) Purpose
 
@@ -17,10 +20,10 @@ This workflow is strict by default. Any exception must be documented and approve
 ## 2) Operating Principles
 
 1. `main` is always releasable.
-2. Prefer small, reversible changes over large batch changes.
-3. Every production-affecting change must be backed by automated evidence.
-4. Security, privacy, and data integrity are non-negotiable.
-5. Cross-surface compatibility is required for shared contracts.
+1. Prefer small, reversible changes over large batch changes.
+1. Every production-affecting change must be backed by automated evidence.
+1. Security, privacy, and data integrity are non-negotiable.
+1. Cross-surface compatibility is required for shared contracts.
 
 ## 3) Repository Boundaries
 
@@ -270,12 +273,12 @@ Any change to CI policy requires:
 Every PR must include:
 
 1. Problem and intent
-2. Risk level (R0-R3)
-3. What changed (by module)
-4. Validation evidence (commands + pass/fail)
-5. Screenshots/video for UI changes (web/admin/mobile)
-6. Migration and rollback notes (R2/R3)
-7. Privacy/security checklist for sensitive features
+1. Risk level (R0-R3)
+1. What changed (by module)
+1. Validation evidence (commands + pass/fail)
+1. Screenshots/video for UI changes (web/admin/mobile)
+1. Migration and rollback notes (R2/R3)
+1. Privacy/security checklist for sensitive features
 
 Preferred PR size:
 
@@ -293,10 +296,10 @@ Applies to schema/index/data-model changes.
 Requirements:
 
 1. Forward-compatible rollout plan
-2. Backfill or migration strategy (if needed)
-3. Idempotent migration behavior
-4. Rollback strategy with failure handling
-5. Post-deploy validation query or dashboard checks
+1. Backfill or migration strategy (if needed)
+1. Idempotent migration behavior
+1. Rollback strategy with failure handling
+1. Post-deploy validation query or dashboard checks
 
 Additional constraints:
 
@@ -311,12 +314,12 @@ Applies to location, health/fitness, calendar/notification context, communicatio
 Mandatory requirements:
 
 1. Explicit opt-in before collection
-2. Feature-scoped permissions (no silent enablement of adjacent signals)
-3. Fail-closed behavior when permissions are denied
-4. Coarse, minimum-necessary data retention by default
-5. Disable path stops new writes immediately
-6. Export/delete flows include newly collected fields
-7. No raw secret or sensitive payload logging
+1. Feature-scoped permissions (no silent enablement of adjacent signals)
+1. Fail-closed behavior when permissions are denied
+1. Coarse, minimum-necessary data retention by default
+1. Disable path stops new writes immediately
+1. Export/delete flows include newly collected fields
+1. No raw secret or sensitive payload logging
 
 Merge is blocked if this section is incomplete for applicable changes.
 
@@ -340,29 +343,29 @@ For background/sync pipelines:
 Before release:
 
 1. Latest `main` has green required checks
-2. Branch protection policy verified
-3. Environment variables validated (no placeholders)
-4. Security-sensitive migrations audited (if applicable)
-5. Smoke test plan assigned and owned
+1. Branch protection policy verified
+1. Environment variables validated (no placeholders)
+1. Security-sensitive migrations audited (if applicable)
+1. Smoke test plan assigned and owned
 
 After release:
 
 1. Sign-in and dashboard flow succeeds
-2. Summary generation succeeds
-3. Integration connect/sync path succeeds
-4. Admin critical pages load
-5. Error rates show no unexpected spike
+1. Summary generation succeeds
+1. Integration connect/sync path succeeds
+1. Admin critical pages load
+1. Error rates show no unexpected spike
 
 ## 15) Hotfix Process
 
 For production-impacting defects:
 
 1. Branch from `main` using `hotfix/...`
-2. Implement minimal targeted fix
-3. Add/adjust tests for root cause
-4. Open expedited PR with incident context
-5. Require approvals and green CI
-6. Deploy, verify, and publish incident follow-up actions
+1. Implement minimal targeted fix
+1. Add/adjust tests for root cause
+1. Open expedited PR with incident context
+1. Require approvals and green CI
+1. Deploy, verify, and publish incident follow-up actions
 
 No "fix now, test later" merges to `main`.
 
@@ -371,13 +374,13 @@ No "fix now, test later" merges to `main`.
 A change is done only when all are true:
 
 1. Functional behavior meets acceptance criteria
-2. Required local checks completed
-3. Required CI checks green
-4. Security/privacy requirements satisfied
-5. Reliability and failure handling are explicit
-6. Tests cover changed risk surface
-7. Documentation/runbook updates are complete
-8. Rollback impact is understood for production
+1. Required local checks completed
+1. Required CI checks green
+1. Security/privacy requirements satisfied
+1. Reliability and failure handling are explicit
+1. Tests cover changed risk surface
+1. Documentation/runbook updates are complete
+1. Rollback impact is understood for production
 
 If any item is missing, the work is not done.
 
@@ -405,11 +408,11 @@ Requirements:
 
 1. Single source of truth:
    - Shared types/validators must be defined in backend or shared packages
-2. No implicit assumptions:
+1. No implicit assumptions:
    - Frontend must not assume fields not defined in backend contracts
-3. Backward compatibility:
+1. Backward compatibility:
    - Breaking changes require migration strategy (R2/R3)
-4. Validation:
+1. Validation:
    - All external inputs must pass strict validation (no "any" bypass)
 
 CI expectation:
@@ -436,13 +439,13 @@ Requirements:
    - remotely configurable (runtimeConfig or backend-driven)
    - environment-aware (dev/staging/prod)
 
-2. Rollout strategy:
+1. Rollout strategy:
 
 - Phase 1: internal testing
 - Phase 2: limited user rollout
 - Phase 3: full release
 
-3. Kill switch:
+1. Kill switch:
 
 - Every critical feature must be disable-able without redeploy
 
@@ -489,12 +492,12 @@ Requirements:
   - status (success/failure)
   - error reason (if failure)
 
-2. Error tracking:
+1. Error tracking:
 
 - All critical errors must be captured (e.g., Sentry)
 - No silent failures
 
-3. Key events to log:
+1. Key events to log:
 
 - summary generation start/end
 - integration sync start/end
@@ -502,7 +505,7 @@ Requirements:
 - export requests
 - background tracking events
 
-4. User-facing errors:
+1. User-facing errors:
 
 - Must be actionable
 - Must not expose internal details
@@ -521,17 +524,17 @@ Requirements:
 - Must respect OS permissions
 - Must fail safely if permissions revoked
 
-2. Battery impact:
+1. Battery impact:
 
 - Background tracking must be bounded
 - Avoid high-frequency polling
 
-3. Network reliability:
+1. Network reliability:
 
 - Offline-safe behavior required where applicable
 - Retry strategy must be defined
 
-4. UI consistency:
+1. UI consistency:
 
 - Every async action must have:
   - loading state
@@ -554,18 +557,18 @@ Requirements:
   - health data
   - integration data
 
-2. Cleanup:
+1. Cleanup:
 
 - Background jobs must enforce retention rules
 - Must be idempotent
 
-3. User control:
+1. User control:
 
 - Users must be able to:
   - export data
   - delete data
 
-4. Storage control:
+1. Storage control:
 
 - Avoid unbounded data growth
 - Use limits or archival strategies
@@ -583,27 +586,134 @@ Requirements:
 - Must be idempotent
 - Must handle partial failures
 
-2. Retry policy:
+1. Retry policy:
 
 - Define retry strategy (with limits)
 - Avoid infinite loops
 
-3. Health tracking:
+1. Health tracking:
 
 - Track:
   - success rate
   - failure rate
   - last sync time
 
-4. User visibility:
+1. User visibility:
 
 - Users must see:
   - connection status
   - last sync result
 
-5. Failure handling:
+1. Failure handling:
 
 - Must degrade gracefully
 - Must not block core app usage
 
 Integration failures must be visible and recoverable.
+
+## 25) Observability Standards
+
+Observability is a release blocker, not an optional enhancement.
+
+Required standards:
+
+1. Sentry coverage:
+
+- Sentry must be configured for every production surface:
+  - web
+  - admin
+  - mobile
+  - backend
+- Any surface without active error capture must be treated as not production-ready.
+
+1. Structured logging:
+
+- Structured logs are mandatory for critical paths.
+- Log envelopes must include at minimum:
+  - `event`
+  - `userId` (or `null` when unavailable)
+  - `status`
+  - `errorMessage`
+
+1. No silent failures:
+
+- Failures must emit logs and user-safe error feedback.
+- Catch-and-ignore behavior without telemetry is prohibited.
+- Production paths must not rely on console-only ad-hoc debugging.
+
+## 26) Data Integrity Rules
+
+Data correctness must be deterministic across all clients.
+
+1. Canonical `dayKey`:
+
+- `dayKey` must always use `YYYY-MM-DD` format.
+- `dayKey` must represent a real calendar date.
+- All writes/updates must pass shared validator enforcement.
+
+1. Timezone consistency:
+
+- Day boundary calculations must use the same resolved user timezone strategy.
+- Mixed timezone assumptions between clients/backend are prohibited.
+- Contract changes to day window logic require cross-surface validation evidence.
+
+## 27) Performance Rules
+
+1. No N+1 query patterns:
+
+- N+1 data access in production paths is prohibited.
+- Use indexed/batched/set-based query plans.
+
+1. Bounded reads:
+
+- Every user-facing list/query must be bounded with explicit limits or pagination.
+- Unbounded scans on hot paths are release blockers.
+
+1. Pagination by default:
+
+- Admin, export, and integration-history views must use paginated fetch paths.
+
+## 28) Export Scalability Rules
+
+1. Exports must be scalable:
+
+- Export workflows must use pagination and/or background job execution.
+- Large exports must not block request/response cycles.
+
+1. Artifact strategy:
+
+- Large export payloads must be generated server-side and delivered via artifact download URLs.
+- Export jobs must expose status transitions and failure visibility.
+
+1. Reliability:
+
+- Export jobs must be idempotent and retry-safe.
+- Retention cleanup must remove stale artifacts to prevent storage growth.
+
+## 29) UX Reliability Rules
+
+All user-triggered async flows must implement deterministic UX states.
+
+Required per async flow:
+
+1. Loading state
+1. Error state
+1. Retry mechanism
+
+Additional requirements:
+
+- Prevent duplicate submits during in-flight requests.
+- Preserve user context on failure (do not silently reset input).
+- Show actionable user-safe messages, not raw internal stack traces.
+
+## 30) Production Readiness Checklist
+
+Release go/no-go requires all items complete:
+
+1. Environment variables are present, non-placeholder, and validated.
+1. Sentry is connected and receiving events for all required surfaces.
+1. Integrations are connectable and sync paths are verified.
+1. Required CI checks are passing.
+1. Production code paths contain no stray `console.log` debugging statements.
+
+If any checklist item is incomplete, deployment must be blocked.

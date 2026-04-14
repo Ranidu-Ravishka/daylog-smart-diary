@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { captureException } from "@/lib/observability";
+import { captureException, logInfo } from "@/lib/observability";
 import { toastError, toastSuccess } from "@/lib/toast";
 
 const ACCEPTED_IMAGE_TYPES = new Set([
@@ -269,6 +269,14 @@ export function MemoryForm({
       return;
     }
 
+    const mode = memoryId ? "edit" : "create";
+    logInfo("web_memory_submit_started", {
+      status: "started",
+      dayKey,
+      mode,
+      selectedImageCount: selectedFiles.length,
+    });
+
     setIsLoading(true);
     try {
       // Parse time to get timestamp for the selected day
@@ -295,6 +303,7 @@ export function MemoryForm({
       const date = new Date(year, month - 1, day, hours, minutes, 0, 0);
       const happenedAt = date.getTime();
       let targetMemoryId: Id<"memories">;
+      let failedUploads = 0;
 
       if (memoryId) {
         // Edit mode
@@ -336,8 +345,6 @@ export function MemoryForm({
       }
 
       if (selectedFiles.length > 0) {
-        let failedUploads = 0;
-
         for (let index = 0; index < selectedFiles.length; index++) {
           const selectedFile = selectedFiles[index];
           if (!selectedFile) continue;
@@ -382,14 +389,25 @@ export function MemoryForm({
         }
       }
 
+      logInfo("web_memory_submit_succeeded", {
+        status: "succeeded",
+        dayKey,
+        mode,
+        memoryId: targetMemoryId,
+        selectedImageCount: selectedFiles.length,
+        failedUploads,
+      });
+
       onSuccess?.();
     } catch (error) {
       toastError(
         memoryId ? "Failed to update memory" : "Failed to create memory",
       );
       captureException("web_memory_submit_failed", error, {
-        mode: memoryId ? "edit" : "create",
+        status: "failed",
+        mode,
         dayKey,
+        selectedImageCount: selectedFiles.length,
       });
     } finally {
       setIsLoading(false);

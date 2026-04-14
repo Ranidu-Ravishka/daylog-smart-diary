@@ -28,6 +28,9 @@ type StructuredLogEnvelope = {
   level: LogLevel;
   event: string;
   timestamp: string;
+  userId: string | null;
+  status: string;
+  errorMessage: string | null;
   context: StructuredContext;
   error?: SerializableError;
 };
@@ -47,6 +50,10 @@ function shouldSample(rate: number): boolean {
   if (rate <= 0) return false;
   if (rate >= 1) return true;
   return Math.random() < rate;
+}
+
+function isLifecycleEvent(event: string): boolean {
+  return /(^|[._-])(started|succeeded|failed)($|[._-])/.test(event);
 }
 
 function resolveInfoEventEndpoint(
@@ -82,7 +89,11 @@ function emitDurableInfoEvent(payload: StructuredLogEnvelope) {
     return;
   }
 
-  if (!durableInfoEventEndpoint || !shouldSample(durableInfoEventSampleRate)) {
+  if (
+    !durableInfoEventEndpoint ||
+    (!isLifecycleEvent(payload.event) &&
+      !shouldSample(durableInfoEventSampleRate))
+  ) {
     return;
   }
 
@@ -95,7 +106,12 @@ function emitDurableInfoEvent(payload: StructuredLogEnvelope) {
     timestamp: payload.timestamp,
     sampleRate: durableInfoEventSampleRate,
     sourceEnvironment: webEnvironment,
-    contextJson: toContextJson(payload.context),
+    contextJson: toContextJson({
+      ...payload.context,
+      userId: payload.userId,
+      status: payload.status,
+      errorMessage: payload.errorMessage,
+    }),
   });
 
   if (typeof window !== "undefined") {
@@ -134,6 +150,52 @@ function toSerializableError(error: unknown): SerializableError {
   };
 }
 
+function toStringOrNull(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  if (typeof value === "number" || typeof value === "bigint") {
+    return String(value);
+  }
+
+  return null;
+}
+
+function resolveUserId(context: StructuredContext): string | null {
+  return (
+    toStringOrNull(context.userId) ??
+    toStringOrNull(context.clerkUserId) ??
+    toStringOrNull(context.actorUserId) ??
+    null
+  );
+}
+
+function resolveStatus(level: LogLevel, context: StructuredContext): string {
+  const explicit = toStringOrNull(context.status);
+  if (explicit) {
+    return explicit;
+  }
+
+  if (level === "error") {
+    return "failed";
+  }
+
+  if (level === "warn") {
+    return "warning";
+  }
+
+  return "info";
+}
+
+function resolveErrorMessage(
+  serializedError: SerializableError | undefined,
+  context: StructuredContext,
+): string | null {
+  return serializedError?.message ?? toStringOrNull(context.errorMessage);
+}
+
 function toSentryLevel(level: LogLevel): "info" | "warning" | "error" {
   if (level === "warn") {
     return "warning";
@@ -150,6 +212,9 @@ function writeStructuredLog(
 ) {
   const serializedError =
     typeof error === "undefined" ? undefined : toSerializableError(error);
+  const userId = resolveUserId(context);
+  const status = resolveStatus(level, context);
+  const errorMessage = resolveErrorMessage(serializedError, context);
 
   const payload: StructuredLogEnvelope = {
     schemaVersion: 1,
@@ -158,6 +223,9 @@ function writeStructuredLog(
     level,
     event,
     timestamp: new Date().toISOString(),
+    userId,
+    status,
+    errorMessage,
     context,
     ...(serializedError ? { error: serializedError } : {}),
   };
@@ -178,7 +246,12 @@ function writeStructuredLog(
     category: "observability",
     message: event,
     level: toSentryLevel(level),
-    data: context,
+    data: {
+      ...context,
+      userId,
+      status,
+      errorMessage,
+    },
   });
 
   if (level === "error") {
@@ -187,8 +260,14 @@ function writeStructuredLog(
         tags: {
           surface: "web",
           event,
+          status,
         },
-        extra: context,
+        extra: {
+          ...context,
+          userId,
+          status,
+          errorMessage,
+        },
       });
       return;
     }
@@ -197,8 +276,14 @@ function writeStructuredLog(
       level: "error",
       tags: {
         surface: "web",
+        status,
       },
-      extra: context,
+      extra: {
+        ...context,
+        userId,
+        status,
+        errorMessage,
+      },
     });
     return;
   }
@@ -208,8 +293,14 @@ function writeStructuredLog(
       level: "warning",
       tags: {
         surface: "web",
+        status,
       },
-      extra: context,
+      extra: {
+        ...context,
+        userId,
+        status,
+        errorMessage,
+      },
     });
   }
 }

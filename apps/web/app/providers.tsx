@@ -7,6 +7,7 @@ import { ClerkProvider, useAuth, useUser } from "@clerk/nextjs";
 import { api } from "@repo/backend/convex";
 import { useSyncClerkUserToConvex } from "@repo/ui/hooks/use-sync-clerk";
 import { ToastProvider } from "@/components/ToastProvider";
+import { captureException } from "@/lib/observability";
 
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
 const convex = convexUrl ? new ConvexReactClient(convexUrl) : null;
@@ -14,7 +15,19 @@ const convex = convexUrl ? new ConvexReactClient(convexUrl) : null;
 function SyncClerkUserToConvex() {
   const { isLoaded, isSignedIn, user } = useUser();
   const syncUser = useMutation(api.users.syncUserFromClerk);
-  useSyncClerkUserToConvex({ isLoaded, isSignedIn, user, syncUser });
+  useSyncClerkUserToConvex({
+    isLoaded,
+    isSignedIn,
+    user,
+    syncUser,
+    onSyncError: (error, context) => {
+      captureException("web_sync_user_to_convex_failed", error, {
+        status: "failed",
+        clerkUserId: context.clerkUserId,
+        userId: context.clerkUserId,
+      });
+    },
+  });
 
   return null;
 }

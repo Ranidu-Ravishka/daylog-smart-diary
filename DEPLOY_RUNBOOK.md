@@ -1,168 +1,175 @@
-# DayLog Deploy + Operations Runbook
+# DayLog Deploy and Operations Runbook
 
-This runbook reflects the current monorepo implementation and CI workflow.
+> Status: Active
+> Last Updated: 2026-04-14
+> Audience: Engineers and release drivers
+> Standard: [CONTRIBUTING.md](CONTRIBUTING.md)
 
-## 1) Environments and services
+This runbook defines release and operational steps for DayLog production.
 
-Required services:
+Related policy docs:
 
-- Convex deployment (backend functions + data)
-- Clerk (auth for web/admin/mobile)
-- OpenAI (summary generation)
-- Hosting for web/admin (for example Vercel)
-- Expo/EAS distribution path for mobile builds
+- [workflow.md](workflow.md)
+- [SECURITY.md](SECURITY.md)
+- [CONVEX_SETUP.md](CONVEX_SETUP.md)
 
-Required environment variables:
+## 1) Deployment Surfaces
 
-- Web/Admin runtime:
-  - `NEXT_PUBLIC_CONVEX_URL`
-  - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
-  - `CLERK_SECRET_KEY`
-- Mobile runtime:
-  - `EXPO_PUBLIC_CONVEX_URL`
-  - `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`
-- Convex dashboard:
-  - `CLERK_JWT_ISSUER_DOMAIN`
-  - `CLERK_WEBHOOK_SECRET`
-  - `OPENAI_API_KEY`
-  - `ADMIN_BOOTSTRAP_CLERK_USER_IDS` (optional)
+- Web: Next.js app in `apps/web` (target: Vercel or equivalent)
+- Admin: Next.js app in `apps/admin` (target: Vercel or equivalent)
+- Mobile: Expo app in `apps/mobile` (target: Expo/EAS)
+- Backend: Convex package in `packages/backend` (target: Convex deployment)
 
-See [CONVEX_SETUP.md](CONVEX_SETUP.md) for setup details and validation behavior.
+## 2) Environment Matrix
 
-## 2) CI/CD gates (source of truth)
+Web/admin environment:
 
-CI workflow file: [.github/workflows/backend-validation.yml](.github/workflows/backend-validation.yml)
+- `NEXT_PUBLIC_CONVEX_URL`
+- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
+- `CLERK_SECRET_KEY`
 
-Branch protection policy file (repo source of truth):
+Web integration env:
 
-- [.github/branch-protection.expected.json](.github/branch-protection.expected.json)
+- `NEXT_PUBLIC_APP_URL`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `SPOTIFY_CLIENT_ID`
+- `SPOTIFY_CLIENT_SECRET`
 
-Required checks:
+Web observability env:
 
-- `backend-validation`
+- `NEXT_PUBLIC_SENTRY_DSN`
+- optional `SENTRY_DSN`
 
-What each check enforces:
+Mobile environment:
 
-- `backend-validation`: install, secret scan, repo lint, repo typecheck, selective web/admin builds, backend lint/tests, mobile typecheck/lint/build
+- `EXPO_PUBLIC_CONVEX_URL`
+- `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`
+- `EXPO_PUBLIC_WEB_APP_URL`
+- `EXPO_PUBLIC_SENTRY_DSN`
 
-Additional CI guardrail job (not a branch protection required check):
+Convex deployment environment:
 
-- `branch-protection-verification`: verifies `main` branch protection required checks against repository policy JSON
+- `CLERK_JWT_ISSUER_DOMAIN`
+- `CLERK_WEBHOOK_SECRET`
+- `OPENAI_API_KEY`
+- `SUMMARY_DAILY_GENERATION_LIMIT`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `SPOTIFY_CLIENT_ID`
+- `SPOTIFY_CLIENT_SECRET`
+- `SENTRY_DSN`
+- `INTEGRATION_SECRETS_KEYRING_JSON`
+- `INTEGRATION_SECRETS_ACTIVE_KEY_ID`
 
-Branch protection alignment (manual GitHub setting):
+## 3) Pre-Release Checks
 
-1. Open repository Settings -> Branches -> Branch protection rules.
-2. Edit the rule for `main` (and any release branch rules).
-3. Under required status checks, keep only `backend-validation`.
-4. Remove stale checks such as `Feature Branch CI / ci-checks`, `Feature Branch CI / Backend Tests`, and `Feature Branch CI / Mobile Validation` if present.
-
-Automated verification (recommended for release checks):
-
-1. Generate a GitHub token with permission to read branch protection rules (repository Administration read).
-2. Run from repo root:
-
-```bash
-GITHUB_TOKEN=<token> GITHUB_REPOSITORY=<owner>/<repo> pnpm verify:branch-protection
-```
-
-Optional flags:
-
-- `pnpm verify:branch-protection -- --repo <owner/repo>` to override `GITHUB_REPOSITORY`
-- `pnpm verify:branch-protection -- --branch <branch>` to verify non-default branches (defaults to `main`)
-- `pnpm verify:branch-protection -- --expected-file <path>` to override `.github/branch-protection.expected.json`
-- `pnpm verify:branch-protection -- --allow-plan-limited-skip` to allow a controlled skip on known GitHub plan limitation responses
-
-Expected result:
-
-- `PASS` when required checks exactly match expected policy JSON
-- `FAIL` when checks are missing, extra checks exist, or API access fails
-
-CI note:
-
-- Workflow job `branch-protection-verification` uses `secrets.BRANCH_PROTECTION_TOKEN` and runs on pull requests (non-forks) and on `main`.
-- Configure `BRANCH_PROTECTION_TOKEN` in repository secrets before enabling enforcement.
-- The workflow enables `ALLOW_BRANCH_PROTECTION_PLAN_LIMITATION_SKIP=true` so private repos on plans without branch protection API access do not hard-fail CI.
-
-## 3) Pre-merge local checklist
-
-Run from repo root:
+From repository root:
 
 ```bash
 pnpm install
 pnpm lint
 pnpm typecheck
-pnpm --filter @repo/backend test:run
+pnpm test
+pnpm test:coverage
+pnpm build:web
+pnpm build:admin
 pnpm --filter mobile check-types
 pnpm --filter mobile lint
 pnpm --filter mobile build:ci
-pnpm build:web
-pnpm build:admin
 ```
 
-## 4) Deployment checklist
+Branch policy verification:
 
-1. Validate secrets and URLs are present in target environments.
-2. Ensure Convex env vars are configured for target deployment.
-3. Confirm Clerk webhook points to:
-   - `https://<your-convex-deployment>.convex.site/clerk/webhook`
-4. Merge to the deployment branch according to your release policy.
-5. Deploy web/admin from latest green commit.
-6. Publish/distribute mobile build as needed.
+```bash
+GITHUB_TOKEN=<token> GITHUB_REPOSITORY=<owner/repo> pnpm verify:branch-protection -- --branch main
+```
 
-Release checklist add-on:
+## 4) Deploy Order
 
-- Run `pnpm verify:branch-protection` before creating a release tag or cutover.
+Recommended order for production stability:
 
-## 5) Post-deploy smoke checks
+1. Deploy backend (Convex)
+2. Deploy web and admin
+3. Publish mobile build/update
 
-Web/Admin:
+### 4.1 Backend deploy
 
-- Sign in via Clerk
-- Confirm data loads from Convex
-- Generate a day summary from dashboard
+From repository root:
 
-Backend:
+```bash
+pnpm --filter @repo/backend exec convex deploy
+```
 
-- Verify Clerk webhook events are accepted
-- Verify summary generation succeeds (OpenAI key valid)
-- Verify integration secrets are encrypted at rest:
-  - Run `integrations:adminAuditIntegrationSecretsEncryptionStatus`
-  - Confirm `legacyPlaintextRows = 0` and `missingEncryptedAccessRows = 0`
-  - If non-zero, run `integrations:adminMigrateLegacyIntegrationSecretsAll` and re-check
+After deploy:
 
-Mobile:
+- Verify Convex env variables are set and non-placeholder.
+- Verify Clerk webhook endpoint is reachable.
 
-- Sign in and load tabs
-- Create a memory
-- Validate sync/API flows used by current release
+### 4.2 Web/admin deploy
 
-## 6) Common operations
+- Deploy from the commit that passed required CI checks.
+- Ensure web/admin environment variables match backend deployment URL and auth keys.
 
-### Run backend logs
+### 4.3 Mobile deploy
+
+- Build and publish via Expo/EAS according to release channel policy.
+- Ensure `EXPO_PUBLIC_WEB_APP_URL` points to the deployed web host used for OAuth completion.
+
+## 5) Post-Deploy Smoke Tests
+
+Core:
+
+1. Sign in on web, admin, and mobile.
+2. Create memory and verify day timeline updates.
+3. Generate daily summary.
+4. Connect at least one OAuth provider and run sync.
+5. Run export flow and confirm artifact download.
+
+Observability:
+
+1. Confirm Sentry receives events from web/mobile/backend.
+2. Confirm structured logs include `event`, `userId`, `status`, `errorMessage`.
+3. Confirm no silent failures in critical user flows.
+
+Security/integration data:
+
+1. Audit encrypted integration secrets:
+   - `integrations:adminAuditIntegrationSecretsEncryptionStatus`
+2. If needed, run migration sweep:
+   - `integrations:adminMigrateLegacyIntegrationSecretsAll`
+
+## 6) Operational Commands
+
+Backend logs:
 
 ```bash
 pnpm --filter @repo/backend logs
 ```
 
-### Run Convex dev locally
+Admin bootstrap:
 
-```bash
-pnpm --filter @repo/backend dev
-```
+1. Set `ADMIN_BOOTSTRAP_CLERK_USER_IDS` in Convex env.
+2. Sign in as listed Clerk user.
+3. Call mutation `users:bootstrapMakeMeAdmin`.
 
-### Bootstrap first admin
+## 7) Rollback Guidance
 
-- Set `ADMIN_BOOTSTRAP_CLERK_USER_IDS` in Convex env.
-- Call mutation `users:bootstrapMakeMeAdmin` while signed in as an allowed Clerk user.
+If release issues occur:
 
-### Integration secret migration sweep
+1. Stop rollout to remaining surfaces.
+2. Revert web/admin/mobile deployment to previous known-good build.
+3. If backend schema/behavior caused issue, roll forward with targeted hotfix (preferred) and guarded migration path.
+4. Keep incident notes including user impact, detection path, and corrective action.
 
-- Audit current status: `integrations:adminAuditIntegrationSecretsEncryptionStatus`
-- Migrate all legacy plaintext rows: `integrations:adminMigrateLegacyIntegrationSecretsAll`
-- Re-audit and ensure plaintext counters are zero before declaring production ready
+Do not bypass observability and data-integrity requirements during rollback/hotfix.
 
-## 7) Troubleshooting quick notes
+## 8) Production Readiness Gate
 
-- Startup env validation errors: check required variable names and formats in [CONVEX_SETUP.md](CONVEX_SETUP.md).
-- CI secret scan failures: rotate exposed keys and remove credential-like strings from tracked files.
-- Convex auth failures: verify Clerk JWT issuer domain and Clerk JWT template (`applicationID: "convex"`).
+All of the following must be true before final release sign-off:
+
+1. Environment variables are correct and validated.
+2. Sentry is connected on required surfaces.
+3. Integrations connect/sync in target environment.
+4. CI required checks are green.
+5. No debug `console.log` usage remains in production-critical code paths.

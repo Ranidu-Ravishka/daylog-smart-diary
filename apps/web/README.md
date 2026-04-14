@@ -1,47 +1,51 @@
 # DayLog Web App (`apps/web`)
 
-User-facing Next.js application for DayLog.
+> Status: Active
+> Last Updated: 2026-04-14
+> Audience: Web engineers
+> Standard: [../../CONTRIBUTING.md](../../CONTRIBUTING.md)
 
-## Product boundary notes
+User-facing Next.js application for memories, summaries, settings, and integrations.
 
-- Web supports journaling, mood tracking, integration connect/sync, and OpenAI summary generation.
-- Current integrations: Google Calendar, Google Fit, Spotify, and Apple Health uploads.
-- Mobile app supports optional foreground location tracking and controlled background location tracking (coarse, privacy-gated).
-- Android communication summary is optional and available only on native builds with the call-activity bridge and explicit user permission.
+Canonical onboarding and monorepo setup:
 
-## Required environment variables
+- [../../README.md](../../README.md)
 
-Create `apps/web/.env.local` from `apps/web/.env.example`.
+## Required Environment Variables
 
-Required:
+Create from example:
+
+```bash
+cp apps/web/.env.example apps/web/.env.local
+```
+
+Required for runtime/auth/integrations:
 
 - `NEXT_PUBLIC_CONVEX_URL`
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
 - `CLERK_SECRET_KEY`
-- `NEXT_PUBLIC_APP_URL` (for OAuth callback URL generation)
-- `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (Google Calendar/Fit OAuth)
-- `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` (Spotify OAuth)
+- `NEXT_PUBLIC_APP_URL`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `SPOTIFY_CLIENT_ID`
+- `SPOTIFY_CLIENT_SECRET`
 
-Optional for durable info-event analytics transport:
+Recommended for observability:
 
-- `NEXT_PUBLIC_INFO_EVENT_SAMPLE_RATE` (default `0.1`)
+- `NEXT_PUBLIC_SENTRY_DSN`
+- optional server-side override: `SENTRY_DSN`
 
-## Local development
+## Local Development
 
-From repo root:
+From repository root:
 
 ```bash
 pnpm dev:web
 ```
 
-Notes:
-
-- The web dev script uses `apps/web/scripts/dev.mjs` and prefers port `3000`.
-- If `3000` is busy, it automatically picks the next free port (up to `3020`).
-
 ## Commands
 
-From repo root:
+From repository root:
 
 ```bash
 pnpm --filter web dev
@@ -49,15 +53,31 @@ pnpm --filter web lint
 pnpm --filter web check-types
 pnpm --filter web build
 pnpm --filter web start
+pnpm --filter web test
 ```
 
-## Build/CI expectations
+## OAuth Callback Routes
 
-- The root CI workflow may run `pnpm build:web` when web/shared files change.
-- `pnpm lint` and `pnpm typecheck` are expected to pass at repo level.
+These paths must be registered in OAuth providers:
+
+- Google Calendar:
+  - `/api/integrations/oauth/google_calendar/callback`
+- Google Fit:
+  - `/api/integrations/oauth/google_fit/callback`
+- Spotify:
+  - `/api/integrations/oauth/spotify/callback`
+
+Full URI format:
+
+- `${NEXT_PUBLIC_APP_URL}/api/integrations/oauth/<provider>/callback`
 
 ## Troubleshooting
 
-- Convex connection issues: verify `NEXT_PUBLIC_CONVEX_URL` and ensure backend is running.
-- Clerk issues: verify publishable/secret keys and sign-in routes.
-- If local port changes from `3000`, use the printed URL from the dev startup log.
+- OAuth callback mismatch:
+  - Check provider redirect URI exactly matches `NEXT_PUBLIC_APP_URL` + callback path.
+- OAuth callback rejected:
+  - Verify state cookie flow and that user is still signed in.
+- Missing integration credentials:
+  - Check `GOOGLE_*` and `SPOTIFY_*` env vars in both web env and Convex env.
+- Convex auth token missing in callback:
+  - Re-authenticate and retry connection.

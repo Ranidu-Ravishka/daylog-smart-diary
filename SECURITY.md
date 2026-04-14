@@ -1,85 +1,99 @@
-# DayLog Security: Secrets and Environment Handling
+# DayLog Security and Secrets Handling
 
-This project uses Clerk, Convex, and OpenAI credentials. Treat all secrets as sensitive and rotate immediately if they appear in git history.
+> Status: Active
+> Last Updated: 2026-04-14
+> Audience: Engineers and operators
+> Standard: [CONTRIBUTING.md](CONTRIBUTING.md)
 
-## Secret handling policy
+DayLog uses Clerk, Convex, OpenAI, OAuth providers, and Sentry. Treat all credentials as production secrets.
 
-- Never commit real values in `.env`, `.env.local`, or any local secret file.
-- Keep only placeholders in `.env.example` files.
-- Store runtime secrets in platform-managed secret stores:
-  - Convex dashboard env variables
-  - Vercel/hosting project env variables
-  - EAS/Expo secure environment configuration
-- If a secret is exposed, rotate it first, then update docs/examples.
-- CI runs a high-confidence secret scan on feature branches and PRs.
-- CI branch protection verification uses a dedicated repository secret: `BRANCH_PROTECTION_TOKEN`.
+## 1) Core Policy
 
-## Branch protection verification security
+- Never commit real secrets to source control.
+- Keep only placeholder values in `.env.example` files.
+- Store production secrets in platform-managed secret stores.
+- Rotate exposed secrets immediately.
+- Re-verify auth, webhook, integration sync, and summary generation after rotation.
 
-- Branch protection policy is versioned in `.github/branch-protection.expected.json`.
-- CI job `branch-protection-verification` runs `pnpm verify:branch-protection -- --branch main`.
-- The verifier compares live GitHub settings against policy JSON and exits non-zero on mismatch.
-- Required secret: `BRANCH_PROTECTION_TOKEN` with least privilege to read repository branch protection settings (Administration read).
-- The workflow avoids exposing this secret on forked pull requests.
-- In private repos without GitHub plan support for branch protection API, CI can use `ALLOW_BRANCH_PROTECTION_PLAN_LIMITATION_SKIP=true` to convert that specific 403 response into an explicit `SKIP` instead of a hard failure.
+## 2) Secret Locations by Surface
 
-## Immediate rotation guidance
+- Web/admin hosting environment
+- Mobile EAS/Expo environment
+- Convex deployment environment
+- Clerk provider dashboard
+- Google Cloud and Spotify developer dashboards
+- Sentry project settings
 
-Based on repository audit, the following providers should be reviewed and rotated now if the exposed values were ever valid in your environments.
+## 3) High-Risk Secrets to Rotate on Exposure
 
-### Clerk
-
-Rotate immediately:
+Clerk:
 
 - `CLERK_SECRET_KEY`
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
 - `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`
 - `CLERK_WEBHOOK_SECRET`
 
-Also verify:
-
-- JWT template used by Convex (`applicationID: "convex"`)
-- Allowed domains, redirect URLs, and webhook endpoint subscriptions
-
-### Convex
-
-Review and rotate/redeploy if needed:
-
-- Deployment URL used in examples (`NEXT_PUBLIC_CONVEX_URL`, `EXPO_PUBLIC_CONVEX_URL`)
-- Any backend env values in Convex dashboard if they were paired with exposed keys
-
-### OpenAI
-
-Rotate immediately:
+OpenAI:
 
 - `OPENAI_API_KEY`
 
-Also verify:
+OAuth providers:
 
-- API key scope and project ownership
-- Spend limits and alerting
+- `GOOGLE_CLIENT_SECRET`
+- `SPOTIFY_CLIENT_SECRET`
 
-## Practical rotation checklist
+Backend/integration encryption:
 
-1. Rotate Clerk secret key and webhook secret in Clerk dashboard.
-2. Rotate Clerk publishable keys if they were tied to compromised configuration.
-3. Rotate OpenAI API key.
-4. Update Convex dashboard env vars (`CLERK_JWT_ISSUER_DOMAIN`, `CLERK_WEBHOOK_SECRET`, `OPENAI_API_KEY`, bootstrap ids).
-5. Update deployment env vars for web/admin/mobile and local `.env.local` files.
-6. Invalidate old sessions/tokens where applicable.
-7. Re-run sign-in, webhook, and summary generation smoke tests.
-8. Confirm tracked `.env.example` files contain placeholders only.
-9. Review git history for accidental secret commits and purge if required.
-10. Enable secret scanning in CI/Git provider for future detection.
+- Values inside `INTEGRATION_SECRETS_KEYRING_JSON`
+- `INTEGRATION_SECRETS_ACTIVE_KEY_ID` when rotating active key selection
 
-## Manual verification commands
+Observability:
 
-Run from repo root:
+- `SENTRY_DSN`
+- `NEXT_PUBLIC_SENTRY_DSN`
+- `EXPO_PUBLIC_SENTRY_DSN`
 
-- `git ls-files '**/.env*'`
-- `git grep -nE '(sk_(test|live)_[A-Za-z0-9]{20,}|pk_(test|live)_[A-Za-z0-9]{20,}|whsec_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|xox[baprs]-[A-Za-z0-9-]{16,})' -- . ':(exclude)SECURITY.md'`
+## 4) Rotation Checklist
+
+1. Rotate secret in provider dashboard first.
+2. Update all environments using that secret.
+3. Restart/redeploy affected surfaces.
+4. Re-run smoke tests:
+   - sign-in
+   - webhook delivery
+   - integration connect/sync
+   - summary generation
+5. Invalidate stale sessions/tokens if applicable.
+6. Audit logs for unusual activity.
+
+## 5) Integration Token Encryption Controls
+
+Production OAuth token storage depends on envelope encryption.
+These Convex env vars must be set correctly:
+
+- `INTEGRATION_SECRETS_KEYRING_JSON`
+- `INTEGRATION_SECRETS_ACTIVE_KEY_ID`
+
+If either is missing/invalid, OAuth connect/sync paths can fail.
+
+## 6) Branch Protection Verification Security
+
+- Policy file: `.github/branch-protection.expected.json`
+- Verification command: `pnpm verify:branch-protection`
+- CI secret: `BRANCH_PROTECTION_TOKEN` (least privilege)
+
+Do not expose branch-protection verification tokens to forked PR contexts.
+
+## 7) Manual Secret Scan Commands
+
+From repository root:
+
+```bash
+git ls-files '**/.env*'
+git grep -nE '(sk_(test|live)_[A-Za-z0-9]{20,}|pk_(test|live)_[A-Za-z0-9]{20,}|whsec_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|xox[baprs]-[A-Za-z0-9-]{16,})' -- . ':(exclude)SECURITY.md'
+```
 
 Expected result:
 
-- Only `.env.example` files are tracked.
-- No real credentials in docs or source.
+- No real secrets in tracked files.
+- Only placeholder values in example env files.

@@ -5,6 +5,7 @@ import { validateDayKey, clampLimit } from "./validators";
 import type { Doc, Id } from "./_generated/dataModel";
 import { applyDashboardMetricsDelta } from "./dashboardMetrics";
 import { getPlanLimitsForTier, normalizeUserPlanTier } from "./planLimits";
+import { captureException, logInfo } from "./observability";
 
 const IMAGE_CONTENT_TYPE_PREFIX = "image/";
 const VIDEO_CONTENT_TYPE_PREFIX = "video/";
@@ -162,56 +163,95 @@ export const createMemory = mutation({
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
+    const startedAt = Date.now();
 
-    validateDayKey(args.dayKey);
-    assertMemoryTextLimits({
-      title: args.title,
-      description: args.description,
-      planTier: user.planTier,
-    });
-
-    if (args.clientRequestId) {
-      const existing = await ctx.db
-        .query("memories")
-        .withIndex("by_user_clientRequestId", (q) =>
-          q.eq("userId", user._id).eq("clientRequestId", args.clientRequestId),
-        )
-        .unique();
-
-      if (existing) {
-        const samePayload =
-          existing.title === args.title &&
-          (existing.description ?? undefined) ===
-            (args.description ?? undefined) &&
-          (existing.mood ?? undefined) === (args.mood ?? undefined) &&
-          existing.happenedAt === args.happenedAt &&
-          existing.dayKey === args.dayKey;
-
-        if (!samePayload) {
-          throw new Error(
-            "Conflict: clientRequestId already used for a different memory payload.",
-          );
-        }
-
-        return existing;
-      }
-    }
-
-    const id = await ctx.db.insert("memories", {
+    logInfo("memory_creation.started", {
+      status: "started",
       userId: user._id,
-      clientRequestId: args.clientRequestId,
-      title: args.title,
-      description: args.description,
-      mood: args.mood,
-      happenedAt: args.happenedAt,
       dayKey: args.dayKey,
+      hasClientRequestId: Boolean(args.clientRequestId),
     });
 
-    await applyDashboardMetricsDelta(ctx.db, {
-      totalMemories: 1,
-    });
+    try {
+      validateDayKey(args.dayKey);
+      assertMemoryTextLimits({
+        title: args.title,
+        description: args.description,
+        planTier: user.planTier,
+      });
 
-    return await ctx.db.get(id);
+      if (args.clientRequestId) {
+        const existing = await ctx.db
+          .query("memories")
+          .withIndex("by_user_clientRequestId", (q) =>
+            q
+              .eq("userId", user._id)
+              .eq("clientRequestId", args.clientRequestId),
+          )
+          .unique();
+
+        if (existing) {
+          const samePayload =
+            existing.title === args.title &&
+            (existing.description ?? undefined) ===
+              (args.description ?? undefined) &&
+            (existing.mood ?? undefined) === (args.mood ?? undefined) &&
+            existing.happenedAt === args.happenedAt &&
+            existing.dayKey === args.dayKey;
+
+          if (!samePayload) {
+            throw new Error(
+              "Conflict: clientRequestId already used for a different memory payload.",
+            );
+          }
+
+          logInfo("memory_creation.succeeded", {
+            status: "succeeded",
+            userId: user._id,
+            dayKey: args.dayKey,
+            memoryId: existing._id,
+            mode: "idempotent",
+            durationMs: Date.now() - startedAt,
+          });
+
+          return existing;
+        }
+      }
+
+      const id = await ctx.db.insert("memories", {
+        userId: user._id,
+        clientRequestId: args.clientRequestId,
+        title: args.title,
+        description: args.description,
+        mood: args.mood,
+        happenedAt: args.happenedAt,
+        dayKey: args.dayKey,
+      });
+
+      await applyDashboardMetricsDelta(ctx.db, {
+        totalMemories: 1,
+      });
+
+      logInfo("memory_creation.succeeded", {
+        status: "succeeded",
+        userId: user._id,
+        dayKey: args.dayKey,
+        memoryId: id,
+        mode: "create",
+        durationMs: Date.now() - startedAt,
+      });
+
+      return await ctx.db.get(id);
+    } catch (error) {
+      captureException("memory_creation.failed", error, {
+        status: "failed",
+        userId: user._id,
+        dayKey: args.dayKey,
+        hasClientRequestId: Boolean(args.clientRequestId),
+        durationMs: Date.now() - startedAt,
+      });
+      throw error;
+    }
   },
 });
 
@@ -331,36 +371,62 @@ export const deleteMemory = mutation({
   args: { memoryId: v.id("memories") },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
-    const memory = await ctx.db.get(args.memoryId);
+    const startedAt = Date.now();
 
-    if (!memory) {
-      throw new Error("Memory not found");
-    }
-
-    requireOwnership(user, memory.userId);
-
-    // Delete associated media rows and storage blobs
-    const media = await ctx.db
-      .query("memoryMedia")
-      .withIndex("by_memory", (q) => q.eq("memoryId", args.memoryId))
-      .collect();
-
-    for (const m of media) {
-      try {
-        await ctx.storage.delete(m.storageId as any);
-      } catch {
-        // Storage blob may already be gone — continue cleanup
-      }
-      await ctx.db.delete(m._id);
-    }
-
-    await ctx.db.delete(args.memoryId);
-
-    await applyDashboardMetricsDelta(ctx.db, {
-      totalMemories: -1,
+    logInfo("deletion.memory.started", {
+      status: "started",
+      userId: user._id,
+      memoryId: args.memoryId,
     });
 
-    return { success: true };
+    try {
+      const memory = await ctx.db.get(args.memoryId);
+
+      if (!memory) {
+        throw new Error("Memory not found");
+      }
+
+      requireOwnership(user, memory.userId);
+
+      // Delete associated media rows and storage blobs
+      const media = await ctx.db
+        .query("memoryMedia")
+        .withIndex("by_memory", (q) => q.eq("memoryId", args.memoryId))
+        .collect();
+
+      for (const m of media) {
+        try {
+          await ctx.storage.delete(m.storageId as any);
+        } catch {
+          // Storage blob may already be gone — continue cleanup
+        }
+        await ctx.db.delete(m._id);
+      }
+
+      await ctx.db.delete(args.memoryId);
+
+      await applyDashboardMetricsDelta(ctx.db, {
+        totalMemories: -1,
+      });
+
+      logInfo("deletion.memory.succeeded", {
+        status: "succeeded",
+        userId: user._id,
+        memoryId: args.memoryId,
+        deletedMediaCount: media.length,
+        durationMs: Date.now() - startedAt,
+      });
+
+      return { success: true };
+    } catch (error) {
+      captureException("deletion.memory.failed", error, {
+        status: "failed",
+        userId: user._id,
+        memoryId: args.memoryId,
+        durationMs: Date.now() - startedAt,
+      });
+      throw error;
+    }
   },
 });
 
@@ -535,22 +601,49 @@ export const deleteMemoryMedia = mutation({
   args: { mediaId: v.id("memoryMedia") },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
-    const media = await ctx.db.get(args.mediaId);
+    const startedAt = Date.now();
 
-    if (!media) {
-      throw new Error("Media not found");
-    }
+    logInfo("deletion.memory_media.started", {
+      status: "started",
+      userId: user._id,
+      mediaId: args.mediaId,
+    });
 
-    requireOwnership(user, media.userId);
-
-    // Delete the storage blob as well
     try {
-      await ctx.storage.delete(media.storageId as any);
-    } catch {
-      // Storage blob may already be gone — continue cleanup
-    }
+      const media = await ctx.db.get(args.mediaId);
 
-    await ctx.db.delete(args.mediaId);
-    return { success: true };
+      if (!media) {
+        throw new Error("Media not found");
+      }
+
+      requireOwnership(user, media.userId);
+
+      // Delete the storage blob as well
+      try {
+        await ctx.storage.delete(media.storageId as any);
+      } catch {
+        // Storage blob may already be gone — continue cleanup
+      }
+
+      await ctx.db.delete(args.mediaId);
+
+      logInfo("deletion.memory_media.succeeded", {
+        status: "succeeded",
+        userId: user._id,
+        mediaId: args.mediaId,
+        memoryId: media.memoryId,
+        durationMs: Date.now() - startedAt,
+      });
+
+      return { success: true };
+    } catch (error) {
+      captureException("deletion.memory_media.failed", error, {
+        status: "failed",
+        userId: user._id,
+        mediaId: args.mediaId,
+        durationMs: Date.now() - startedAt,
+      });
+      throw error;
+    }
   },
 });

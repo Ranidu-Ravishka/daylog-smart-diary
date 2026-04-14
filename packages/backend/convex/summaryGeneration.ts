@@ -350,6 +350,11 @@ export const generateSummaryForDay = action({
     };
 
     if (!runtimeFlags.flags?.aiSummaryEnabled) {
+      logWarn("summary_generation.skipped_disabled", {
+        status: "skipped",
+        dayKey: args.dayKey,
+      });
+
       return {
         success: false,
         errorCode: "model_generation_failed",
@@ -359,6 +364,7 @@ export const generateSummaryForDay = action({
     }
 
     logInfo("summary_generation.started", {
+      status: "started",
       dayKey: args.dayKey,
     });
 
@@ -386,6 +392,11 @@ export const generateSummaryForDay = action({
       !hasDayMetadata &&
       !hasIntegrationData
     ) {
+      logWarn("summary_generation.skipped_no_input", {
+        status: "skipped",
+        dayKey: args.dayKey,
+      });
+
       return {
         success: false,
         errorCode: "no_input_data",
@@ -459,8 +470,10 @@ export const generateSummaryForDay = action({
       generated = await generateSummaryWithOpenAi(args.dayKey, modelInput);
     } catch (error) {
       captureException("summary_generation.failed", error, {
+        status: "failed",
         dayKey: args.dayKey,
         userId: generationIdentity.userId,
+        durationMs: Date.now() - startedAt,
       });
 
       try {
@@ -482,7 +495,9 @@ export const generateSummaryForDay = action({
         );
       } catch (qualityLoggingError) {
         logWarn("summary_generation.quality_logging_failed", {
+          status: "degraded",
           dayKey: args.dayKey,
+          userId: generationIdentity.userId,
           reason: "failure_logging",
           error:
             qualityLoggingError instanceof Error
@@ -550,7 +565,9 @@ export const generateSummaryForDay = action({
       );
     } catch (qualityLoggingError) {
       logWarn("summary_generation.quality_logging_failed", {
+        status: "degraded",
         dayKey: args.dayKey,
+        userId: generationIdentity.userId,
         reason: "success_logging",
         error:
           qualityLoggingError instanceof Error
@@ -560,6 +577,7 @@ export const generateSummaryForDay = action({
     }
 
     logInfo("summary_generation.succeeded", {
+      status: "succeeded",
       dayKey: args.dayKey,
       userId: generationIdentity.userId,
       summaryId: saved?._id,

@@ -41,7 +41,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { captureException } from "@/lib/observability";
+import { captureException, logInfo } from "@/lib/observability";
 import { cn } from "@/lib/utils";
 import { toastError, toastInfo, toastSuccess } from "@/lib/toast";
 
@@ -396,6 +396,12 @@ export default function SettingsPage() {
   };
 
   const handleSync = async (provider: string) => {
+    logInfo("web_integration_sync_started", {
+      status: "started",
+      provider,
+      dayKey: todayDayKey,
+    });
+
     setProviderAction(provider, "sync");
     try {
       const result = await syncMyIntegrationForDay({
@@ -405,15 +411,31 @@ export default function SettingsPage() {
       });
 
       if (result?.idempotent) {
+        logInfo("web_integration_sync_skipped", {
+          status: "skipped",
+          provider,
+          dayKey: todayDayKey,
+          reason: result.skippedReason,
+        });
         toastInfo(
           result.skippedReason === "already_synced"
             ? "Already synced for today."
             : "Sync is already in progress.",
         );
       } else {
+        logInfo("web_integration_sync_succeeded", {
+          status: "succeeded",
+          provider,
+          dayKey: todayDayKey,
+        });
         toastSuccess("Sync completed");
       }
     } catch (error) {
+      captureException("web_integration_sync_failed", error, {
+        status: "failed",
+        provider,
+        dayKey: todayDayKey,
+      });
       toastError(error instanceof Error ? error.message : "Sync failed");
     } finally {
       setProviderAction(provider, undefined);

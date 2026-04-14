@@ -82,6 +82,9 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "convexUrl": "https://basic-crane-400.convex.cloud"
     }
   }
 }

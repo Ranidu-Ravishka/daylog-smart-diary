@@ -4,6 +4,7 @@ import {
   DefaultTheme,
   ThemeProvider,
 } from "@react-navigation/native";
+import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -35,14 +36,29 @@ initCrashReporting();
 
 const DEV_FALLBACK_CONVEX_URL = "http://localhost:4334";
 const CONVEX_URL_ENV_VAR = "EXPO_PUBLIC_CONVEX_URL";
+const CONVEX_URL_ENV_ALIASES = ["NEXT_PUBLIC_CONVEX_URL", "CONVEX_URL"];
+const CONVEX_URL_CONFIG_KEY = "expo.extra.convexUrl";
 
 type ConvexBootstrap = {
   client: ConvexReactClient | null;
   startupError: Error | null;
 };
 
+function toOptionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 function resolveConvexUrlOrThrow(): { url: string; usingDevFallback: boolean } {
-  const configuredConvexUrl = process.env.EXPO_PUBLIC_CONVEX_URL?.trim();
+  const configuredConvexUrl =
+    toOptionalString(process.env.EXPO_PUBLIC_CONVEX_URL) ||
+    toOptionalString(Constants.expoConfig?.extra?.convexUrl) ||
+    toOptionalString(process.env.NEXT_PUBLIC_CONVEX_URL) ||
+    toOptionalString(process.env.CONVEX_URL);
 
   if (configuredConvexUrl) {
     return {
@@ -59,7 +75,7 @@ function resolveConvexUrlOrThrow(): { url: string; usingDevFallback: boolean } {
   }
 
   throw new Error(
-    `Missing ${CONVEX_URL_ENV_VAR}. Set ${CONVEX_URL_ENV_VAR} to your Convex deployment URL and restart the app.`,
+    `Missing Convex URL configuration. Set ${CONVEX_URL_ENV_VAR} (or ${CONVEX_URL_ENV_ALIASES.join(", ")}) or ${CONVEX_URL_CONFIG_KEY} to your Convex deployment URL and restart the app.`,
   );
 }
 

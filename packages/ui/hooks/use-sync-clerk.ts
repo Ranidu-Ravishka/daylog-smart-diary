@@ -27,6 +27,7 @@ type UseSyncClerkUserToConvexArgs = {
     lastName?: string;
     imageUrl?: string;
   }) => Promise<unknown>;
+  onSyncError?: (error: unknown, context: { clerkUserId: string }) => void;
 };
 
 export function useSyncClerkUserToConvex({
@@ -34,6 +35,7 @@ export function useSyncClerkUserToConvex({
   isSignedIn,
   user,
   syncUser,
+  onSyncError,
 }: UseSyncClerkUserToConvexArgs): void {
   const lastSyncedUserId = useRef<string | null>(null);
 
@@ -62,9 +64,9 @@ export function useSyncClerkUserToConvex({
       lastName: user.lastName ?? undefined,
       imageUrl: user.imageUrl ?? undefined,
     }).catch((error) => {
-      console.error("Failed to sync user to Convex", error);
+      onSyncError?.(error, { clerkUserId: user.id });
     });
 
     lastSyncedUserId.current = user.id;
-  }, [isLoaded, isSignedIn, user, syncUser]);
+  }, [isLoaded, isSignedIn, user, syncUser, onSyncError]);
 }

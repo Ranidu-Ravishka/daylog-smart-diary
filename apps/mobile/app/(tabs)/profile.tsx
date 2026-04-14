@@ -67,6 +67,7 @@ import {
 import { collectAndroidScreenTimeDailyDataForDay } from "../../lib/android-screen-time-sync";
 import { collectIosScreenTimeDailyDataForDay } from "../../lib/ios-screen-time-sync";
 import { getOfflineOutboxSnapshot } from "@/lib/offline-outbox";
+import { captureException, logInfo, logWarn } from "@/lib/observability";
 import {
   Colors,
   Spacing,
@@ -1333,6 +1334,11 @@ const SettingsScreen = () => {
   }, []);
 
   const handleDeleteAccount = useCallback(() => {
+    logInfo("mobile_account_deletion_started", {
+      status: "started",
+      hasUser: Boolean(user),
+    });
+
     Alert.alert(
       "Delete Account",
       "This action is permanent and cannot be undone. All your data will be deleted.",
@@ -1345,6 +1351,10 @@ const SettingsScreen = () => {
             void (async () => {
               try {
                 if (!user) {
+                  logWarn("mobile_account_deletion_skipped", {
+                    status: "skipped",
+                    reason: "missing_user",
+                  });
                   Alert.alert(
                     "Delete failed",
                     "No signed-in user found. Please sign in again.",
@@ -1354,7 +1364,15 @@ const SettingsScreen = () => {
 
                 await user.delete();
                 await signOut();
-              } catch {
+                logInfo("mobile_account_deletion_succeeded", {
+                  status: "succeeded",
+                  hasUser: true,
+                });
+              } catch (error) {
+                captureException("mobile_account_delete_failed", error, {
+                  status: "failed",
+                  hasUser: Boolean(user),
+                });
                 Alert.alert(
                   "Delete failed",
                   "We could not delete your account right now. Please try again.",
@@ -1517,6 +1535,12 @@ const SettingsScreen = () => {
 
   const handleSyncIntegration = useCallback(
     async (provider: string) => {
+      logInfo("mobile_integration_sync_started", {
+        status: "started",
+        provider,
+        dayKey: todayDayKey,
+      });
+
       setProviderAction(provider, "sync");
       setIntegrationFeedback(null);
       const userTimeZone = getResolvedTimeZone();
@@ -1525,6 +1549,13 @@ const SettingsScreen = () => {
         if (provider === "apple_health") {
           const setupIssue = getAppleHealthSetupIssue();
           if (setupIssue) {
+            logWarn("mobile_integration_sync_skipped", {
+              status: "skipped",
+              provider,
+              dayKey: todayDayKey,
+              reason: "apple_health_setup_issue",
+              errorMessage: setupIssue,
+            });
             Alert.alert("Apple Health setup", setupIssue);
             setIntegrationFeedback({
               type: "error",
@@ -1543,6 +1574,13 @@ const SettingsScreen = () => {
             metrics: appleHealthData.metrics,
             summary: appleHealthData.summary,
             signals: appleHealthData.signals,
+          });
+
+          logInfo("mobile_integration_sync_succeeded", {
+            status: "succeeded",
+            provider,
+            dayKey: todayDayKey,
+            source: "apple_health",
           });
 
           setIntegrationFeedback({
@@ -1618,6 +1656,12 @@ const SettingsScreen = () => {
         }
 
         if (result?.idempotent) {
+          logInfo("mobile_integration_sync_skipped", {
+            status: "skipped",
+            provider,
+            dayKey: todayDayKey,
+            reason: result.skippedReason,
+          });
           setIntegrationFeedback({
             type: "success",
             message:
@@ -1626,12 +1670,22 @@ const SettingsScreen = () => {
                 : "Sync is already in progress.",
           });
         } else {
+          logInfo("mobile_integration_sync_succeeded", {
+            status: "succeeded",
+            provider,
+            dayKey: todayDayKey,
+          });
           setIntegrationFeedback({
             type: "success",
             message: `Sync completed successfully.${screenTimeMessage}`,
           });
         }
       } catch (error) {
+        captureException("mobile_integration_sync_failed", error, {
+          status: "failed",
+          provider,
+          dayKey: todayDayKey,
+        });
         setIntegrationFeedback({
           type: "error",
           message: error instanceof Error ? error.message : "Sync failed.",

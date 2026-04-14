@@ -6,6 +6,7 @@
     "build:web": "turbo run build --filter=web",
     "build:admin": "turbo run build --filter=admin",
     "dev": "turbo dev",
+    "dev:backend": "pnpm dev:convex",
     "dev:web": "turbo run dev --filter=web",
     "dev:mobile": "turbo run dev --filter=mobile",
     "dev:admin": "turbo run dev --filter=admin",
@@ -21,6 +22,7 @@
     "test:backend": "pnpm --filter @repo/backend test:run",
     "test:admin": "pnpm --filter admin test",
     "test:mobile": "pnpm --filter mobile test",
+    "test:coverage": "pnpm test:coverage:backend",
     "test:coverage:backend": "pnpm --filter @repo/backend test:coverage:backend",
     "verify:branch-protection": "node scripts/verify-branch-protection.mjs"
   },
@@ -37,7 +39,9 @@
     },
     "onlyBuiltDependencies": [
       "esbuild",
-      "@tailwindcss/oxide"
+      "@tailwindcss/oxide",
+      "@sentry/cli",
+      "sharp"
     ]
   },
   "packageManager": "pnpm@10.29.3",
