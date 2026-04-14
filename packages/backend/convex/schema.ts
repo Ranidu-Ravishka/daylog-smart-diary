@@ -81,8 +81,14 @@ const userDeletionStageValidator = v.union(
   v.literal("integrationDailyData"),
   v.literal("integrationSecrets"),
   v.literal("integrationSyncRuns"),
+  v.literal("exportJobs"),
+  v.literal("restoreJobs"),
+  v.literal("summaryQualityEvaluations"),
+  v.literal("summaryGenerationEvents"),
+  v.literal("integrationHealthEvents"),
   v.literal("userPreferences"),
   v.literal("auditLogs"),
+  v.literal("platformAuditEvents"),
   v.literal("summaryGenerationQuotas"),
 );
 
@@ -93,10 +99,16 @@ const userDeletionProgressValidator = v.object({
   deletedIntegrations: v.number(),
   deletedPreferences: v.number(),
   deletedAuditLogs: v.number(),
+  deletedPlatformAuditEvents: v.optional(v.number()),
   deletedMemoryMedia: v.number(),
   deletedIntegrationDailyData: v.number(),
   deletedIntegrationSecrets: v.number(),
   deletedIntegrationSyncRuns: v.number(),
+  deletedIntegrationHealthEvents: v.optional(v.number()),
+  deletedExportJobs: v.optional(v.number()),
+  deletedRestoreJobs: v.optional(v.number()),
+  deletedSummaryGenerationEvents: v.optional(v.number()),
+  deletedSummaryQualityEvaluations: v.optional(v.number()),
   deletedSummaryGenerationQuotas: v.number(),
 });
 
@@ -293,7 +305,9 @@ export default defineSchema(
       quotaDayKey: v.string(), // YYYY-MM-DD (UTC day)
       used: v.number(),
       updatedAt: v.number(),
-    }).index("by_user_day", ["userId", "quotaDayKey"]),
+    })
+      .index("by_user_day", ["userId", "quotaDayKey"])
+      .index("by_quotaDayKey", ["quotaDayKey"]),
 
     // ── Export jobs (history + artifact lifecycle) ──────────
     exportJobs: defineTable({
@@ -462,7 +476,8 @@ export default defineSchema(
     })
       .index("by_user_provider_day", ["userId", "provider", "dayKey"])
       .index("by_user_provider", ["userId", "provider"])
-      .index("by_user_day_updatedAt", ["userId", "dayKey", "updatedAt"]),
+      .index("by_user_day_updatedAt", ["userId", "dayKey", "updatedAt"])
+      .index("by_updatedAt", ["updatedAt"]),
 
     // ── Normalized per-day integration sync payloads ───────
     integrationDailyData: defineTable({
@@ -532,7 +547,9 @@ export default defineSchema(
     })
       .index("by_provider_at", ["provider", "at"])
       .index("by_status_at", ["status", "at"])
-      .index("by_outcome_at", ["outcome", "at"]),
+      .index("by_outcome_at", ["outcome", "at"])
+      .index("by_at", ["at"])
+      .index("by_userId_at", ["userId", "at"]),
 
     // ── Sampled info-level observability transport (durable analytics) ───
     observabilityInfoEvents: defineTable({
@@ -571,12 +588,21 @@ export default defineSchema(
       policySnapshot: v.array(retentionPolicySnapshotValidator),
       deletedCounts: v.object({
         memories: v.number(),
+        days: v.optional(v.number()),
         daySummaries: v.number(),
         integrationDailyData: v.number(),
+        integrationSyncRuns: v.optional(v.number()),
         locationSignals: v.number(),
         summaryGenerationEvents: v.number(),
+        summaryQualityEvaluations: v.optional(v.number()),
+        summaryGenerationQuotas: v.optional(v.number()),
         infoEvents: v.optional(v.number()),
+        integrationHealthEvents: v.optional(v.number()),
+        auditLogs: v.optional(v.number()),
+        platformAuditEvents: v.optional(v.number()),
         exportJobs: v.optional(v.number()),
+        restoreJobs: v.optional(v.number()),
+        userDeletionJobs: v.optional(v.number()),
       }),
       error: v.optional(v.string()),
       actorUserId: v.optional(v.id("user")),
@@ -589,6 +615,7 @@ export default defineSchema(
         v.literal("retention"),
         v.literal("summary_quality"),
         v.literal("integration_health"),
+        v.literal("deletion"),
       ),
       action: v.string(),
       actorType: v.union(
@@ -602,7 +629,9 @@ export default defineSchema(
       at: v.number(),
     })
       .index("by_category_at", ["category", "at"])
-      .index("by_actor_at", ["actorType", "at"]),
+      .index("by_actor_at", ["actorType", "at"])
+      .index("by_at", ["at"])
+      .index("by_actorUserId_at", ["actorUserId", "at"]),
 
     // ── Summary quality harness artifacts ─────────────────────────────────
     summaryGenerationEvents: defineTable({

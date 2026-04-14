@@ -84,12 +84,26 @@ function emptyUserDeletionProgress(): UserDeletionProgress {
     deletedIntegrations: 0,
     deletedPreferences: 0,
     deletedAuditLogs: 0,
+    deletedPlatformAuditEvents: 0,
     deletedMemoryMedia: 0,
     deletedIntegrationDailyData: 0,
     deletedIntegrationSecrets: 0,
     deletedIntegrationSyncRuns: 0,
+    deletedIntegrationHealthEvents: 0,
+    deletedExportJobs: 0,
+    deletedRestoreJobs: 0,
+    deletedSummaryGenerationEvents: 0,
+    deletedSummaryQualityEvaluations: 0,
     deletedSummaryGenerationQuotas: 0,
   };
+}
+
+function safeProgressCount(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return 0;
+  }
+
+  return value;
 }
 
 function mergeUserDeletionProgress(
@@ -97,23 +111,52 @@ function mergeUserDeletionProgress(
   delta: UserCascadeDeleteProgress,
 ): UserDeletionProgress {
   return {
-    deletedMemories: base.deletedMemories + delta.deletedMemories,
-    deletedSummaries: base.deletedSummaries + delta.deletedSummaries,
-    deletedDays: base.deletedDays + delta.deletedDays,
-    deletedIntegrations: base.deletedIntegrations + delta.deletedIntegrations,
-    deletedPreferences: base.deletedPreferences + delta.deletedPreferences,
-    deletedAuditLogs: base.deletedAuditLogs + delta.deletedAuditLogs,
-    deletedMemoryMedia: base.deletedMemoryMedia + delta.deletedMemoryMedia,
+    deletedMemories:
+      safeProgressCount(base.deletedMemories) + delta.deletedMemories,
+    deletedSummaries:
+      safeProgressCount(base.deletedSummaries) + delta.deletedSummaries,
+    deletedDays: safeProgressCount(base.deletedDays) + delta.deletedDays,
+    deletedIntegrations:
+      safeProgressCount(base.deletedIntegrations) + delta.deletedIntegrations,
+    deletedPreferences:
+      safeProgressCount(base.deletedPreferences) + delta.deletedPreferences,
+    deletedAuditLogs:
+      safeProgressCount(base.deletedAuditLogs) + delta.deletedAuditLogs,
+    deletedPlatformAuditEvents:
+      safeProgressCount(base.deletedPlatformAuditEvents) +
+      delta.deletedPlatformAuditEvents,
+    deletedMemoryMedia:
+      safeProgressCount(base.deletedMemoryMedia) + delta.deletedMemoryMedia,
     deletedIntegrationDailyData:
-      base.deletedIntegrationDailyData + delta.deletedIntegrationDailyData,
+      safeProgressCount(base.deletedIntegrationDailyData) +
+      delta.deletedIntegrationDailyData,
     deletedIntegrationSecrets:
-      base.deletedIntegrationSecrets + delta.deletedIntegrationSecrets,
+      safeProgressCount(base.deletedIntegrationSecrets) +
+      delta.deletedIntegrationSecrets,
     deletedIntegrationSyncRuns:
-      base.deletedIntegrationSyncRuns + delta.deletedIntegrationSyncRuns,
+      safeProgressCount(base.deletedIntegrationSyncRuns) +
+      delta.deletedIntegrationSyncRuns,
+    deletedIntegrationHealthEvents:
+      safeProgressCount(base.deletedIntegrationHealthEvents) +
+      delta.deletedIntegrationHealthEvents,
+    deletedExportJobs:
+      safeProgressCount(base.deletedExportJobs) + delta.deletedExportJobs,
+    deletedRestoreJobs:
+      safeProgressCount(base.deletedRestoreJobs) + delta.deletedRestoreJobs,
+    deletedSummaryGenerationEvents:
+      safeProgressCount(base.deletedSummaryGenerationEvents) +
+      delta.deletedSummaryGenerationEvents,
+    deletedSummaryQualityEvaluations:
+      safeProgressCount(base.deletedSummaryQualityEvaluations) +
+      delta.deletedSummaryQualityEvaluations,
     deletedSummaryGenerationQuotas:
-      base.deletedSummaryGenerationQuotas +
+      safeProgressCount(base.deletedSummaryGenerationQuotas) +
       delta.deletedSummaryGenerationQuotas,
   };
+}
+
+function safeDetailsJson(payload: Record<string, unknown>): string {
+  return JSON.stringify(payload).slice(0, 1500);
 }
 
 function resolveUserDeletionBatchSize(value: number | undefined): number {
@@ -499,6 +542,35 @@ export const runUserDeletionCascadeJobStepInternal = internalMutation({
         lastError: undefined,
       });
 
+      try {
+        await ctx.db.insert("platformAuditEvents", {
+          category: "deletion",
+          action: "user_cascade_delete_completed",
+          actorType: job.requestedByUserId ? "admin" : "system",
+          actorUserId: job.requestedByUserId,
+          target: String(job._id),
+          details: safeDetailsJson({
+            userId: job.userId,
+            stage: job.stage,
+            checkpoints: nextCheckpoints,
+            processedBatches: nextProcessedBatches,
+            progress: nextProgress,
+          }),
+          at: now,
+        });
+
+        if (job.requestedByUserId) {
+          await ctx.db.insert("auditLogs", {
+            actorUserId: job.requestedByUserId,
+            action: "delete_user_completed",
+            target: String(job.userId),
+            at: now,
+          });
+        }
+      } catch {
+        // Do not fail deletion completion if audit write fails.
+      }
+
       logInfo("deletion.user_job.completed", {
         status: "succeeded",
         jobId: job._id,
@@ -532,6 +604,33 @@ export const runUserDeletionCascadeJobStepInternal = internalMutation({
         failedAt: now,
         lastError: message,
       });
+
+      try {
+        await ctx.db.insert("platformAuditEvents", {
+          category: "deletion",
+          action: "user_cascade_delete_failed",
+          actorType: job.requestedByUserId ? "admin" : "system",
+          actorUserId: job.requestedByUserId,
+          target: String(job._id),
+          details: safeDetailsJson({
+            userId: job.userId,
+            stage: job.stage,
+            error: message,
+          }),
+          at: now,
+        });
+
+        if (job.requestedByUserId) {
+          await ctx.db.insert("auditLogs", {
+            actorUserId: job.requestedByUserId,
+            action: "delete_user_failed",
+            target: String(job.userId),
+            at: now,
+          });
+        }
+      } catch {
+        // Preserve original deletion failure regardless of audit insert state.
+      }
 
       captureException("deletion.user_job.failed", error, {
         status: "failed",

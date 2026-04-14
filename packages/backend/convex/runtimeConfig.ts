@@ -4,6 +4,7 @@ const SUMMARY_DAILY_GENERATION_LIMIT_ENV = "SUMMARY_DAILY_GENERATION_LIMIT";
 const DEFAULT_SUMMARY_DAILY_GENERATION_LIMIT = 5;
 
 const RETENTION_MEMORIES_DAYS_ENV = "RETENTION_MEMORIES_DAYS";
+const RETENTION_DAYS_RECORDS_DAYS_ENV = "RETENTION_DAYS_RECORDS_DAYS";
 const RETENTION_DAY_SUMMARIES_DAYS_ENV = "RETENTION_DAY_SUMMARIES_DAYS";
 const RETENTION_INTEGRATION_DATA_DAYS_ENV = "RETENTION_INTEGRATION_DATA_DAYS";
 const RETENTION_LOCATION_SIGNALS_DAYS_ENV = "RETENTION_LOCATION_SIGNALS_DAYS";
@@ -11,6 +12,14 @@ const RETENTION_SUMMARY_EVENTS_DAYS_ENV = "RETENTION_SUMMARY_EVENTS_DAYS";
 const RETENTION_INFO_EVENTS_DAYS_ENV = "RETENTION_INFO_EVENTS_DAYS";
 const RETENTION_EXPORT_JOBS_DAYS_ENV = "RETENTION_EXPORT_JOBS_DAYS";
 const RETENTION_RESTORE_JOBS_DAYS_ENV = "RETENTION_RESTORE_JOBS_DAYS";
+const RETENTION_SYNC_RUNS_DAYS_ENV = "RETENTION_SYNC_RUNS_DAYS";
+const RETENTION_SUMMARY_QUOTAS_DAYS_ENV = "RETENTION_SUMMARY_QUOTAS_DAYS";
+const RETENTION_SUMMARY_QUALITY_DAYS_ENV = "RETENTION_SUMMARY_QUALITY_DAYS";
+const RETENTION_HEALTH_EVENTS_DAYS_ENV = "RETENTION_HEALTH_EVENTS_DAYS";
+const RETENTION_AUDIT_LOGS_DAYS_ENV = "RETENTION_AUDIT_LOGS_DAYS";
+const RETENTION_PLATFORM_AUDIT_DAYS_ENV = "RETENTION_PLATFORM_AUDIT_DAYS";
+const RETENTION_USER_DELETION_JOBS_DAYS_ENV =
+  "RETENTION_USER_DELETION_JOBS_DAYS";
 const RETENTION_DELETE_BATCH_SIZE_ENV = "RETENTION_DELETE_BATCH_SIZE";
 const SUMMARY_LOW_QUALITY_THRESHOLD_ENV = "SUMMARY_LOW_QUALITY_THRESHOLD";
 const ENABLE_BACKGROUND_LOCATION_TRACKING_ENV =
@@ -120,12 +129,21 @@ export function getSummaryDailyGenerationLimit(): number {
 
 export type RetentionPolicyKey =
   | "memories"
+  | "days"
   | "daySummaries"
   | "integrationDailyData"
+  | "integrationSyncRuns"
   | "locationSignals"
   | "summaryGenerationEvents"
+  | "summaryQualityEvaluations"
+  | "summaryGenerationQuotas"
   | "infoEvents"
-  | "exportJobs";
+  | "integrationHealthEvents"
+  | "auditLogs"
+  | "platformAuditEvents"
+  | "exportJobs"
+  | "restoreJobs"
+  | "userDeletionJobs";
 
 export function getRetentionPolicyDefaults(): Record<
   RetentionPolicyKey,
@@ -139,6 +157,16 @@ export function getRetentionPolicyDefaults(): Record<
     memories: {
       retentionDays: parseBoundedInt({
         envName: RETENTION_MEMORIES_DAYS_ENV,
+        fallback: 90,
+        min: 1,
+        max: 3650,
+      }),
+      sensitive: false,
+      enabled: true,
+    },
+    days: {
+      retentionDays: parseBoundedInt({
+        envName: RETENTION_DAYS_RECORDS_DAYS_ENV,
         fallback: 90,
         min: 1,
         max: 3650,
@@ -166,6 +194,16 @@ export function getRetentionPolicyDefaults(): Record<
       sensitive: false,
       enabled: true,
     },
+    integrationSyncRuns: {
+      retentionDays: parseBoundedInt({
+        envName: RETENTION_SYNC_RUNS_DAYS_ENV,
+        fallback: 90,
+        min: 1,
+        max: 3650,
+      }),
+      sensitive: false,
+      enabled: true,
+    },
     locationSignals: {
       retentionDays: parseBoundedInt({
         envName: RETENTION_LOCATION_SIGNALS_DAYS_ENV,
@@ -180,6 +218,26 @@ export function getRetentionPolicyDefaults(): Record<
       retentionDays: parseBoundedInt({
         envName: RETENTION_SUMMARY_EVENTS_DAYS_ENV,
         fallback: 60,
+        min: 1,
+        max: 3650,
+      }),
+      sensitive: false,
+      enabled: true,
+    },
+    summaryQualityEvaluations: {
+      retentionDays: parseBoundedInt({
+        envName: RETENTION_SUMMARY_QUALITY_DAYS_ENV,
+        fallback: 60,
+        min: 1,
+        max: 3650,
+      }),
+      sensitive: false,
+      enabled: true,
+    },
+    summaryGenerationQuotas: {
+      retentionDays: parseBoundedInt({
+        envName: RETENTION_SUMMARY_QUOTAS_DAYS_ENV,
+        fallback: 180,
         min: 1,
         max: 3650,
       }),
@@ -206,6 +264,56 @@ export function getRetentionPolicyDefaults(): Record<
       sensitive: true,
       enabled: true,
     },
+    restoreJobs: {
+      retentionDays: parseBoundedInt({
+        envName: RETENTION_RESTORE_JOBS_DAYS_ENV,
+        fallback: 30,
+        min: 1,
+        max: 3650,
+      }),
+      sensitive: true,
+      enabled: true,
+    },
+    integrationHealthEvents: {
+      retentionDays: parseBoundedInt({
+        envName: RETENTION_HEALTH_EVENTS_DAYS_ENV,
+        fallback: 90,
+        min: 1,
+        max: 3650,
+      }),
+      sensitive: false,
+      enabled: true,
+    },
+    auditLogs: {
+      retentionDays: parseBoundedInt({
+        envName: RETENTION_AUDIT_LOGS_DAYS_ENV,
+        fallback: 365,
+        min: 1,
+        max: 3650,
+      }),
+      sensitive: true,
+      enabled: true,
+    },
+    platformAuditEvents: {
+      retentionDays: parseBoundedInt({
+        envName: RETENTION_PLATFORM_AUDIT_DAYS_ENV,
+        fallback: 180,
+        min: 1,
+        max: 3650,
+      }),
+      sensitive: true,
+      enabled: true,
+    },
+    userDeletionJobs: {
+      retentionDays: parseBoundedInt({
+        envName: RETENTION_USER_DELETION_JOBS_DAYS_ENV,
+        fallback: 180,
+        min: 1,
+        max: 3650,
+      }),
+      sensitive: true,
+      enabled: true,
+    },
   };
 }
 
@@ -214,12 +322,7 @@ export function getExportJobRetentionDays(): number {
 }
 
 export function getRestoreJobRetentionDays(): number {
-  return parseBoundedInt({
-    envName: RETENTION_RESTORE_JOBS_DAYS_ENV,
-    fallback: 30,
-    min: 1,
-    max: 3650,
-  });
+  return getRetentionPolicyDefaults().restoreJobs.retentionDays;
 }
 
 export function getRetentionDeleteBatchSize(): number {

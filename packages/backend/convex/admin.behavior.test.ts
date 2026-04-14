@@ -643,10 +643,16 @@ describe("admin behavior", () => {
       deletedIntegrations: 0,
       deletedPreferences: 0,
       deletedAuditLogs: 0,
+      deletedPlatformAuditEvents: 0,
       deletedMemoryMedia: 0,
       deletedIntegrationDailyData: 0,
       deletedIntegrationSecrets: 0,
       deletedIntegrationSyncRuns: 0,
+      deletedIntegrationHealthEvents: 0,
+      deletedExportJobs: 0,
+      deletedRestoreJobs: 0,
+      deletedSummaryGenerationEvents: 0,
+      deletedSummaryQualityEvaluations: 0,
       deletedSummaryGenerationQuotas: 0,
     };
 

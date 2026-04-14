@@ -1,21 +1,39 @@
 export type RetentionDeletedCounts = {
   memories?: number;
+  days?: number;
   daySummaries?: number;
   integrationDailyData?: number;
+  integrationSyncRuns?: number;
   locationSignals?: number;
   summaryGenerationEvents?: number;
+  summaryQualityEvaluations?: number;
+  summaryGenerationQuotas?: number;
   infoEvents?: number;
+  integrationHealthEvents?: number;
+  auditLogs?: number;
+  platformAuditEvents?: number;
   exportJobs?: number;
+  restoreJobs?: number;
+  userDeletionJobs?: number;
 };
 
 export type NormalizedRetentionDeletedCounts = {
   memories: number;
+  days: number;
   daySummaries: number;
   integrationDailyData: number;
+  integrationSyncRuns: number;
   locationSignals: number;
   summaryGenerationEvents: number;
+  summaryQualityEvaluations: number;
+  summaryGenerationQuotas: number;
   infoEvents: number;
+  integrationHealthEvents: number;
+  auditLogs: number;
+  platformAuditEvents: number;
   exportJobs: number;
+  restoreJobs: number;
+  userDeletionJobs: number;
 };
 
 function toSafeCount(value: number | undefined): number {
@@ -35,12 +53,21 @@ export function normalizeRetentionDeletedCounts(
 ): NormalizedRetentionDeletedCounts {
   return {
     memories: toSafeCount(counts?.memories),
+    days: toSafeCount(counts?.days),
     daySummaries: toSafeCount(counts?.daySummaries),
     integrationDailyData: toSafeCount(counts?.integrationDailyData),
+    integrationSyncRuns: toSafeCount(counts?.integrationSyncRuns),
     locationSignals: toSafeCount(counts?.locationSignals),
     summaryGenerationEvents: toSafeCount(counts?.summaryGenerationEvents),
+    summaryQualityEvaluations: toSafeCount(counts?.summaryQualityEvaluations),
+    summaryGenerationQuotas: toSafeCount(counts?.summaryGenerationQuotas),
     infoEvents: toSafeCount(counts?.infoEvents),
+    integrationHealthEvents: toSafeCount(counts?.integrationHealthEvents),
+    auditLogs: toSafeCount(counts?.auditLogs),
+    platformAuditEvents: toSafeCount(counts?.platformAuditEvents),
     exportJobs: toSafeCount(counts?.exportJobs),
+    restoreJobs: toSafeCount(counts?.restoreJobs),
+    userDeletionJobs: toSafeCount(counts?.userDeletionJobs),
   };
 }
 
@@ -51,12 +78,21 @@ export function sumRetentionDeletedCounts(
 
   return (
     normalized.memories +
+    normalized.days +
     normalized.daySummaries +
     normalized.integrationDailyData +
+    normalized.integrationSyncRuns +
     normalized.locationSignals +
     normalized.summaryGenerationEvents +
+    normalized.summaryQualityEvaluations +
+    normalized.summaryGenerationQuotas +
     normalized.infoEvents +
-    normalized.exportJobs
+    normalized.integrationHealthEvents +
+    normalized.auditLogs +
+    normalized.platformAuditEvents +
+    normalized.exportJobs +
+    normalized.restoreJobs +
+    normalized.userDeletionJobs
   );
 }
 
@@ -67,12 +103,21 @@ export function formatRetentionDeletedCounts(
 
   return [
     `memories=${normalized.memories}`,
+    `days=${normalized.days}`,
     `summaries=${normalized.daySummaries}`,
     `integration=${normalized.integrationDailyData}`,
+    `syncRuns=${normalized.integrationSyncRuns}`,
     `location=${normalized.locationSignals}`,
     `summaryEvents=${normalized.summaryGenerationEvents}`,
+    `summaryQuality=${normalized.summaryQualityEvaluations}`,
+    `summaryQuotas=${normalized.summaryGenerationQuotas}`,
     `infoEvents=${normalized.infoEvents}`,
+    `healthEvents=${normalized.integrationHealthEvents}`,
+    `auditLogs=${normalized.auditLogs}`,
+    `platformAudit=${normalized.platformAuditEvents}`,
     `exportJobs=${normalized.exportJobs}`,
+    `restoreJobs=${normalized.restoreJobs}`,
+    `userDeletionJobs=${normalized.userDeletionJobs}`,
   ].join(", ");
 }
 

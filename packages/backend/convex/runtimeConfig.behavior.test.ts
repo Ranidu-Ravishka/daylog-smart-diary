@@ -17,6 +17,7 @@ import {
 const runtimeEnvKeys = [
   "SUMMARY_DAILY_GENERATION_LIMIT",
   "RETENTION_MEMORIES_DAYS",
+  "RETENTION_DAYS_RECORDS_DAYS",
   "RETENTION_DAY_SUMMARIES_DAYS",
   "RETENTION_INTEGRATION_DATA_DAYS",
   "RETENTION_LOCATION_SIGNALS_DAYS",
@@ -24,6 +25,13 @@ const runtimeEnvKeys = [
   "RETENTION_INFO_EVENTS_DAYS",
   "RETENTION_EXPORT_JOBS_DAYS",
   "RETENTION_RESTORE_JOBS_DAYS",
+  "RETENTION_SYNC_RUNS_DAYS",
+  "RETENTION_SUMMARY_QUOTAS_DAYS",
+  "RETENTION_SUMMARY_QUALITY_DAYS",
+  "RETENTION_HEALTH_EVENTS_DAYS",
+  "RETENTION_AUDIT_LOGS_DAYS",
+  "RETENTION_PLATFORM_AUDIT_DAYS",
+  "RETENTION_USER_DELETION_JOBS_DAYS",
   "RETENTION_DELETE_BATCH_SIZE",
   "SUMMARY_LOW_QUALITY_THRESHOLD",
   "ENABLE_BACKGROUND_LOCATION_TRACKING",
@@ -62,6 +70,7 @@ describe("runtime config behavior", () => {
 
   it("parses retention defaults with bounds and fallbacks", () => {
     process.env.RETENTION_MEMORIES_DAYS = "365";
+    process.env.RETENTION_DAYS_RECORDS_DAYS = "150";
     process.env.RETENTION_DAY_SUMMARIES_DAYS = "invalid";
     process.env.RETENTION_INTEGRATION_DATA_DAYS = "120";
     process.env.RETENTION_LOCATION_SIGNALS_DAYS = "-1";
@@ -69,16 +78,32 @@ describe("runtime config behavior", () => {
     process.env.RETENTION_INFO_EVENTS_DAYS = "45";
     process.env.RETENTION_EXPORT_JOBS_DAYS = "21";
     process.env.RETENTION_RESTORE_JOBS_DAYS = "35";
+    process.env.RETENTION_SYNC_RUNS_DAYS = "75";
+    process.env.RETENTION_SUMMARY_QUOTAS_DAYS = "120";
+    process.env.RETENTION_SUMMARY_QUALITY_DAYS = "50";
+    process.env.RETENTION_HEALTH_EVENTS_DAYS = "70";
+    process.env.RETENTION_AUDIT_LOGS_DAYS = "400";
+    process.env.RETENTION_PLATFORM_AUDIT_DAYS = "95";
+    process.env.RETENTION_USER_DELETION_JOBS_DAYS = "140";
 
     const defaults = getRetentionPolicyDefaults();
 
     expect(defaults.memories.retentionDays).toBe(365);
+    expect(defaults.days.retentionDays).toBe(150);
     expect(defaults.daySummaries.retentionDays).toBe(90);
     expect(defaults.integrationDailyData.retentionDays).toBe(120);
     expect(defaults.locationSignals.retentionDays).toBe(30);
     expect(defaults.summaryGenerationEvents.retentionDays).toBe(30);
+    expect(defaults.summaryQualityEvaluations.retentionDays).toBe(50);
+    expect(defaults.summaryGenerationQuotas.retentionDays).toBe(120);
     expect(defaults.infoEvents.retentionDays).toBe(45);
+    expect(defaults.integrationSyncRuns.retentionDays).toBe(75);
+    expect(defaults.integrationHealthEvents.retentionDays).toBe(70);
+    expect(defaults.auditLogs.retentionDays).toBe(400);
+    expect(defaults.platformAuditEvents.retentionDays).toBe(95);
+    expect(defaults.userDeletionJobs.retentionDays).toBe(140);
     expect(defaults.exportJobs.retentionDays).toBe(21);
+    expect(defaults.restoreJobs.retentionDays).toBe(35);
     expect(getExportJobRetentionDays()).toBe(21);
     expect(getRestoreJobRetentionDays()).toBe(35);
   });

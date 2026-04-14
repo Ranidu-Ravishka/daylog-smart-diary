@@ -11,39 +11,66 @@ describe("retention UI logic", () => {
   it("normalizes invalid retention counters to zero", () => {
     const normalized = normalizeRetentionDeletedCounts({
       memories: 3.9,
+      days: Number.NaN,
       daySummaries: -2,
       integrationDailyData: Number.NaN,
+      integrationSyncRuns: 4.7,
       locationSignals: undefined,
       summaryGenerationEvents: 0,
+      summaryQualityEvaluations: 1,
+      summaryGenerationQuotas: -1,
       infoEvents: 2,
+      integrationHealthEvents: 3,
+      auditLogs: 2,
+      platformAuditEvents: 1,
       exportJobs: 1,
+      restoreJobs: 5,
+      userDeletionJobs: Number.NaN,
     });
 
     expect(normalized).toEqual({
       memories: 3,
+      days: 0,
       daySummaries: 0,
       integrationDailyData: 0,
+      integrationSyncRuns: 4,
       locationSignals: 0,
       summaryGenerationEvents: 0,
+      summaryQualityEvaluations: 1,
+      summaryGenerationQuotas: 0,
       infoEvents: 2,
+      integrationHealthEvents: 3,
+      auditLogs: 2,
+      platformAuditEvents: 1,
       exportJobs: 1,
+      restoreJobs: 5,
+      userDeletionJobs: 0,
     });
   });
 
   it("computes total deletes and formats details", () => {
     const counts = {
       memories: 1,
-      daySummaries: 2,
-      integrationDailyData: 3,
-      locationSignals: 4,
-      summaryGenerationEvents: 5,
-      infoEvents: 6,
-      exportJobs: 7,
+      days: 2,
+      daySummaries: 3,
+      integrationDailyData: 4,
+      integrationSyncRuns: 5,
+      locationSignals: 6,
+      summaryGenerationEvents: 7,
+      summaryQualityEvaluations: 8,
+      summaryGenerationQuotas: 9,
+      infoEvents: 10,
+      integrationHealthEvents: 11,
+      auditLogs: 12,
+      platformAuditEvents: 13,
+      exportJobs: 14,
+      restoreJobs: 15,
+      userDeletionJobs: 16,
     };
 
-    expect(sumRetentionDeletedCounts(counts)).toBe(28);
+    expect(sumRetentionDeletedCounts(counts)).toBe(136);
     expect(formatRetentionDeletedCounts(counts)).toBe(
-      "memories=1, summaries=2, integration=3, location=4, summaryEvents=5, infoEvents=6, exportJobs=7",
+      "memories=1, days=2, summaries=3, integration=4, syncRuns=5, location=6, summaryEvents=7, summaryQuality=8, summaryQuotas=9, infoEvents=10, healthEvents=11, auditLogs=12, platformAudit=13, exportJobs=14, restoreJobs=15, userDeletionJobs=16",
     );
   });
 

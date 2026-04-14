@@ -299,6 +299,7 @@ describe("summaries behavior", () => {
 
     await db.insert("memories", {
       userId: USER_ID,
+      clientRequestId: "mem_export_001",
       dayKey: "2026-04-02",
       title: "Memory",
       description: "Desc",
@@ -381,6 +382,9 @@ describe("summaries behavior", () => {
     expect(summaries.page).toHaveLength(1);
     expect(memories.page).toHaveLength(1);
     expect(days.page).toHaveLength(1);
+    expect(
+      (memories.page[0] as { clientRequestId?: string }).clientRequestId,
+    ).toBe("mem_export_001");
   });
 
   it("builds export artifacts server-side and returns a download URL", async () => {
@@ -1592,6 +1596,30 @@ describe("summaries behavior", () => {
       },
     );
     expect(byRequestIdConflictOverwrite.updated).toBe(1);
+
+    const explicitClientRequestIdRow = {
+      clientRequestId: "imported_memory_req_001",
+      dayKey: "2026-04-12",
+      title: "Explicit request id",
+      description: "from export",
+      mood: "curious",
+      happenedAt: 720,
+    };
+
+    const explicitClientRequestIdInserted =
+      await restoreDiaryDatasetBatchInternal(ctx, {
+        userId: USER_ID,
+        dataset: "memories",
+        rows: [explicitClientRequestIdRow],
+        conflictMode: "skip",
+        allowPartial: false,
+      });
+
+    expect(explicitClientRequestIdInserted.inserted).toBe(1);
+    const explicitClientRequestMemory = db
+      .getTable("memories")
+      .find((row) => row.clientRequestId === "imported_memory_req_001");
+    expect(explicitClientRequestMemory?._id).toBeDefined();
   });
 
   it("rethrows row errors when partial restore is disabled", async () => {

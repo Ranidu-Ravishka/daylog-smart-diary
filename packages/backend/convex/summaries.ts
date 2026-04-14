@@ -366,6 +366,7 @@ type ExportSummaryRow = {
 };
 
 type ExportMemoryRow = {
+  clientRequestId?: string;
   dayKey: string;
   title: string;
   description?: string;
@@ -639,6 +640,10 @@ function parseMemoryRows(value: unknown): ExportMemoryRow[] {
     validateDayKey(dayKey);
 
     return {
+      clientRequestId: parseOptionalString(
+        item.clientRequestId,
+        `memories[${index}].clientRequestId`,
+      ),
       dayKey,
       title: assertNonEmptyString(item.title, `memories[${index}].title`),
       description: parseOptionalString(
@@ -972,6 +977,11 @@ function buildSignedExportPayload(input: {
 }
 
 function buildRestoreMemoryClientRequestId(row: ExportMemoryRow): string {
+  const importedClientRequestId = row.clientRequestId?.trim();
+  if (importedClientRequestId) {
+    return importedClientRequestId;
+  }
+
   const source = `${row.dayKey}|${row.happenedAt}|${row.title}|${row.description ?? ""}|${row.mood ?? ""}`;
   let hash = 2166136261;
 
@@ -1167,6 +1177,9 @@ function toTextExport(data: DiaryExportPayload): string {
   parts.push("=== Memories ===");
   for (const memory of data.memories) {
     parts.push(`- [${memory.dayKey}] ${memory.title}`);
+    if (memory.clientRequestId) {
+      parts.push(`  Request ID: ${memory.clientRequestId}`);
+    }
     parts.push(`  Mood: ${memory.mood ?? "-"}`);
     parts.push(`  Time: ${new Date(memory.happenedAt).toISOString()}`);
     if (memory.description?.trim()) {
@@ -1390,6 +1403,7 @@ export const exportMyDiaryData = query({
         exportedAt: Date.now(),
         dataset: args.dataset,
         page: page.page.map((memory) => ({
+          clientRequestId: memory.clientRequestId,
           dayKey: memory.dayKey,
           title: memory.title,
           description: memory.description,
@@ -2138,6 +2152,7 @@ export const restoreDiaryDatasetBatchInternal = internalMutation({
 
           if (args.conflictMode === "overwrite") {
             await db.patch(existingByRestoreRequestId._id, {
+              clientRequestId: restoreClientRequestId,
               dayKey: row.dayKey,
               title: row.title,
               description: row.description,
@@ -2177,6 +2192,7 @@ export const restoreDiaryDatasetBatchInternal = internalMutation({
         if (potentialConflict) {
           if (args.conflictMode === "overwrite") {
             await db.patch(potentialConflict._id, {
+              clientRequestId: restoreClientRequestId,
               dayKey: row.dayKey,
               title: row.title,
               description: row.description,
