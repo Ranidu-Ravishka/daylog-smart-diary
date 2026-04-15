@@ -256,6 +256,12 @@ const SettingsScreen = () => {
   const updateMyLocationTrackingState = useMutation(
     api.userPreferences.updateMyLocationTrackingState,
   );
+  const requestAccountDeletion = useMutation(api.users.requestAccountDeletion);
+  const [deletionPollToken, setDeletionPollToken] = useState(0);
+  const accountDeletionStatus = useQuery(
+    api.users.getMyAccountDeletionStatus,
+    isAuthenticated ? { pollToken: deletionPollToken } : "skip",
+  );
 
   const [darkMode, setDarkMode] = useState(false);
   const [allNotifications, setAllNotifications] = useState(true);
@@ -320,6 +326,26 @@ const SettingsScreen = () => {
       pending: 0,
       dueNow: 0,
     });
+  const [isRequestingAccountDeletion, setIsRequestingAccountDeletion] =
+    useState(false);
+  const [isFinalizingAccountDeletion, setIsFinalizingAccountDeletion] =
+    useState(false);
+  const [
+    hasTriggeredAccountDeletionFinalize,
+    setHasTriggeredAccountDeletionFinalize,
+  ] = useState(false);
+  const isAccountDeletionInProgress = Boolean(
+    accountDeletionStatus?.inProgress,
+  );
+  const canRetryAccountDeletion = Boolean(accountDeletionStatus?.retryable);
+  const accountDeletionStatusMessage =
+    accountDeletionStatus?.canDeleteClerkAccount
+      ? "Backend cleanup complete. Finalizing account deletion now."
+      : accountDeletionStatus?.inProgress
+        ? `Backend cleanup in progress (${accountDeletionStatus.job?.stage ?? "pending"}).`
+        : accountDeletionStatus?.retryable
+          ? `Cleanup failed: ${accountDeletionStatus.job?.lastError ?? "Unknown error"}`
+          : null;
   const callActivityCollectionSupported = React.useMemo(
     () =>
       Platform.OS === "android" && isAndroidCallActivityCollectionSupported(),
@@ -749,6 +775,85 @@ const SettingsScreen = () => {
       clearInterval(intervalId);
     };
   }, []);
+
+  useEffect(() => {
+    if (!accountDeletionStatus?.requested || isFinalizingAccountDeletion) {
+      return;
+    }
+
+    if (
+      accountDeletionStatus.canDeleteClerkAccount ||
+      accountDeletionStatus.retryable
+    ) {
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      setDeletionPollToken((token) => token + 1);
+    }, 2000);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [
+    accountDeletionStatus?.canDeleteClerkAccount,
+    accountDeletionStatus?.requested,
+    accountDeletionStatus?.retryable,
+    isFinalizingAccountDeletion,
+  ]);
+
+  useEffect(() => {
+    if (!accountDeletionStatus?.canDeleteClerkAccount) {
+      return;
+    }
+
+    if (hasTriggeredAccountDeletionFinalize || isFinalizingAccountDeletion) {
+      return;
+    }
+
+    void (async () => {
+      setHasTriggeredAccountDeletionFinalize(true);
+      setIsFinalizingAccountDeletion(true);
+
+      logInfo("mobile_account_deletion_finalize_started", {
+        status: "started",
+        hasUser: Boolean(user),
+        jobStatus: accountDeletionStatus.job?.status,
+      });
+
+      try {
+        if (!user) {
+          throw new Error("Missing Clerk user while finalizing deletion");
+        }
+
+        await user.delete();
+        await signOut();
+
+        logInfo("mobile_account_deletion_succeeded", {
+          status: "succeeded",
+          hasUser: true,
+        });
+      } catch (error) {
+        captureException("mobile_account_delete_finalize_failed", error, {
+          status: "failed",
+          hasUser: Boolean(user),
+        });
+        Alert.alert(
+          "Delete failed",
+          "Backend cleanup finished, but account deletion could not be finalized. Please retry.",
+        );
+        setHasTriggeredAccountDeletionFinalize(false);
+        setIsFinalizingAccountDeletion(false);
+      }
+    })();
+  }, [
+    accountDeletionStatus?.canDeleteClerkAccount,
+    accountDeletionStatus?.job?.status,
+    hasTriggeredAccountDeletionFinalize,
+    isFinalizingAccountDeletion,
+    signOut,
+    user,
+  ]);
 
   const updateReminderType = useCallback(
     async (nextReminderType: "daily" | "weekly") => {
@@ -1333,11 +1438,75 @@ const SettingsScreen = () => {
     });
   }, []);
 
-  const handleDeleteAccount = useCallback(() => {
-    logInfo("mobile_account_deletion_started", {
+  const submitAccountDeletionRequest = useCallback(async () => {
+    logInfo("mobile_account_deletion_request_started", {
       status: "started",
       hasUser: Boolean(user),
+      hasExistingJob: Boolean(accountDeletionStatus?.job),
     });
+
+    setIsRequestingAccountDeletion(true);
+    try {
+      const response = await requestAccountDeletion({});
+      setDeletionPollToken((token) => token + 1);
+
+      logInfo("mobile_account_deletion_request_succeeded", {
+        status: "succeeded",
+        hasUser: Boolean(user),
+        jobId: response.jobId,
+        jobStatus: response.status,
+        jobStage: response.stage,
+        created: response.created,
+        retried: response.retried,
+      });
+
+      if (response.canDeleteClerkAccount) {
+        Alert.alert(
+          "Finalizing deletion",
+          "Backend cleanup is complete. Finalizing account deletion now.",
+        );
+      } else if (response.retried) {
+        Alert.alert(
+          "Retry started",
+          "Backend cleanup is retrying. Your account will be deleted once cleanup completes.",
+        );
+      } else if (response.created) {
+        Alert.alert(
+          "Deletion started",
+          "Backend cleanup started. Keep the app open until account deletion is complete.",
+        );
+      } else {
+        Alert.alert(
+          "Deletion in progress",
+          "Backend cleanup is already running. We will finalize deletion automatically when it finishes.",
+        );
+      }
+    } catch (error) {
+      captureException("mobile_account_deletion_request_failed", error, {
+        status: "failed",
+        hasUser: Boolean(user),
+      });
+      Alert.alert(
+        "Delete failed",
+        "We could not start account deletion right now. Please try again.",
+      );
+    } finally {
+      setIsRequestingAccountDeletion(false);
+    }
+  }, [accountDeletionStatus?.job, requestAccountDeletion, user]);
+
+  const handleDeleteAccount = useCallback(() => {
+    if (isRequestingAccountDeletion || isFinalizingAccountDeletion) {
+      return;
+    }
+
+    if (isAccountDeletionInProgress && !canRetryAccountDeletion) {
+      Alert.alert(
+        "Deletion in progress",
+        "Backend cleanup is still running. We will finish deleting your account automatically once cleanup is complete.",
+      );
+      return;
+    }
 
     Alert.alert(
       "Delete Account",
@@ -1348,42 +1517,18 @@ const SettingsScreen = () => {
           text: "Delete",
           style: "destructive",
           onPress: () => {
-            void (async () => {
-              try {
-                if (!user) {
-                  logWarn("mobile_account_deletion_skipped", {
-                    status: "skipped",
-                    reason: "missing_user",
-                  });
-                  Alert.alert(
-                    "Delete failed",
-                    "No signed-in user found. Please sign in again.",
-                  );
-                  return;
-                }
-
-                await user.delete();
-                await signOut();
-                logInfo("mobile_account_deletion_succeeded", {
-                  status: "succeeded",
-                  hasUser: true,
-                });
-              } catch (error) {
-                captureException("mobile_account_delete_failed", error, {
-                  status: "failed",
-                  hasUser: Boolean(user),
-                });
-                Alert.alert(
-                  "Delete failed",
-                  "We could not delete your account right now. Please try again.",
-                );
-              }
-            })();
+            void submitAccountDeletionRequest();
           },
         },
       ],
     );
-  }, [signOut, user]);
+  }, [
+    canRetryAccountDeletion,
+    isAccountDeletionInProgress,
+    isFinalizingAccountDeletion,
+    isRequestingAccountDeletion,
+    submitAccountDeletionRequest,
+  ]);
 
   const handleOpenAboutLink = useCallback((path: string) => {
     const webAppUrl =
@@ -2576,12 +2721,46 @@ const SettingsScreen = () => {
         {/* ── Danger Zone ─────────────────────────── */}
         <View style={styles.pad}>
           <TouchableOpacity
-            style={styles.dangerBtn}
+            style={[
+              styles.dangerBtn,
+              (isRequestingAccountDeletion ||
+                isFinalizingAccountDeletion ||
+                (isAccountDeletionInProgress && !canRetryAccountDeletion)) &&
+                styles.dangerBtnDisabled,
+            ]}
             onPress={handleDeleteAccount}
+            disabled={
+              isRequestingAccountDeletion ||
+              isFinalizingAccountDeletion ||
+              (isAccountDeletionInProgress && !canRetryAccountDeletion)
+            }
           >
             <Ionicons name="trash-outline" size={16} color={c.error} />
-            <Text style={styles.dangerText}>Delete Account</Text>
+            <Text style={styles.dangerText}>
+              {isFinalizingAccountDeletion
+                ? "Finalizing account deletion..."
+                : isRequestingAccountDeletion
+                  ? "Requesting backend deletion..."
+                  : canRetryAccountDeletion
+                    ? "Retry Account Deletion"
+                    : isAccountDeletionInProgress
+                      ? "Cleaning up backend data..."
+                      : "Delete Account"}
+            </Text>
           </TouchableOpacity>
+
+          {accountDeletionStatusMessage ? (
+            <Text
+              style={[
+                styles.dangerStatusText,
+                accountDeletionStatus?.retryable
+                  ? styles.dangerStatusTextError
+                  : null,
+              ]}
+            >
+              {accountDeletionStatusMessage}
+            </Text>
+          ) : null}
         </View>
 
         <View style={{ height: 100 }} />
@@ -2989,8 +3168,20 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     paddingVertical: Spacing.md,
   },
+  dangerBtnDisabled: {
+    opacity: 0.55,
+  },
   dangerText: {
     ...Typography.callout,
+    color: c.error,
+  },
+  dangerStatusText: {
+    ...Typography.caption1,
+    color: c.textSecondary,
+    textAlign: "center",
+    marginTop: Spacing.xs,
+  },
+  dangerStatusTextError: {
     color: c.error,
   },
 });

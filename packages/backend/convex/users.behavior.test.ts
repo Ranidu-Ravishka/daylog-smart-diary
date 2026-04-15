@@ -545,6 +545,204 @@ describe("users behavior", () => {
     expect(second).toEqual({ success: true, deleted: false, queued: false });
   });
 
+  it("requests account deletion via backend job and exposes polling status", async () => {
+    const schedulerRunAfter = vi.fn(async () => undefined);
+    const db = createInMemoryDb(baseSeed());
+
+    const requestAccountDeletion = handler<
+      Record<string, never>,
+      {
+        success: boolean;
+        created: boolean;
+        retried: boolean;
+        canDeleteClerkAccount: boolean;
+      }
+    >(usersModule.requestAccountDeletion);
+    const getMyAccountDeletionStatus = handler<
+      { pollToken?: number },
+      {
+        requested: boolean;
+        inProgress: boolean;
+        retryable: boolean;
+        canDeleteClerkAccount: boolean;
+      }
+    >(usersModule.getMyAccountDeletionStatus);
+
+    const ctx = {
+      ...createAuthCtx(db, "clerk_member_001"),
+      scheduler: {
+        runAfter: schedulerRunAfter,
+      },
+    };
+
+    const response = await requestAccountDeletion(ctx, {});
+    expect(response.success).toBe(true);
+    expect(response.created).toBe(true);
+    expect(response.retried).toBe(false);
+    expect(response.canDeleteClerkAccount).toBe(false);
+    expect(schedulerRunAfter).toHaveBeenCalledTimes(1);
+
+    const member = await db
+      .query("user")
+      .withIndex("by_clerkUserId", (q) =>
+        q.eq("clerkUserId", "clerk_member_001"),
+      )
+      .unique();
+    expect(member?.accountStatus).toBe("deletion_requested");
+    expect(typeof member?.accountDeletionRequestedAt).toBe("number");
+
+    const status = await getMyAccountDeletionStatus(
+      createAuthCtx(db, "clerk_member_001"),
+      {
+        pollToken: 1,
+      },
+    );
+    expect(status.requested).toBe(true);
+    expect(status.inProgress).toBe(true);
+    expect(status.retryable).toBe(false);
+    expect(status.canDeleteClerkAccount).toBe(false);
+  });
+
+  it("retries failed account deletion jobs on request", async () => {
+    const schedulerRunAfter = vi.fn(async () => undefined);
+    const failedUserId = "user_retry_target_001" as Id<"user">;
+    const failedJobId = "deletion_job_retry_001" as Id<"userDeletionJobs">;
+
+    const db = createInMemoryDb({
+      ...baseSeed(),
+      user: [
+        ...baseSeed().user,
+        {
+          _id: failedUserId,
+          _creationTime: 100,
+          clerkUserId: "clerk_retry_target_001",
+          email: "retry-target@example.com",
+          isAdmin: false,
+        },
+      ],
+      userDeletionJobs: [
+        {
+          _id: failedJobId,
+          _creationTime: 101,
+          userId: failedUserId,
+          clerkUserId: "clerk_retry_target_001",
+          status: "failed",
+          stage: "memories",
+          processedBatches: 2,
+          checkpoints: 2,
+          progress: {
+            deletedMemories: 10,
+            deletedSummaries: 3,
+            deletedDays: 2,
+            deletedIntegrations: 1,
+            deletedPreferences: 1,
+            deletedAuditLogs: 1,
+            deletedPlatformAuditEvents: 1,
+            deletedMemoryMedia: 4,
+            deletedIntegrationDailyData: 1,
+            deletedIntegrationSecrets: 1,
+            deletedIntegrationSyncRuns: 1,
+            deletedIntegrationHealthEvents: 1,
+            deletedExportJobs: 1,
+            deletedRestoreJobs: 1,
+            deletedSummaryGenerationEvents: 1,
+            deletedSummaryQualityEvaluations: 1,
+            deletedSummaryGenerationQuotas: 1,
+          },
+          startedAt: 1,
+          updatedAt: 2,
+          failedAt: 2,
+          lastError: "boom",
+        },
+      ],
+    });
+
+    const requestAccountDeletion = handler<
+      Record<string, never>,
+      { success: boolean; retried: boolean; status: string }
+    >(usersModule.requestAccountDeletion);
+
+    const ctx = {
+      ...createAuthCtx(db, "clerk_retry_target_001"),
+      scheduler: {
+        runAfter: schedulerRunAfter,
+      },
+    };
+
+    const response = await requestAccountDeletion(ctx, {});
+    expect(response.success).toBe(true);
+    expect(response.retried).toBe(true);
+    expect(response.status).toBe("processing");
+    expect(schedulerRunAfter).toHaveBeenCalledTimes(1);
+
+    const retriedJob = await db.get(failedJobId);
+    expect(retriedJob?.status).toBe("processing");
+    expect(retriedJob?.failedAt).toBeUndefined();
+    expect(retriedJob?.lastError).toBeUndefined();
+  });
+
+  it("blocks Clerk sync from recreating users after deletion completion", async () => {
+    const deletedUserId = "user_deleted_target_001" as Id<"user">;
+    const completedJobId =
+      "deletion_job_completed_001" as Id<"userDeletionJobs">;
+
+    const db = createInMemoryDb({
+      ...baseSeed(),
+      userDeletionJobs: [
+        {
+          _id: completedJobId,
+          _creationTime: 50,
+          userId: deletedUserId,
+          clerkUserId: "clerk_deleted_target_001",
+          status: "completed",
+          stage: "summaryGenerationQuotas",
+          processedBatches: 3,
+          checkpoints: 3,
+          progress: {
+            deletedMemories: 1,
+            deletedSummaries: 1,
+            deletedDays: 1,
+            deletedIntegrations: 1,
+            deletedPreferences: 1,
+            deletedAuditLogs: 1,
+            deletedPlatformAuditEvents: 1,
+            deletedMemoryMedia: 1,
+            deletedIntegrationDailyData: 1,
+            deletedIntegrationSecrets: 1,
+            deletedIntegrationSyncRuns: 1,
+            deletedIntegrationHealthEvents: 1,
+            deletedExportJobs: 1,
+            deletedRestoreJobs: 1,
+            deletedSummaryGenerationEvents: 1,
+            deletedSummaryQualityEvaluations: 1,
+            deletedSummaryGenerationQuotas: 1,
+          },
+          startedAt: 1,
+          updatedAt: 3,
+          completedAt: 3,
+          userDeletedAt: 3,
+        },
+      ],
+    });
+
+    const syncUserFromClerk = handler<
+      {
+        clerkUserId: string;
+        email: string;
+        firstName?: string;
+        lastName?: string;
+      },
+      unknown
+    >(usersModule.syncUserFromClerk);
+
+    await expect(
+      syncUserFromClerk(createAuthCtx(db, "clerk_deleted_target_001"), {
+        clerkUserId: "clerk_deleted_target_001",
+        email: "deleted-target@example.com",
+      }),
+    ).rejects.toThrow("Account deletion in progress");
+  });
+
   it("marks deletion jobs as failed when a step throws", async () => {
     const targetUserId = "user_fail_target_001" as Id<"user">;
     const targetJobId = "deletion_job_fail_001" as Id<"userDeletionJobs">;

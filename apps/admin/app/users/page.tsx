@@ -140,6 +140,25 @@ const getUserDeletionJobRef = makeFunctionReference<"query">(
   "admin:adminGetUserDeletionJob",
 );
 
+const listRecentUserDeletionJobsRef = makeFunctionReference<"query">(
+  "admin:adminListRecentUserDeletionJobs",
+);
+
+type RecentDeletionJobRecord = {
+  _id: string;
+  userId: string;
+  clerkUserId: string;
+  status: DeletionJobStatus;
+  stage: string;
+  checkpoints: number;
+  updatedAt: number;
+  completedAt?: number;
+  failedAt?: number;
+  lastError?: string;
+  progress?: unknown;
+  userEmail?: string | null;
+};
+
 function formatDeletionStageLabel(stage: string): string {
   return stage
     .replace(/([A-Z])/g, " $1")
@@ -383,11 +402,18 @@ export default function UsersPage() {
   const deleteUser = useMutation(api.admin.adminDeleteUser);
 
   const [pollToken, setPollToken] = React.useState(0);
+  const recentDeletionJobs = useQuery(
+    listRecentUserDeletionJobsRef,
+    isAdmin ? { limit: 20, pollToken } : "skip",
+  ) as RecentDeletionJobRecord[] | undefined;
   const [deletingByUserId, setDeletingByUserId] = React.useState<
     Record<string, boolean>
   >({});
   const [optimisticallyHiddenByUserId, setOptimisticallyHiddenByUserId] =
     React.useState<Record<string, boolean>>({});
+  const [dismissedDeletionJobIds, setDismissedDeletionJobIds] = React.useState<
+    Record<string, true>
+  >({});
   const [rowRefreshVersionByUserId, setRowRefreshVersionByUserId] =
     React.useState<Record<string, number>>({});
   const [toasts, setToasts] = React.useState<ActionToast[]>([]);
@@ -478,6 +504,59 @@ export default function UsersPage() {
     return buildRowDeletionStatusByUserId(trackedDeletionJobs);
   }, [trackedDeletionJobs]);
 
+  React.useEffect(() => {
+    if (!recentDeletionJobs) {
+      return;
+    }
+
+    setTrackedDeletionJobs((current) => {
+      const previousByJobId = new Map(
+        current.map((job) => [job.jobId, job] as const),
+      );
+      const mergedByJobId = new Map(previousByJobId);
+
+      for (const recentJob of recentDeletionJobs) {
+        const jobId = String(recentJob._id);
+
+        if (dismissedDeletionJobIds[jobId]) {
+          continue;
+        }
+
+        const existing = previousByJobId.get(jobId);
+        const normalizedProgress =
+          normalizeDeletionJobProgress(recentJob.progress) ??
+          existing?.progress ??
+          EMPTY_DELETION_JOB_PROGRESS;
+
+        const mergedJob: TrackedDeletionJob = {
+          jobId,
+          userId: String(recentJob.userId),
+          userEmail:
+            recentJob.userEmail ?? existing?.userEmail ?? recentJob.clerkUserId,
+          status: recentJob.status,
+          stage: recentJob.stage,
+          checkpoints: recentJob.checkpoints,
+          updatedAt: recentJob.updatedAt,
+          completedAt: recentJob.completedAt,
+          failedAt: recentJob.failedAt,
+          lastError: recentJob.lastError,
+          progress: normalizedProgress,
+        };
+
+        if (!existing && isDeletionJobTerminal(mergedJob.status)) {
+          handledTerminalJobIdsRef.current.add(jobId);
+        }
+
+        mergedByJobId.set(jobId, mergedJob);
+      }
+
+      return Array.from(mergedByJobId.values())
+        .filter((job) => !dismissedDeletionJobIds[job.jobId])
+        .sort((left, right) => right.updatedAt - left.updatedAt)
+        .slice(0, 20);
+    });
+  }, [dismissedDeletionJobIds, recentDeletionJobs]);
+
   const visibleUsers = React.useMemo(
     () => users.filter((row) => !optimisticallyHiddenByUserId[String(row._id)]),
     [optimisticallyHiddenByUserId, users],
@@ -546,6 +625,10 @@ export default function UsersPage() {
   );
 
   const dismissDeletionJob = React.useCallback((jobId: string) => {
+    setDismissedDeletionJobIds((current) => ({
+      ...current,
+      [jobId]: true,
+    }));
     setTrackedDeletionJobs((current) =>
       current.filter((job) => job.jobId !== jobId),
     );
@@ -602,6 +685,16 @@ export default function UsersPage() {
 
         const now = Date.now();
         pushToast("info", `Deletion requested for ${row.email}.`);
+
+        setDismissedDeletionJobIds((current) => {
+          if (!current[jobId]) {
+            return current;
+          }
+
+          const next = { ...current };
+          delete next[jobId];
+          return next;
+        });
 
         setTrackedDeletionJobs((current) => {
           const initialStatus: DeletionJobStatus =
@@ -697,7 +790,8 @@ export default function UsersPage() {
                     User Deletion Jobs
                   </h2>
                   <p className="text-xs text-blue-700 mt-0.5">
-                    Polling deletion status every 3 seconds.
+                    Showing recent jobs across sessions and polling active jobs
+                    every 3 seconds.
                   </p>
                 </div>
                 <span className="text-xs font-medium text-blue-800">

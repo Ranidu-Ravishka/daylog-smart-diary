@@ -118,6 +118,11 @@ const activityLevelValidator = v.union(
   v.literal("idle"),
 );
 
+const userAccountStatusValidator = v.union(
+  v.literal("active"),
+  v.literal("deletion_requested"),
+);
+
 const locationStayPointValidator = v.object({
   label: v.string(),
   startedAt: v.number(),
@@ -185,6 +190,8 @@ export default defineSchema(
       firstName: v.optional(v.string()),
       lastName: v.optional(v.string()),
       imageUrl: v.optional(v.string()),
+      accountStatus: v.optional(userAccountStatusValidator),
+      accountDeletionRequestedAt: v.optional(v.number()),
       planTier: v.optional(
         v.union(
           v.literal("free"),
