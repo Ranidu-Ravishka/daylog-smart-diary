@@ -5,6 +5,7 @@ import {
   internalMutation,
   internalQuery,
   type MutationCtx,
+  type QueryCtx,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import {
@@ -173,6 +174,8 @@ type UserDeletionJobRef = {
   stage: Doc<"userDeletionJobs">["stage"];
 };
 
+type UserDeletionJobReader = Pick<MutationCtx | QueryCtx, "db">;
+
 async function findLatestUserDeletionJobByUserId(
   ctx: Pick<MutationCtx, "db">,
   userId: Id<"user">,
@@ -227,41 +230,101 @@ async function findLatestUserDeletionJobByUserId(
     : latestFailed;
 }
 
+async function findLatestUserDeletionJobByClerkUserId(
+  ctx: UserDeletionJobReader,
+  clerkUserId: string,
+): Promise<Doc<"userDeletionJobs"> | null> {
+  const [processing, requested, completed, failed] = await Promise.all([
+    ctx.db
+      .query("userDeletionJobs")
+      .withIndex("by_clerk_status", (q) =>
+        q.eq("clerkUserId", clerkUserId).eq("status", "processing"),
+      )
+      .order("desc")
+      .take(1),
+    ctx.db
+      .query("userDeletionJobs")
+      .withIndex("by_clerk_status", (q) =>
+        q.eq("clerkUserId", clerkUserId).eq("status", "requested"),
+      )
+      .order("desc")
+      .take(1),
+    ctx.db
+      .query("userDeletionJobs")
+      .withIndex("by_clerk_status", (q) =>
+        q.eq("clerkUserId", clerkUserId).eq("status", "completed"),
+      )
+      .order("desc")
+      .take(1),
+    ctx.db
+      .query("userDeletionJobs")
+      .withIndex("by_clerk_status", (q) =>
+        q.eq("clerkUserId", clerkUserId).eq("status", "failed"),
+      )
+      .order("desc")
+      .take(1),
+  ]);
+
+  if (processing[0]) {
+    return processing[0];
+  }
+
+  if (requested[0]) {
+    return requested[0];
+  }
+
+  const latestCompleted = completed[0] ?? null;
+  const latestFailed = failed[0] ?? null;
+
+  if (!latestCompleted) {
+    return latestFailed;
+  }
+
+  if (!latestFailed) {
+    return latestCompleted;
+  }
+
+  return latestCompleted.updatedAt >= latestFailed.updatedAt
+    ? latestCompleted
+    : latestFailed;
+}
+
+function shouldBlockUserSyncDuringDeletion(
+  job: Doc<"userDeletionJobs"> | null,
+): boolean {
+  if (!job) {
+    return false;
+  }
+
+  if (job.status === "requested" || job.status === "processing") {
+    return true;
+  }
+
+  if (job.status === "completed") {
+    return true;
+  }
+
+  return Boolean(job.userDeletedAt);
+}
+
 async function findActiveUserDeletionJobByClerkId(
-  ctx: Pick<MutationCtx, "db">,
+  ctx: UserDeletionJobReader,
   clerkUserId: string,
 ): Promise<UserDeletionJobRef | null> {
-  const processing = await ctx.db
-    .query("userDeletionJobs")
-    .withIndex("by_clerk_status", (q) =>
-      q.eq("clerkUserId", clerkUserId).eq("status", "processing"),
-    )
-    .order("desc")
-    .take(1);
-  if (processing[0]) {
-    return {
-      jobId: processing[0]._id,
-      status: processing[0].status,
-      stage: processing[0].stage,
-    };
+  const latest = await findLatestUserDeletionJobByClerkUserId(ctx, clerkUserId);
+  if (!latest) {
+    return null;
   }
 
-  const requested = await ctx.db
-    .query("userDeletionJobs")
-    .withIndex("by_clerk_status", (q) =>
-      q.eq("clerkUserId", clerkUserId).eq("status", "requested"),
-    )
-    .order("desc")
-    .take(1);
-  if (requested[0]) {
-    return {
-      jobId: requested[0]._id,
-      status: requested[0].status,
-      stage: requested[0].stage,
-    };
+  if (latest.status !== "requested" && latest.status !== "processing") {
+    return null;
   }
 
-  return null;
+  return {
+    jobId: latest._id,
+    status: latest.status,
+    stage: latest.stage,
+  };
 }
 
 async function scheduleUserDeletionStep(
@@ -729,6 +792,14 @@ async function syncUserRecord(
     return await ctx.db.get(existing._id);
   }
 
+  const latestDeletionJob = await findLatestUserDeletionJobByClerkUserId(
+    ctx,
+    args.clerkUserId,
+  );
+  if (shouldBlockUserSyncDuringDeletion(latestDeletionJob)) {
+    throw new Error("Account deletion in progress; user sync is blocked");
+  }
+
   const now = Date.now();
   const id = await ctx.db.insert("user", {
     clerkUserId: args.clerkUserId,
@@ -736,6 +807,7 @@ async function syncUserRecord(
     firstName: args.firstName,
     lastName: args.lastName,
     imageUrl: args.imageUrl,
+    accountStatus: "active",
     planTier: "free",
     isAdmin: false,
     adminAuthVersion: 0,
@@ -837,6 +909,180 @@ export const setUserAdminStatus = mutation({
     const adminRolePatch = buildAdminRoleStatePatch(targetUser, args.isAdmin);
     await ctx.db.patch(targetUser._id, adminRolePatch);
     return { success: true };
+  },
+});
+
+export const requestAccountDeletion = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const user = await requireUser(ctx);
+    const now = Date.now();
+
+    await ctx.db.patch(user._id, {
+      accountStatus: "deletion_requested",
+      accountDeletionRequestedAt: now,
+    });
+
+    const latestJob = await findLatestUserDeletionJobByUserId(ctx, user._id);
+
+    if (latestJob?.status === "completed") {
+      logInfo("deletion.user.request.completed_job_reused", {
+        status: "succeeded",
+        userId: user._id,
+        clerkUserId: user.clerkUserId,
+        jobId: latestJob._id,
+      });
+
+      return {
+        success: true,
+        requestedAt: now,
+        jobId: latestJob._id,
+        status: latestJob.status,
+        stage: latestJob.stage,
+        created: false,
+        retried: false,
+        canDeleteClerkAccount: true,
+      };
+    }
+
+    if (
+      latestJob?.status === "processing" ||
+      latestJob?.status === "requested"
+    ) {
+      logInfo("deletion.user.request.reused_inflight_job", {
+        status: "queued",
+        userId: user._id,
+        clerkUserId: user.clerkUserId,
+        jobId: latestJob._id,
+        stage: latestJob.stage,
+        jobStatus: latestJob.status,
+      });
+
+      return {
+        success: true,
+        requestedAt: now,
+        jobId: latestJob._id,
+        status: latestJob.status,
+        stage: latestJob.stage,
+        created: false,
+        retried: false,
+        canDeleteClerkAccount: false,
+      };
+    }
+
+    if (latestJob?.status === "failed") {
+      await ctx.db.patch(latestJob._id, {
+        status: "processing",
+        updatedAt: now,
+        failedAt: undefined,
+        lastError: undefined,
+      });
+      await scheduleUserDeletionStep(ctx, latestJob._id);
+
+      logInfo("deletion.user.request.retried_failed_job", {
+        status: "queued",
+        userId: user._id,
+        clerkUserId: user.clerkUserId,
+        jobId: latestJob._id,
+        stage: latestJob.stage,
+      });
+
+      return {
+        success: true,
+        requestedAt: now,
+        jobId: latestJob._id,
+        status: "processing" as const,
+        stage: latestJob.stage,
+        created: false,
+        retried: true,
+        canDeleteClerkAccount: false,
+      };
+    }
+
+    const job = await enqueueUserDeletionJob(ctx, {
+      userId: user._id,
+      clerkUserId: user.clerkUserId,
+      requestedByUserId: user._id,
+    });
+
+    logInfo("deletion.user.request.enqueued", {
+      status: "queued",
+      userId: user._id,
+      clerkUserId: user.clerkUserId,
+      jobId: job.jobId,
+      stage: job.stage,
+      created: job.created,
+    });
+
+    return {
+      success: true,
+      requestedAt: now,
+      jobId: job.jobId,
+      status: job.status,
+      stage: job.stage,
+      created: job.created,
+      retried: false,
+      canDeleteClerkAccount: false,
+    };
+  },
+});
+
+export const getMyAccountDeletionStatus = query({
+  args: {
+    pollToken: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    void args.pollToken;
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: not signed in");
+    }
+
+    const clerkUserId = identity.subject;
+
+    const [user, latestJob] = await Promise.all([
+      ctx.db
+        .query("user")
+        .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", clerkUserId))
+        .unique(),
+      findLatestUserDeletionJobByClerkUserId(ctx, clerkUserId),
+    ]);
+
+    const requestedFromJob =
+      latestJob?.status === "requested" ||
+      latestJob?.status === "processing" ||
+      latestJob?.status === "failed" ||
+      latestJob?.status === "completed";
+
+    const requested =
+      user?.accountStatus === "deletion_requested" || requestedFromJob;
+
+    return {
+      requested,
+      requestedAt: user?.accountDeletionRequestedAt ?? latestJob?.startedAt,
+      accountStatus: requested ? "deletion_requested" : "active",
+      userExists: user !== null,
+      inProgress:
+        latestJob?.status === "requested" || latestJob?.status === "processing",
+      retryable: latestJob?.status === "failed",
+      canDeleteClerkAccount: latestJob?.status === "completed",
+      job: latestJob
+        ? {
+            id: latestJob._id,
+            status: latestJob.status,
+            stage: latestJob.stage,
+            startedAt: latestJob.startedAt,
+            updatedAt: latestJob.updatedAt,
+            completedAt: latestJob.completedAt,
+            failedAt: latestJob.failedAt,
+            lastError: latestJob.lastError,
+            checkpoints: latestJob.checkpoints,
+            processedBatches: latestJob.processedBatches,
+            progress: latestJob.progress,
+          }
+        : null,
+    };
   },
 });
 

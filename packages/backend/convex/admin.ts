@@ -324,6 +324,47 @@ export const adminGetUserDeletionJob = query({
   },
 });
 
+export const adminListRecentUserDeletionJobs = query({
+  args: {
+    limit: v.optional(v.number()),
+    pollToken: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+    void args.pollToken;
+
+    const limit = clampLimit(args.limit ?? 15, 100);
+    const jobs = await ctx.db
+      .query("userDeletionJobs")
+      .withIndex("by_updatedAt")
+      .order("desc")
+      .take(limit);
+
+    if (jobs.length === 0) {
+      return [];
+    }
+
+    const uniqueUserIds = Array.from(new Set(jobs.map((job) => job.userId)));
+
+    const userRows = await Promise.all(
+      uniqueUserIds.map((userId) => ctx.db.get(userId)),
+    );
+
+    const userEmailById = new Map<string, string>();
+    userRows.forEach((row) => {
+      if (!row) {
+        return;
+      }
+      userEmailById.set(String(row._id), row.email);
+    });
+
+    return jobs.map((job) => ({
+      ...job,
+      userEmail: userEmailById.get(String(job.userId)) ?? null,
+    }));
+  },
+});
+
 export const adminMigrateUserDeletionJobStatuses = mutation({
   args: {
     dryRun: v.optional(v.boolean()),

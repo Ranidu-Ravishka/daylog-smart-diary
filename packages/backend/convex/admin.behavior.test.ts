@@ -725,4 +725,82 @@ describe("admin behavior", () => {
     });
     expect(secondPass.totalMigrated).toBe(0);
   });
+
+  it("lists recent user deletion jobs for admin monitoring", async () => {
+    const db = seededDb();
+    const ctx = adminCtx(db);
+
+    const adminListRecentUserDeletionJobs = handler<
+      { limit?: number; pollToken?: number },
+      Array<{
+        _id: Id<"userDeletionJobs">;
+        userId: Id<"user">;
+        clerkUserId: string;
+        userEmail: string | null;
+        status: "requested" | "processing" | "completed" | "failed";
+        updatedAt: number;
+      }>
+    >(adminModule.adminListRecentUserDeletionJobs);
+
+    const emptyProgress = {
+      deletedMemories: 0,
+      deletedSummaries: 0,
+      deletedDays: 0,
+      deletedIntegrations: 0,
+      deletedPreferences: 0,
+      deletedAuditLogs: 0,
+      deletedPlatformAuditEvents: 0,
+      deletedMemoryMedia: 0,
+      deletedIntegrationDailyData: 0,
+      deletedIntegrationSecrets: 0,
+      deletedIntegrationSyncRuns: 0,
+      deletedIntegrationHealthEvents: 0,
+      deletedExportJobs: 0,
+      deletedRestoreJobs: 0,
+      deletedSummaryGenerationEvents: 0,
+      deletedSummaryQualityEvaluations: 0,
+      deletedSummaryGenerationQuotas: 0,
+    };
+
+    const olderJobId = (await db.insert("userDeletionJobs", {
+      userId: MEMBER_ID,
+      clerkUserId: "clerk_member_001",
+      requestedByUserId: ADMIN_ID,
+      status: "failed",
+      stage: "memories",
+      processedBatches: 1,
+      checkpoints: 1,
+      progress: emptyProgress,
+      startedAt: 100,
+      updatedAt: 100,
+      failedAt: 100,
+      lastError: "failed_once",
+    })) as Id<"userDeletionJobs">;
+
+    const deletedUserId = "user_deleted_001" as Id<"user">;
+    const newerJobId = (await db.insert("userDeletionJobs", {
+      userId: deletedUserId,
+      clerkUserId: "clerk_deleted_001",
+      requestedByUserId: ADMIN_ID,
+      status: "processing",
+      stage: "days",
+      processedBatches: 3,
+      checkpoints: 3,
+      progress: emptyProgress,
+      startedAt: 200,
+      updatedAt: 200,
+    })) as Id<"userDeletionJobs">;
+
+    const recent = await adminListRecentUserDeletionJobs(ctx, {
+      limit: 10,
+      pollToken: 1,
+    });
+
+    expect(recent).toHaveLength(2);
+    expect(recent[0]?._id).toBe(newerJobId);
+    expect(recent[0]?.userEmail).toBeNull();
+    expect(recent[0]?.clerkUserId).toBe("clerk_deleted_001");
+    expect(recent[1]?._id).toBe(olderJobId);
+    expect(recent[1]?.userEmail).toBe("member@example.com");
+  });
 });

@@ -1,8 +1,10 @@
 "use client";
 
 import { useUser, useClerk } from "@clerk/nextjs";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery } from "convex/react";
 import { LogOut, AlertTriangle } from "lucide-react";
+import { api } from "@repo/backend/convex";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -19,36 +21,163 @@ import { toastError, toastSuccess } from "@/lib/toast";
 export default function AccountPage() {
   const { user } = useUser();
   const { signOut } = useClerk();
+  const requestAccountDeletion = useMutation(api.users.requestAccountDeletion);
+  const [pollToken, setPollToken] = useState(0);
+  const deletionStatus = useQuery(api.users.getMyAccountDeletionStatus, {
+    pollToken,
+  });
   const [showConfirm, setShowConfirm] = useState(false);
   const [confirmText, setConfirmText] = useState("");
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [isRequestingDeletion, setIsRequestingDeletion] = useState(false);
+  const [isFinalizingDeletion, setIsFinalizingDeletion] = useState(false);
+  const [hasTriggeredClerkDelete, setHasTriggeredClerkDelete] = useState(false);
 
-  const handleDeleteAccount = async () => {
-    if (confirmText !== "DELETE") return;
+  const isDeletionInProgress = Boolean(deletionStatus?.inProgress);
+  const canRetryDeletion = Boolean(deletionStatus?.retryable);
 
-    logInfo("web_account_deletion_started", {
+  useEffect(() => {
+    if (!deletionStatus?.requested || isFinalizingDeletion) {
+      return;
+    }
+
+    if (deletionStatus.canDeleteClerkAccount || deletionStatus.retryable) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setPollToken((token) => token + 1);
+    }, 2000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [
+    deletionStatus?.canDeleteClerkAccount,
+    deletionStatus?.requested,
+    deletionStatus?.retryable,
+    isFinalizingDeletion,
+  ]);
+
+  useEffect(() => {
+    if (!deletionStatus?.canDeleteClerkAccount) {
+      return;
+    }
+
+    if (hasTriggeredClerkDelete || isFinalizingDeletion) {
+      return;
+    }
+
+    const finalizeClerkDeletion = async () => {
+      setHasTriggeredClerkDelete(true);
+      setIsFinalizingDeletion(true);
+
+      logInfo("web_account_deletion_finalize_started", {
+        status: "started",
+        hasUser: Boolean(user),
+        jobStatus: deletionStatus.job?.status,
+      });
+
+      try {
+        if (!user) {
+          throw new Error("Missing Clerk user while finalizing deletion");
+        }
+
+        await user.delete();
+        await signOut();
+
+        logInfo("web_account_deletion_succeeded", {
+          status: "succeeded",
+          hasUser: true,
+        });
+        toastSuccess("Account deleted successfully.");
+      } catch (err) {
+        captureException("web_account_delete_finalize_failed", err, {
+          status: "failed",
+          hasUser: Boolean(user),
+        });
+        toastError(
+          "Backend cleanup completed, but we could not finalize account deletion. Please retry.",
+        );
+        setHasTriggeredClerkDelete(false);
+        setIsFinalizingDeletion(false);
+      }
+    };
+
+    void finalizeClerkDeletion();
+  }, [
+    deletionStatus?.canDeleteClerkAccount,
+    deletionStatus?.job?.status,
+    hasTriggeredClerkDelete,
+    isFinalizingDeletion,
+    signOut,
+    user,
+  ]);
+
+  const submitAccountDeletionRequest = async () => {
+    logInfo("web_account_deletion_request_started", {
       status: "started",
       hasUser: Boolean(user),
+      hasExistingJob: Boolean(deletionStatus?.job),
     });
 
-    setIsDeleting(true);
+    setIsRequestingDeletion(true);
     try {
-      await user?.delete();
-      await signOut();
-      logInfo("web_account_deletion_succeeded", {
+      const response = await requestAccountDeletion({});
+      setPollToken((token) => token + 1);
+
+      logInfo("web_account_deletion_request_succeeded", {
         status: "succeeded",
         hasUser: Boolean(user),
+        jobId: response.jobId,
+        jobStatus: response.status,
+        jobStage: response.stage,
+        created: response.created,
+        retried: response.retried,
       });
-      toastSuccess("Account deleted successfully.");
+
+      if (response.canDeleteClerkAccount) {
+        toastSuccess(
+          "Backend cleanup is complete. Finalizing account deletion now.",
+        );
+      } else if (response.retried) {
+        toastSuccess(
+          "Retrying backend cleanup. Your account will be deleted automatically once cleanup completes.",
+        );
+      } else if (response.created) {
+        toastSuccess(
+          "Account cleanup started. Keep this page open while we finish deletion.",
+        );
+      } else {
+        toastSuccess(
+          "Account cleanup is already running. We will finish deletion automatically.",
+        );
+      }
     } catch (err) {
-      captureException("web_account_delete_failed", err, {
+      captureException("web_account_deletion_request_failed", err, {
         status: "failed",
         hasUser: Boolean(user),
       });
-      toastError("Failed to delete account. Please try again.");
-      setIsDeleting(false);
+      toastError("Failed to start account deletion. Please try again.");
+    } finally {
+      setIsRequestingDeletion(false);
     }
   };
+
+  const handleDeleteAccount = async () => {
+    if (confirmText !== "DELETE") {
+      return;
+    }
+
+    await submitAccountDeletionRequest();
+  };
+
+  const deletionButtonLabel = isFinalizingDeletion
+    ? "Finalizing account deletion…"
+    : isRequestingDeletion
+      ? "Requesting backend deletion…"
+      : isDeletionInProgress
+        ? "Cleaning up backend data…"
+        : "Permanently delete";
 
   return (
     <div className="max-w-xl">
@@ -145,14 +274,58 @@ export default function AccountPage() {
                 onChange={(e) => setConfirmText(e.target.value)}
                 placeholder="Type DELETE"
               />
+
+              {deletionStatus?.requested ? (
+                <div className="rounded-md border border-muted bg-muted/30 p-3 space-y-2">
+                  {deletionStatus.inProgress ? (
+                    <p className="text-xs text-muted-foreground">
+                      Backend cleanup is in progress at stage{" "}
+                      <span className="font-medium text-foreground">
+                        {deletionStatus.job?.stage ?? "pending"}
+                      </span>
+                      .
+                    </p>
+                  ) : null}
+
+                  {deletionStatus.retryable ? (
+                    <p className="text-xs text-destructive">
+                      Cleanup failed.{" "}
+                      {deletionStatus.job?.lastError ?? "Unknown error."}
+                    </p>
+                  ) : null}
+
+                  {deletionStatus.canDeleteClerkAccount ? (
+                    <p className="text-xs text-muted-foreground">
+                      Cleanup complete. Finalizing account deletion now.
+                    </p>
+                  ) : null}
+
+                  {deletionStatus.retryable ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={submitAccountDeletionRequest}
+                      disabled={isRequestingDeletion || isFinalizingDeletion}
+                    >
+                      Retry backend cleanup
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+
               <div className="flex gap-2">
                 <Button
                   variant="destructive"
                   size="sm"
                   onClick={handleDeleteAccount}
-                  disabled={confirmText !== "DELETE" || isDeleting}
+                  disabled={
+                    confirmText !== "DELETE" ||
+                    isRequestingDeletion ||
+                    isFinalizingDeletion ||
+                    (isDeletionInProgress && !canRetryDeletion)
+                  }
                 >
-                  {isDeleting ? "Deleting…" : "Permanently delete"}
+                  {deletionButtonLabel}
                 </Button>
                 <Button
                   variant="outline"
@@ -161,6 +334,7 @@ export default function AccountPage() {
                     setShowConfirm(false);
                     setConfirmText("");
                   }}
+                  disabled={isRequestingDeletion || isFinalizingDeletion}
                 >
                   Cancel
                 </Button>
