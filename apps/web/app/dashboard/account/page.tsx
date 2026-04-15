@@ -3,8 +3,16 @@
 import { useUser, useClerk } from "@clerk/nextjs";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
+import type { GenericId } from "convex/values";
 import { LogOut, AlertTriangle } from "lucide-react";
 import { api } from "@repo/backend/convex";
+import {
+  deriveDeletionState,
+  formatDeletionStageLabel,
+  getDeletionProgressPercent,
+  getDeletionStateLabel,
+  shouldLockDeletionNavigation,
+} from "@repo/ui/lib/account-deletion";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -18,13 +26,49 @@ import { Separator } from "@/components/ui/separator";
 import { captureException, logInfo } from "@/lib/observability";
 import { toastError, toastSuccess } from "@/lib/toast";
 
+function getDeletionStatePillClasses(
+  deletionState: ReturnType<typeof deriveDeletionState>,
+): string {
+  if (deletionState === "completed") {
+    return "bg-emerald-100 text-emerald-800";
+  }
+
+  if (deletionState === "failed") {
+    return "bg-red-100 text-red-800";
+  }
+
+  if (deletionState === "processing") {
+    return "bg-amber-100 text-amber-800";
+  }
+
+  return "bg-slate-100 text-slate-700";
+}
+
+function getDeletionProgressClasses(
+  deletionState: ReturnType<typeof deriveDeletionState>,
+): string {
+  if (deletionState === "completed") {
+    return "bg-emerald-500";
+  }
+
+  if (deletionState === "failed") {
+    return "bg-destructive";
+  }
+
+  return "bg-blue-600";
+}
+
 export default function AccountPage() {
   const { user } = useUser();
   const { signOut } = useClerk();
   const requestAccountDeletion = useMutation(api.users.requestAccountDeletion);
   const [pollToken, setPollToken] = useState(0);
+  const [trackedDeletionJobId, setTrackedDeletionJobId] = useState<
+    GenericId<"userDeletionJobs"> | undefined
+  >(undefined);
   const deletionStatus = useQuery(api.users.getMyAccountDeletionStatus, {
     pollToken,
+    jobId: trackedDeletionJobId,
   });
   const [showConfirm, setShowConfirm] = useState(false);
   const [confirmText, setConfirmText] = useState("");
@@ -32,11 +76,37 @@ export default function AccountPage() {
   const [isFinalizingDeletion, setIsFinalizingDeletion] = useState(false);
   const [hasTriggeredClerkDelete, setHasTriggeredClerkDelete] = useState(false);
 
+  const deletionState = deriveDeletionState(deletionStatus);
+  const deletionStateLabel = deletionState
+    ? getDeletionStateLabel(deletionState)
+    : null;
+  const deletionStageLabel = formatDeletionStageLabel(
+    deletionStatus?.job?.stage,
+  );
+  const deletionProgressPercent = getDeletionProgressPercent(
+    deletionState,
+    deletionStatus?.job?.stage,
+  );
+  const lockUnsafeNavigation = shouldLockDeletionNavigation({
+    deletionState,
+    isFinalizingDeletion,
+  });
   const isDeletionInProgress = Boolean(deletionStatus?.inProgress);
   const canRetryDeletion = Boolean(deletionStatus?.retryable);
 
   useEffect(() => {
-    if (!deletionStatus?.requested || isFinalizingDeletion) {
+    const jobIdFromStatus = deletionStatus?.job?.id;
+    if (jobIdFromStatus && trackedDeletionJobId !== jobIdFromStatus) {
+      setTrackedDeletionJobId(jobIdFromStatus);
+    }
+  }, [deletionStatus?.job?.id, trackedDeletionJobId]);
+
+  useEffect(() => {
+    if (
+      !deletionStatus?.requested ||
+      isFinalizingDeletion ||
+      !trackedDeletionJobId
+    ) {
       return;
     }
 
@@ -56,7 +126,64 @@ export default function AccountPage() {
     deletionStatus?.requested,
     deletionStatus?.retryable,
     isFinalizingDeletion,
+    trackedDeletionJobId,
   ]);
+
+  useEffect(() => {
+    if (!lockUnsafeNavigation) {
+      return;
+    }
+
+    const lockMessage =
+      "Account deletion is still running. Stay on this page until cleanup is finished or fails.";
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = lockMessage;
+      return lockMessage;
+    };
+
+    const handlePopState = () => {
+      window.history.pushState(null, "", window.location.href);
+      toastError(lockMessage);
+    };
+
+    const handleAnchorNavigation = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+
+      const anchor = target.closest("a[href]");
+      if (!anchor) {
+        return;
+      }
+
+      const href = anchor.getAttribute("href");
+      if (!href || href.startsWith("#")) {
+        return;
+      }
+
+      if (anchor.getAttribute("target") === "_blank") {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      toastError(lockMessage);
+    };
+
+    window.history.pushState(null, "", window.location.href);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("popstate", handlePopState);
+    document.addEventListener("click", handleAnchorNavigation, true);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("popstate", handlePopState);
+      document.removeEventListener("click", handleAnchorNavigation, true);
+    };
+  }, [lockUnsafeNavigation]);
 
   useEffect(() => {
     if (!deletionStatus?.canDeleteClerkAccount) {
@@ -123,6 +250,7 @@ export default function AccountPage() {
     setIsRequestingDeletion(true);
     try {
       const response = await requestAccountDeletion({});
+      setTrackedDeletionJobId(response.jobId);
       setPollToken((token) => token + 1);
 
       logInfo("web_account_deletion_request_succeeded", {
@@ -169,6 +297,17 @@ export default function AccountPage() {
     }
 
     await submitAccountDeletionRequest();
+  };
+
+  const handleSignOut = async () => {
+    if (lockUnsafeNavigation) {
+      toastError(
+        "Sign out is blocked while deletion cleanup is still running.",
+      );
+      return;
+    }
+
+    await signOut();
   };
 
   const deletionButtonLabel = isFinalizingDeletion
@@ -230,10 +369,20 @@ export default function AccountPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-4 pb-5">
-          <Button variant="outline" onClick={() => signOut()}>
+          <Button
+            variant="outline"
+            onClick={handleSignOut}
+            disabled={lockUnsafeNavigation}
+          >
             <LogOut className="h-4 w-4" />
             Sign out
           </Button>
+          {lockUnsafeNavigation ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Sign out is temporarily disabled while secure deletion cleanup is
+              in progress.
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -276,27 +425,59 @@ export default function AccountPage() {
               />
 
               {deletionStatus?.requested ? (
-                <div className="rounded-md border border-muted bg-muted/30 p-3 space-y-2">
-                  {deletionStatus.inProgress ? (
-                    <p className="text-xs text-muted-foreground">
-                      Backend cleanup is in progress at stage{" "}
-                      <span className="font-medium text-foreground">
-                        {deletionStatus.job?.stage ?? "pending"}
+                <div className="rounded-md border border-muted bg-muted/30 p-3 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    {deletionStateLabel ? (
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${getDeletionStatePillClasses(
+                          deletionState,
+                        )}`}
+                      >
+                        {deletionStateLabel}
                       </span>
-                      .
+                    ) : null}
+
+                    {deletionStatus.job?.id ? (
+                      <span className="font-mono text-[11px] text-muted-foreground">
+                        Job {deletionStatus.job.id}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                      <span>Stage: {deletionStageLabel}</span>
+                      <span>{deletionProgressPercent}%</span>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                      <div
+                        className={`h-full rounded-full transition-all duration-300 ${getDeletionProgressClasses(
+                          deletionState,
+                        )}`}
+                        style={{ width: `${deletionProgressPercent}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {deletionState === "requested" ||
+                  deletionState === "processing" ? (
+                    <p className="text-xs text-muted-foreground">
+                      Secure cleanup is running. Please keep this page open so
+                      we can finish deletion safely.
                     </p>
                   ) : null}
 
-                  {deletionStatus.retryable ? (
+                  {deletionState === "failed" ? (
                     <p className="text-xs text-destructive">
                       Cleanup failed.{" "}
                       {deletionStatus.job?.lastError ?? "Unknown error."}
                     </p>
                   ) : null}
 
-                  {deletionStatus.canDeleteClerkAccount ? (
+                  {deletionState === "completed" ? (
                     <p className="text-xs text-muted-foreground">
-                      Cleanup complete. Finalizing account deletion now.
+                      Backend cleanup completed. Finalizing account deletion
+                      now.
                     </p>
                   ) : null}
 

@@ -24,7 +24,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { useUser, useAuth } from "@clerk/clerk-expo";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useAction, useMutation, useQuery, useConvexAuth } from "convex/react";
+import { usePreventRemove } from "@react-navigation/native";
 import { api } from "@repo/backend/convex";
+import {
+  deriveDeletionState,
+  formatDeletionStageLabel,
+  getDeletionProgressPercent,
+  getDeletionStateLabel,
+  shouldLockDeletionNavigation,
+} from "@repo/ui/lib/account-deletion";
 import {
   normalizeLifeContextUserSettingsPatch,
   normalizeUserSettingsPatch,
@@ -258,9 +266,14 @@ const SettingsScreen = () => {
   );
   const requestAccountDeletion = useMutation(api.users.requestAccountDeletion);
   const [deletionPollToken, setDeletionPollToken] = useState(0);
+  const [trackedDeletionJobId, setTrackedDeletionJobId] = useState<
+    GenericId<"userDeletionJobs"> | undefined
+  >(undefined);
   const accountDeletionStatus = useQuery(
     api.users.getMyAccountDeletionStatus,
-    isAuthenticated ? { pollToken: deletionPollToken } : "skip",
+    isAuthenticated
+      ? { pollToken: deletionPollToken, jobId: trackedDeletionJobId }
+      : "skip",
   );
 
   const [darkMode, setDarkMode] = useState(false);
@@ -334,15 +347,31 @@ const SettingsScreen = () => {
     hasTriggeredAccountDeletionFinalize,
     setHasTriggeredAccountDeletionFinalize,
   ] = useState(false);
+  const deletionState = deriveDeletionState(accountDeletionStatus);
+  const deletionStateLabel = deletionState
+    ? getDeletionStateLabel(deletionState)
+    : null;
+  const deletionStageLabel = formatDeletionStageLabel(
+    accountDeletionStatus?.job?.stage,
+  );
+  const deletionProgressPercent = getDeletionProgressPercent(
+    deletionState,
+    accountDeletionStatus?.job?.stage,
+  );
+  const lockUnsafeDeletionNavigation = shouldLockDeletionNavigation({
+    deletionState,
+    isFinalizingDeletion: isFinalizingAccountDeletion,
+  });
   const isAccountDeletionInProgress = Boolean(
     accountDeletionStatus?.inProgress,
   );
   const canRetryAccountDeletion = Boolean(accountDeletionStatus?.retryable);
-  const accountDeletionStatusMessage =
-    accountDeletionStatus?.canDeleteClerkAccount
+  const accountDeletionStatusMessage = isFinalizingAccountDeletion
+    ? "Finalizing account deletion now."
+    : accountDeletionStatus?.canDeleteClerkAccount
       ? "Backend cleanup complete. Finalizing account deletion now."
-      : accountDeletionStatus?.inProgress
-        ? `Backend cleanup in progress (${accountDeletionStatus.job?.stage ?? "pending"}).`
+      : accountDeletionStatus?.inProgress || deletionState === "requested"
+        ? `Backend cleanup in progress (${deletionStageLabel}).`
         : accountDeletionStatus?.retryable
           ? `Cleanup failed: ${accountDeletionStatus.job?.lastError ?? "Unknown error"}`
           : null;
@@ -777,7 +806,18 @@ const SettingsScreen = () => {
   }, []);
 
   useEffect(() => {
-    if (!accountDeletionStatus?.requested || isFinalizingAccountDeletion) {
+    const jobIdFromStatus = accountDeletionStatus?.job?.id;
+    if (jobIdFromStatus && trackedDeletionJobId !== jobIdFromStatus) {
+      setTrackedDeletionJobId(jobIdFromStatus);
+    }
+  }, [accountDeletionStatus?.job?.id, trackedDeletionJobId]);
+
+  useEffect(() => {
+    if (
+      !accountDeletionStatus?.requested ||
+      isFinalizingAccountDeletion ||
+      !trackedDeletionJobId
+    ) {
       return;
     }
 
@@ -800,7 +840,15 @@ const SettingsScreen = () => {
     accountDeletionStatus?.requested,
     accountDeletionStatus?.retryable,
     isFinalizingAccountDeletion,
+    trackedDeletionJobId,
   ]);
+
+  usePreventRemove(lockUnsafeDeletionNavigation, () => {
+    Alert.alert(
+      "Deletion in progress",
+      "Stay on this screen until cleanup is completed or fails.",
+    );
+  });
 
   useEffect(() => {
     if (!accountDeletionStatus?.canDeleteClerkAccount) {
@@ -1419,13 +1467,29 @@ const SettingsScreen = () => {
 
   /* ── Callbacks ────────────────────────── */
   const handleSignOut = useCallback(() => {
+    if (lockUnsafeDeletionNavigation) {
+      Alert.alert(
+        "Deletion in progress",
+        "Sign out is blocked while secure deletion cleanup is running.",
+      );
+      return;
+    }
+
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
       { text: "Cancel", style: "cancel" },
       { text: "Sign Out", style: "destructive", onPress: () => signOut() },
     ]);
-  }, [signOut]);
+  }, [lockUnsafeDeletionNavigation, signOut]);
 
   const handleExportData = useCallback(() => {
+    if (lockUnsafeDeletionNavigation) {
+      Alert.alert(
+        "Deletion in progress",
+        "Navigation is blocked until deletion cleanup is completed or fails.",
+      );
+      return;
+    }
+
     const webAppUrl =
       process.env.EXPO_PUBLIC_WEB_APP_URL ?? "http://localhost:3000";
     const exportUrl = `${webAppUrl.replace(/\/$/, "")}/dashboard/export`;
@@ -1436,7 +1500,7 @@ const SettingsScreen = () => {
         "Could not open the export page right now. Please try again.",
       );
     });
-  }, []);
+  }, [lockUnsafeDeletionNavigation]);
 
   const submitAccountDeletionRequest = useCallback(async () => {
     logInfo("mobile_account_deletion_request_started", {
@@ -1448,6 +1512,7 @@ const SettingsScreen = () => {
     setIsRequestingAccountDeletion(true);
     try {
       const response = await requestAccountDeletion({});
+      setTrackedDeletionJobId(response.jobId);
       setDeletionPollToken((token) => token + 1);
 
       logInfo("mobile_account_deletion_request_succeeded", {
@@ -1530,15 +1595,26 @@ const SettingsScreen = () => {
     submitAccountDeletionRequest,
   ]);
 
-  const handleOpenAboutLink = useCallback((path: string) => {
-    const webAppUrl =
-      process.env.EXPO_PUBLIC_WEB_APP_URL ?? "http://localhost:3000";
-    const targetUrl = `${webAppUrl.replace(/\/$/, "")}${path}`;
+  const handleOpenAboutLink = useCallback(
+    (path: string) => {
+      if (lockUnsafeDeletionNavigation) {
+        Alert.alert(
+          "Deletion in progress",
+          "Navigation is blocked until deletion cleanup is completed or fails.",
+        );
+        return;
+      }
 
-    void WebBrowser.openBrowserAsync(targetUrl).catch(() => {
-      Alert.alert("Link unavailable", "Could not open this page right now.");
-    });
-  }, []);
+      const webAppUrl =
+        process.env.EXPO_PUBLIC_WEB_APP_URL ?? "http://localhost:3000";
+      const targetUrl = `${webAppUrl.replace(/\/$/, "")}${path}`;
+
+      void WebBrowser.openBrowserAsync(targetUrl).catch(() => {
+        Alert.alert("Link unavailable", "Could not open this page right now.");
+      });
+    },
+    [lockUnsafeDeletionNavigation],
+  );
 
   const setProviderAction = useCallback(
     (
@@ -2749,6 +2825,65 @@ const SettingsScreen = () => {
             </Text>
           </TouchableOpacity>
 
+          {deletionStateLabel ? (
+            <View style={styles.dangerStatusCard}>
+              <View style={styles.dangerStatusHeader}>
+                <View
+                  style={[
+                    styles.dangerStateBadge,
+                    deletionState === "completed"
+                      ? styles.dangerStateBadgeCompleted
+                      : deletionState === "failed"
+                        ? styles.dangerStateBadgeFailed
+                        : deletionState === "processing"
+                          ? styles.dangerStateBadgeProcessing
+                          : styles.dangerStateBadgeRequested,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.dangerStateBadgeText,
+                      deletionState === "failed"
+                        ? styles.dangerStateBadgeTextInverted
+                        : null,
+                    ]}
+                  >
+                    {deletionStateLabel}
+                  </Text>
+                </View>
+
+                {accountDeletionStatus?.job?.id ? (
+                  <Text style={styles.dangerJobIdText}>
+                    Job {accountDeletionStatus.job.id}
+                  </Text>
+                ) : null}
+              </View>
+
+              <View style={styles.dangerProgressMetaRow}>
+                <Text style={styles.dangerProgressMetaText}>
+                  Stage: {deletionStageLabel}
+                </Text>
+                <Text style={styles.dangerProgressMetaText}>
+                  {deletionProgressPercent}%
+                </Text>
+              </View>
+
+              <View style={styles.dangerProgressTrack}>
+                <View
+                  style={[
+                    styles.dangerProgressFill,
+                    deletionState === "completed"
+                      ? styles.dangerProgressFillCompleted
+                      : deletionState === "failed"
+                        ? styles.dangerProgressFillFailed
+                        : styles.dangerProgressFillActive,
+                    { width: `${deletionProgressPercent}%` },
+                  ]}
+                />
+              </View>
+            </View>
+          ) : null}
+
           {accountDeletionStatusMessage ? (
             <Text
               style={[
@@ -3174,6 +3309,77 @@ const styles = StyleSheet.create({
   dangerText: {
     ...Typography.callout,
     color: c.error,
+  },
+  dangerStatusCard: {
+    marginTop: Spacing.sm,
+    borderWidth: 1,
+    borderColor: c.divider,
+    borderRadius: Radius.md,
+    padding: Spacing.sm,
+    gap: Spacing.xs,
+  },
+  dangerStatusHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: Spacing.sm,
+  },
+  dangerStateBadge: {
+    borderRadius: 999,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+  },
+  dangerStateBadgeRequested: {
+    backgroundColor: "#E2E8F0",
+  },
+  dangerStateBadgeProcessing: {
+    backgroundColor: "#FEF3C7",
+  },
+  dangerStateBadgeCompleted: {
+    backgroundColor: "#DCFCE7",
+  },
+  dangerStateBadgeFailed: {
+    backgroundColor: "#DC2626",
+  },
+  dangerStateBadgeText: {
+    ...Typography.caption1,
+    color: c.text,
+    fontWeight: "700",
+  },
+  dangerStateBadgeTextInverted: {
+    color: "#FFFFFF",
+  },
+  dangerJobIdText: {
+    ...Typography.caption2,
+    color: c.textTertiary,
+  },
+  dangerProgressMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  dangerProgressMetaText: {
+    ...Typography.caption2,
+    color: c.textSecondary,
+  },
+  dangerProgressTrack: {
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: c.divider,
+    overflow: "hidden",
+  },
+  dangerProgressFill: {
+    height: "100%",
+    borderRadius: 999,
+  },
+  dangerProgressFillActive: {
+    backgroundColor: c.tint,
+  },
+  dangerProgressFillCompleted: {
+    backgroundColor: "#10B981",
+  },
+  dangerProgressFillFailed: {
+    backgroundColor: c.error,
   },
   dangerStatusText: {
     ...Typography.caption1,

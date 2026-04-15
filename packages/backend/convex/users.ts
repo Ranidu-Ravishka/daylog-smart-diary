@@ -1030,6 +1030,7 @@ export const requestAccountDeletion = mutation({
 export const getMyAccountDeletionStatus = query({
   args: {
     pollToken: v.optional(v.number()),
+    jobId: v.optional(v.id("userDeletionJobs")),
   },
   handler: async (ctx, args) => {
     void args.pollToken;
@@ -1041,13 +1042,22 @@ export const getMyAccountDeletionStatus = query({
 
     const clerkUserId = identity.subject;
 
-    const [user, latestJob] = await Promise.all([
+    const [user, requestedJob] = await Promise.all([
       ctx.db
         .query("user")
         .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", clerkUserId))
         .unique(),
-      findLatestUserDeletionJobByClerkUserId(ctx, clerkUserId),
+      args.jobId ? ctx.db.get(args.jobId) : Promise.resolve(null),
     ]);
+
+    const scopedRequestedJob =
+      requestedJob && requestedJob.clerkUserId === clerkUserId
+        ? requestedJob
+        : null;
+
+    const latestJob =
+      scopedRequestedJob ??
+      (await findLatestUserDeletionJobByClerkUserId(ctx, clerkUserId));
 
     const requestedFromJob =
       latestJob?.status === "requested" ||
