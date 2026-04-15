@@ -553,18 +553,23 @@ describe("users behavior", () => {
       Record<string, never>,
       {
         success: boolean;
+        jobId: Id<"userDeletionJobs">;
         created: boolean;
         retried: boolean;
         canDeleteClerkAccount: boolean;
       }
     >(usersModule.requestAccountDeletion);
     const getMyAccountDeletionStatus = handler<
-      { pollToken?: number },
+      { pollToken?: number; jobId?: Id<"userDeletionJobs"> },
       {
         requested: boolean;
         inProgress: boolean;
         retryable: boolean;
         canDeleteClerkAccount: boolean;
+        job: {
+          id: Id<"userDeletionJobs">;
+          status: "requested" | "processing" | "completed" | "failed";
+        } | null;
       }
     >(usersModule.getMyAccountDeletionStatus);
 
@@ -595,12 +600,15 @@ describe("users behavior", () => {
       createAuthCtx(db, "clerk_member_001"),
       {
         pollToken: 1,
+        jobId: response.jobId,
       },
     );
     expect(status.requested).toBe(true);
     expect(status.inProgress).toBe(true);
     expect(status.retryable).toBe(false);
     expect(status.canDeleteClerkAccount).toBe(false);
+    expect(status.job?.id).toBe(response.jobId);
+    expect(status.job?.status).toBe("requested");
   });
 
   it("retries failed account deletion jobs on request", async () => {
