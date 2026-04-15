@@ -217,7 +217,9 @@ export default function DashboardPage() {
     day?.rating !== undefined ||
     (day?.manualNotes?.length ?? 0) > 0 ||
     (day?.peopleTags?.length ?? 0) > 0;
-  const hasSummarySourceData = hasMemories || hasDayMetadata;
+  const hasIntegrationData = (integrationDailyData?.length ?? 0) > 0;
+  const hasSummarySourceData =
+    hasMemories || hasDayMetadata || hasIntegrationData;
 
   const handleEditMemory = (memory: MemoryData) => {
     setEditingMemory(memory);
