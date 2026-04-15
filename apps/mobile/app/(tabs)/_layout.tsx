@@ -13,8 +13,7 @@ import {
 import { HapticTab } from "@/components/haptic-tab";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
-import { Colors } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { useAppTheme } from "@/components/theme-provider";
 import {
   acknowledgeBackgroundLocationFlush,
   getBackgroundLocationTelemetry,
@@ -110,7 +109,7 @@ async function subscribeToConnectivityChanges(
 }
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
+  const { colors: theme } = useAppTheme();
   const { isLoaded, isSignedIn, sessionId, userId } = useAuth();
   const { isLoading: isConvexAuthLoading, isAuthenticated } = useConvexAuth();
   const launchPreferences = useQuery(
@@ -151,8 +150,6 @@ export default function TabLayout() {
   const locationTrackingEnabled = launchUserSettings.locationTrackingEnabled;
   const backgroundLocationTrackingEnabled =
     launchUserSettings.backgroundLocationTrackingEnabled;
-
-  const theme = Colors[colorScheme ?? "light"];
 
   React.useEffect(() => {
     if (!isLoaded) {

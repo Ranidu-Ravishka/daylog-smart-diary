@@ -13,18 +13,17 @@ import { useQuery, useConvexAuth } from "convex/react";
 import { api } from "@repo/backend/convex";
 import { MOOD_EMOJI } from "@repo/ui/lib/constants";
 import {
-  Colors,
   Spacing,
   Typography,
   Radius,
   Shadows,
+  type ThemeColors,
 } from "@/constants/theme";
+import { useAppTheme } from "@/components/theme-provider";
 import { AppCard } from "@/components/ui/app-card";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
 import { EmptyState } from "@/components/ui/empty-state";
-
-const c = Colors.light;
 const { width } = Dimensions.get("window");
 const CHART_WIDTH = width - Spacing.xl * 2 - Spacing.xl * 2; // card padding
 
@@ -104,6 +103,9 @@ function formatLastSyncTime(lastSyncAt: number | null, now: number): string {
 }
 
 function InsightsSkeleton() {
+  const { colors: c } = useAppTheme();
+  const styles = React.useMemo(() => createStyles(c), [c]);
+
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.scroll}>
@@ -127,6 +129,8 @@ function InsightsSkeleton() {
 }
 
 const InsightsScreen = () => {
+  const { colors: c } = useAppTheme();
+  const styles = React.useMemo(() => createStyles(c), [c]);
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
   const [refreshing, setRefreshing] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
@@ -508,136 +512,138 @@ const InsightsScreen = () => {
 export default InsightsScreen;
 
 // ── Styles ──────────────────────────────────────────────────
-const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: c.background,
-  },
-  scroll: {
-    paddingTop: Spacing.lg,
-    paddingBottom: Spacing["2xl"],
-  },
+function createStyles(c: ThemeColors) {
+  return StyleSheet.create({
+    safe: {
+      flex: 1,
+      backgroundColor: c.background,
+    },
+    scroll: {
+      paddingTop: Spacing.lg,
+      paddingBottom: Spacing["2xl"],
+    },
 
-  // Header
-  headerRow: {
-    paddingHorizontal: Spacing.xl,
-    marginBottom: Spacing["2xl"],
-  },
-  pageTitle: {
-    ...Typography.title1,
-    color: c.text,
-  },
-  syncText: {
-    ...Typography.caption2,
-    color: c.textSecondary,
-    marginTop: 4,
-  },
+    // Header
+    headerRow: {
+      paddingHorizontal: Spacing.xl,
+      marginBottom: Spacing["2xl"],
+    },
+    pageTitle: {
+      ...Typography.title1,
+      color: c.text,
+    },
+    syncText: {
+      ...Typography.caption2,
+      color: c.textSecondary,
+      marginTop: 4,
+    },
 
-  // Stats
-  statsRow: {
-    flexDirection: "row",
-    gap: Spacing.md,
-    paddingHorizontal: Spacing.xl,
-    marginBottom: Spacing["2xl"],
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: c.surface,
-    borderRadius: Radius.lg,
-    padding: Spacing.lg,
-    alignItems: "center",
-    ...Shadows.sm,
-  },
-  statValue: {
-    ...Typography.title2,
-    color: c.text,
-    marginTop: Spacing.sm,
-  },
-  statLabel: {
-    ...Typography.caption2,
-    color: c.textSecondary,
-    marginTop: 2,
-  },
+    // Stats
+    statsRow: {
+      flexDirection: "row",
+      gap: Spacing.md,
+      paddingHorizontal: Spacing.xl,
+      marginBottom: Spacing["2xl"],
+    },
+    statCard: {
+      flex: 1,
+      backgroundColor: c.surface,
+      borderRadius: Radius.lg,
+      padding: Spacing.lg,
+      alignItems: "center",
+      ...Shadows.sm,
+    },
+    statValue: {
+      ...Typography.title2,
+      color: c.text,
+      marginTop: Spacing.sm,
+    },
+    statLabel: {
+      ...Typography.caption2,
+      color: c.textSecondary,
+      marginTop: 2,
+    },
 
-  // Sections
-  section: {
-    paddingHorizontal: Spacing.xl,
-    marginBottom: Spacing["2xl"],
-  },
-  emptyStateWrap: {
-    minHeight: 320,
-    justifyContent: "center",
-    paddingHorizontal: Spacing.xl,
-  },
+    // Sections
+    section: {
+      paddingHorizontal: Spacing.xl,
+      marginBottom: Spacing["2xl"],
+    },
+    emptyStateWrap: {
+      minHeight: 320,
+      justifyContent: "center",
+      paddingHorizontal: Spacing.xl,
+    },
 
-  // Days of week
-  daysRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  dayLabel: {
-    ...Typography.caption1,
-    color: c.textSecondary,
-    flex: 1,
-    textAlign: "center",
-  },
+    // Days of week
+    daysRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+    },
+    dayLabel: {
+      ...Typography.caption1,
+      color: c.textSecondary,
+      flex: 1,
+      textAlign: "center",
+    },
 
-  // Mood distribution
-  distRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: Spacing.md,
-  },
-  distEmoji: {
-    fontSize: 16,
-    marginRight: Spacing.sm,
-  },
-  distLabel: {
-    ...Typography.callout,
-    color: c.text,
-    width: 72,
-  },
-  barOuter: {
-    flex: 1,
-    height: 8,
-    backgroundColor: c.surfaceSecondary,
-    borderRadius: Radius.full,
-    marginHorizontal: Spacing.md,
-    overflow: "hidden",
-  },
-  barInner: {
-    height: "100%",
-    backgroundColor: c.tint,
-    borderRadius: Radius.full,
-  },
-  distCount: {
-    ...Typography.caption1,
-    color: c.textSecondary,
-    width: 24,
-    textAlign: "right",
-  },
+    // Mood distribution
+    distRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginBottom: Spacing.md,
+    },
+    distEmoji: {
+      fontSize: 16,
+      marginRight: Spacing.sm,
+    },
+    distLabel: {
+      ...Typography.callout,
+      color: c.text,
+      width: 72,
+    },
+    barOuter: {
+      flex: 1,
+      height: 8,
+      backgroundColor: c.surfaceSecondary,
+      borderRadius: Radius.full,
+      marginHorizontal: Spacing.md,
+      overflow: "hidden",
+    },
+    barInner: {
+      height: "100%",
+      backgroundColor: c.tint,
+      borderRadius: Radius.full,
+    },
+    distCount: {
+      ...Typography.caption1,
+      color: c.textSecondary,
+      width: 24,
+      textAlign: "right",
+    },
 
-  // Stories
-  storyRow: {
-    paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.lg,
-  },
-  storyBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: c.divider,
-  },
-  storyDate: {
-    ...Typography.caption1,
-    color: c.textTertiary,
-    marginBottom: 4,
-  },
-  storyText: {
-    ...Typography.body,
-    color: c.text,
-  },
-  storyHighlights: {
-    ...Typography.caption2,
-    color: c.tint,
-    marginTop: 4,
-  },
-});
+    // Stories
+    storyRow: {
+      paddingHorizontal: Spacing.xl,
+      paddingVertical: Spacing.lg,
+    },
+    storyBorder: {
+      borderBottomWidth: 1,
+      borderBottomColor: c.divider,
+    },
+    storyDate: {
+      ...Typography.caption1,
+      color: c.textTertiary,
+      marginBottom: 4,
+    },
+    storyText: {
+      ...Typography.body,
+      color: c.text,
+    },
+    storyHighlights: {
+      ...Typography.caption2,
+      color: c.tint,
+      marginTop: 4,
+    },
+  });
+}

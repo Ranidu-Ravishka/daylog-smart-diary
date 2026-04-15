@@ -7,7 +7,13 @@ import {
   ViewStyle,
   TextStyle,
 } from "react-native";
-import { Colors, Radius, Spacing, Typography } from "@/constants/theme";
+import {
+  Radius,
+  Spacing,
+  Typography,
+  type ThemeColors,
+} from "@/constants/theme";
+import { useAppTheme } from "@/components/theme-provider";
 
 interface AppButtonProps {
   title: string;
@@ -32,7 +38,8 @@ export function AppButton({
   textStyle,
   icon,
 }: AppButtonProps) {
-  const c = Colors.light;
+  const { colors: c } = useAppTheme();
+  const styles = React.useMemo(() => createStyles(c), [c]);
   const isDisabled = disabled || loading;
 
   const bgMap = {
@@ -89,19 +96,22 @@ export function AppButton({
   );
 }
 
-const styles = StyleSheet.create({
-  base: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: Radius.md,
-    paddingHorizontal: Spacing.xl,
-    gap: Spacing.sm,
-  },
-  ghost: {
-    paddingHorizontal: Spacing.md,
-  },
-  text: {
-    ...Typography.bodyMedium,
-  },
-});
+function createStyles(c: ThemeColors) {
+  return StyleSheet.create({
+    base: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: Radius.md,
+      paddingHorizontal: Spacing.xl,
+      gap: Spacing.sm,
+    },
+    ghost: {
+      paddingHorizontal: Spacing.md,
+    },
+    text: {
+      ...Typography.bodyMedium,
+      color: c.text,
+    },
+  });
+}

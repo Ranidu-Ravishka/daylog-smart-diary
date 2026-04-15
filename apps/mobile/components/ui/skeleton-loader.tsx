@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { View, ViewStyle, Animated, StyleSheet } from "react-native";
-import { Colors, Radius } from "@/constants/theme";
+import { Radius, type ThemeColors } from "@/constants/theme";
+import { useAppTheme } from "@/components/theme-provider";
 
 interface SkeletonProps {
   width: number | `${number}%` | "auto";
@@ -15,6 +16,7 @@ export function Skeleton({
   radius = Radius.sm,
   style,
 }: SkeletonProps) {
+  const { colors } = useAppTheme();
   const opacity = useRef(new Animated.Value(0.4)).current;
 
   useEffect(() => {
@@ -43,7 +45,7 @@ export function Skeleton({
           width,
           height,
           borderRadius: radius,
-          backgroundColor: Colors.light.skeleton,
+          backgroundColor: colors.skeleton,
           opacity,
         },
         style,
@@ -58,6 +60,9 @@ interface SkeletonCardProps {
 }
 
 export function SkeletonCard({ lines = 3, style }: SkeletonCardProps) {
+  const { colors } = useAppTheme();
+  const styles = React.useMemo(() => createStyles(colors), [colors]);
+
   return (
     <View style={[styles.card, style]}>
       <Skeleton width="60%" height={14} style={{ marginBottom: 16 }} />
@@ -73,11 +78,13 @@ export function SkeletonCard({ lines = 3, style }: SkeletonCardProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: Colors.light.surface,
-    borderRadius: Radius.lg,
-    padding: 20,
-    marginBottom: 16,
-  },
-});
+function createStyles(c: ThemeColors) {
+  return StyleSheet.create({
+    card: {
+      backgroundColor: c.surface,
+      borderRadius: Radius.lg,
+      padding: 20,
+      marginBottom: 16,
+    },
+  });
+}
