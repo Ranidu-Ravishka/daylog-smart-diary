@@ -34,6 +34,32 @@ export type IntegrationSyncRunDoc = {
   lastError?: string;
 };
 
+export type IntegrationHealthDoc = {
+  status: "connected" | "degraded" | "failed";
+  tokenValidityStatus: "valid" | "expiring_soon" | "expired" | "unknown";
+  lastSyncAt?: number;
+  lastFailureAt?: number;
+  totalSyncAttempts: number;
+  failedSyncAttempts: number;
+  errorRate: number;
+  recentOutcomes: ("success" | "error" | "skipped")[];
+  recentFailures: {
+    at: number;
+    error: string;
+    dayKey?: string;
+    userId?: GenericId<"user">;
+  }[];
+  updatedAt: number;
+};
+
+export type IntegrationHealthSnapshot = {
+  provider: string;
+  integrationStatus: IntegrationDoc["status"];
+  integrationLastSyncAt?: number;
+  integrationLastError?: string;
+  health: IntegrationHealthDoc | null;
+};
+
 export type ProviderPendingAction = Record<
   string,
   "connect" | "disconnect" | "sync" | undefined
