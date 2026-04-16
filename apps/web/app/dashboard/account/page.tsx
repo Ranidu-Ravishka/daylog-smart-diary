@@ -30,32 +30,32 @@ function getDeletionStatePillClasses(
   deletionState: ReturnType<typeof deriveDeletionState>,
 ): string {
   if (deletionState === "completed") {
-    return "bg-emerald-100 text-emerald-800";
+    return "bg-success/15 text-success";
   }
 
   if (deletionState === "failed") {
-    return "bg-red-100 text-red-800";
+    return "bg-destructive/15 text-destructive";
   }
 
   if (deletionState === "processing") {
-    return "bg-amber-100 text-amber-800";
+    return "bg-warning/15 text-warning";
   }
 
-  return "bg-slate-100 text-slate-700";
+  return "bg-muted text-muted-foreground";
 }
 
 function getDeletionProgressClasses(
   deletionState: ReturnType<typeof deriveDeletionState>,
 ): string {
   if (deletionState === "completed") {
-    return "bg-emerald-500";
+    return "bg-success";
   }
 
   if (deletionState === "failed") {
     return "bg-destructive";
   }
 
-  return "bg-blue-600";
+  return "bg-primary";
 }
 
 export default function AccountPage() {

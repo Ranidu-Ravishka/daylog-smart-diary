@@ -1,7 +1,13 @@
 import React from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Colors, Spacing, Typography, Radius } from "@/constants/theme";
+import {
+  Spacing,
+  Typography,
+  Radius,
+  type ThemeColors,
+} from "@/constants/theme";
+import { useAppTheme } from "@/components/theme-provider";
 
 interface EmptyStateProps {
   icon: React.ComponentProps<typeof Ionicons>["name"];
@@ -18,7 +24,9 @@ export function EmptyState({
   actionLabel,
   onAction,
 }: EmptyStateProps) {
-  const c = Colors.light;
+  const { colors: c } = useAppTheme();
+  const styles = React.useMemo(() => createStyles(c), [c]);
+
   return (
     <View style={styles.container}>
       <View style={[styles.iconCircle, { backgroundColor: c.tintLight }]}>
@@ -43,39 +51,41 @@ export function EmptyState({
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    alignItems: "center",
-    paddingVertical: Spacing["3xl"],
-    paddingHorizontal: Spacing["2xl"],
-  },
-  iconCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: Spacing.lg,
-  },
-  title: {
-    ...Typography.title3,
-    textAlign: "center",
-    marginBottom: Spacing.xs,
-  },
-  subtitle: {
-    ...Typography.callout,
-    textAlign: "center",
-    lineHeight: 20,
-    maxWidth: 260,
-  },
-  button: {
-    marginTop: Spacing.xl,
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing["2xl"],
-    borderRadius: Radius.md,
-  },
-  buttonText: {
-    ...Typography.bodyMedium,
-    color: "#fff",
-  },
-});
+function createStyles(c: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      alignItems: "center",
+      paddingVertical: Spacing["3xl"],
+      paddingHorizontal: Spacing["2xl"],
+    },
+    iconCircle: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: Spacing.lg,
+    },
+    title: {
+      ...Typography.title3,
+      textAlign: "center",
+      marginBottom: Spacing.xs,
+    },
+    subtitle: {
+      ...Typography.callout,
+      textAlign: "center",
+      lineHeight: 20,
+      maxWidth: 260,
+    },
+    button: {
+      marginTop: Spacing.xl,
+      paddingVertical: Spacing.md,
+      paddingHorizontal: Spacing["2xl"],
+      borderRadius: Radius.md,
+    },
+    buttonText: {
+      ...Typography.bodyMedium,
+      color: c.inverseText,
+    },
+  });
+}

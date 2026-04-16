@@ -75,19 +75,19 @@ import {
 import { collectAndroidScreenTimeDailyDataForDay } from "../../lib/android-screen-time-sync";
 import { collectIosScreenTimeDailyDataForDay } from "../../lib/ios-screen-time-sync";
 import { getOfflineOutboxSnapshot } from "@/lib/offline-outbox";
+import { withOpacity } from "@/lib/color-utils";
 import { captureException, logInfo, logWarn } from "@/lib/observability";
 import {
-  Colors,
   Spacing,
   Typography,
   Radius,
   Shadows,
+  type ThemeColors,
 } from "@/constants/theme";
+import { useAppTheme } from "@/components/theme-provider";
 import { AppCard } from "@/components/ui/app-card";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
-
-const c = Colors.light;
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
 type IntegrationDoc = {
@@ -196,6 +196,9 @@ function snapToQuarterHour(value: Date): Date {
 
 /* ── Skeleton ──────────────────────────────────────────── */
 function ProfileSkeleton() {
+  const { colors: c } = useAppTheme();
+  const styles = React.useMemo(() => createStyles(c), [c]);
+
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.scroll}>
@@ -214,6 +217,8 @@ function ProfileSkeleton() {
 
 /* ── Screen ────────────────────────────────────────────── */
 const SettingsScreen = () => {
+  const { colors: c, effectiveTheme, setThemePreference } = useAppTheme();
+  const styles = React.useMemo(() => createStyles(c), [c]);
   const router = useRouter();
   const searchParams = useLocalSearchParams<{
     integrationProvider?: string;
@@ -615,7 +620,7 @@ const SettingsScreen = () => {
 
   useEffect(() => {
     if (!preferences) {
-      setDarkMode(false);
+      setDarkMode(effectiveTheme === "dark");
       setAllNotifications(true);
       setDailySummary(false);
       setWeeklyInsights(false);
@@ -639,7 +644,10 @@ const SettingsScreen = () => {
       return;
     }
 
-    setDarkMode(preferences.theme === "dark");
+    setDarkMode(
+      preferences.theme === "dark" ||
+        (preferences.theme === "system" && effectiveTheme === "dark"),
+    );
     setAllNotifications(preferences.notificationsEnabled ?? true);
     setDailySummary(preferences.reminderType === "daily");
     setWeeklyInsights(preferences.reminderType === "weekly");
@@ -681,7 +689,7 @@ const SettingsScreen = () => {
       preferences.backgroundLocationTrackingEnabled ??
         SETTINGS_DEFAULTS.backgroundLocationTrackingEnabled,
     );
-  }, [preferences]);
+  }, [effectiveTheme, preferences]);
 
   useEffect(() => {
     if (!searchParams.integrationStatus || !searchParams.integrationMessage) {
@@ -955,14 +963,16 @@ const SettingsScreen = () => {
     const previous = darkMode;
     const next = !darkMode;
     setDarkMode(next);
+    setThemePreference(next ? "dark" : "light");
 
     try {
       await savePreferencePatch({ theme: next ? "dark" : "light" });
     } catch {
       setDarkMode(previous);
+      setThemePreference(previous ? "dark" : "light");
       Alert.alert("Update failed", "Theme preference could not be saved.");
     }
-  }, [darkMode, savePreferencePatch]);
+  }, [darkMode, savePreferencePatch, setThemePreference]);
 
   const handleAllNotificationsToggle = useCallback(async () => {
     const previous = allNotifications;
@@ -2028,7 +2038,7 @@ const SettingsScreen = () => {
         disabled={disabled}
         testID={testID}
         trackColor={{ false: c.border, true: c.tint }}
-        thumbColor="#FFF"
+        thumbColor={c.surface}
       />
     </View>
   );
@@ -2947,447 +2957,449 @@ const SettingsScreen = () => {
 export default SettingsScreen;
 
 /* ── Styles ──────────────────────────────────────────── */
-const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: c.background,
-  },
-  scroll: {
-    paddingTop: Spacing.lg,
-  },
-  headerRow: {
-    paddingHorizontal: Spacing.xl,
-    marginBottom: Spacing["2xl"],
-  },
-  pageTitle: {
-    ...Typography.title1,
-    color: c.text,
-  },
-  pad: {
-    paddingHorizontal: Spacing.xl,
-    marginBottom: Spacing.xl,
-  },
+function createStyles(c: ThemeColors) {
+  return StyleSheet.create({
+    safe: {
+      flex: 1,
+      backgroundColor: c.background,
+    },
+    scroll: {
+      paddingTop: Spacing.lg,
+    },
+    headerRow: {
+      paddingHorizontal: Spacing.xl,
+      marginBottom: Spacing["2xl"],
+    },
+    pageTitle: {
+      ...Typography.title1,
+      color: c.text,
+    },
+    pad: {
+      paddingHorizontal: Spacing.xl,
+      marginBottom: Spacing.xl,
+    },
 
-  /* Profile */
-  profileRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: c.tintLight,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: Spacing.lg,
-  },
-  profileName: {
-    ...Typography.bodyMedium,
-    color: c.text,
-  },
-  profileEmail: {
-    ...Typography.caption1,
-    color: c.textSecondary,
-    marginTop: 2,
-  },
+    /* Profile */
+    profileRow: {
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    avatar: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: c.tintLight,
+      alignItems: "center",
+      justifyContent: "center",
+      marginRight: Spacing.lg,
+    },
+    profileName: {
+      ...Typography.bodyMedium,
+      color: c.text,
+    },
+    profileEmail: {
+      ...Typography.caption1,
+      color: c.textSecondary,
+      marginTop: 2,
+    },
 
-  /* Quick actions */
-  quickRow: {
-    flexDirection: "row",
-    gap: Spacing.md,
-  },
-  quickBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: Spacing.sm,
-    backgroundColor: c.surface,
-    borderRadius: Radius.md,
-    paddingVertical: Spacing.md,
-    ...Shadows.sm,
-  },
-  quickText: {
-    ...Typography.callout,
-    color: c.text,
-  },
+    /* Quick actions */
+    quickRow: {
+      flexDirection: "row",
+      gap: Spacing.md,
+    },
+    quickBtn: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: Spacing.sm,
+      backgroundColor: c.surface,
+      borderRadius: Radius.md,
+      paddingVertical: Spacing.md,
+      ...Shadows.sm,
+    },
+    quickText: {
+      ...Typography.callout,
+      color: c.text,
+    },
 
-  /* Toggle rows */
-  toggleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: Spacing.xs,
-  },
-  toggleLabel: {
-    ...Typography.body,
-    color: c.text,
-  },
-  toggleSub: {
-    ...Typography.caption1,
-    color: c.textTertiary,
-    marginTop: 2,
-  },
-  quietHoursConfigRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: Spacing.xs,
-    gap: Spacing.md,
-  },
-  quietHoursChip: {
-    borderWidth: 1,
-    borderColor: c.divider,
-    backgroundColor: c.surfaceSecondary,
-    borderRadius: Radius.sm,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
-  quietHoursChipText: {
-    ...Typography.caption1,
-    color: c.text,
-    fontWeight: "600",
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "flex-end",
-  },
-  pickerContainer: {
-    backgroundColor: c.surface,
-    borderTopLeftRadius: Radius.lg,
-    borderTopRightRadius: Radius.lg,
-    paddingBottom: Spacing.lg,
-  },
-  pickerHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.lg,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: c.divider,
-  },
-  pickerTitle: {
-    ...Typography.bodyMedium,
-    color: c.text,
-  },
-  pickerCancelText: {
-    ...Typography.callout,
-    color: c.textSecondary,
-  },
-  pickerDoneText: {
-    ...Typography.callout,
-    color: c.tint,
-    fontWeight: "600",
-  },
-  moodChipsRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: Spacing.sm,
-    marginTop: Spacing.md,
-  },
-  moodChip: {
-    borderWidth: 1,
-    borderColor: c.divider,
-    borderRadius: Radius.full,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-    backgroundColor: c.background,
-  },
-  moodChipSelected: {
-    backgroundColor: c.tintLight,
-    borderColor: c.tint,
-  },
-  moodChipLabel: {
-    ...Typography.caption1,
-    color: c.textSecondary,
-    textTransform: "capitalize",
-  },
-  moodChipLabelSelected: {
-    color: c.tint,
-  },
+    /* Toggle rows */
+    toggleRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingVertical: Spacing.xs,
+    },
+    toggleLabel: {
+      ...Typography.body,
+      color: c.text,
+    },
+    toggleSub: {
+      ...Typography.caption1,
+      color: c.textTertiary,
+      marginTop: 2,
+    },
+    quietHoursConfigRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingVertical: Spacing.xs,
+      gap: Spacing.md,
+    },
+    quietHoursChip: {
+      borderWidth: 1,
+      borderColor: c.divider,
+      backgroundColor: c.surfaceSecondary,
+      borderRadius: Radius.sm,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.sm,
+    },
+    quietHoursChipText: {
+      ...Typography.caption1,
+      color: c.text,
+      fontWeight: "600",
+    },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: c.overlay,
+      justifyContent: "flex-end",
+    },
+    pickerContainer: {
+      backgroundColor: c.surface,
+      borderTopLeftRadius: Radius.lg,
+      borderTopRightRadius: Radius.lg,
+      paddingBottom: Spacing.lg,
+    },
+    pickerHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      paddingHorizontal: Spacing.xl,
+      paddingVertical: Spacing.lg,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.divider,
+    },
+    pickerTitle: {
+      ...Typography.bodyMedium,
+      color: c.text,
+    },
+    pickerCancelText: {
+      ...Typography.callout,
+      color: c.textSecondary,
+    },
+    pickerDoneText: {
+      ...Typography.callout,
+      color: c.tint,
+      fontWeight: "600",
+    },
+    moodChipsRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: Spacing.sm,
+      marginTop: Spacing.md,
+    },
+    moodChip: {
+      borderWidth: 1,
+      borderColor: c.divider,
+      borderRadius: Radius.full,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.xs,
+      backgroundColor: c.background,
+    },
+    moodChipSelected: {
+      backgroundColor: c.tintLight,
+      borderColor: c.tint,
+    },
+    moodChipLabel: {
+      ...Typography.caption1,
+      color: c.textSecondary,
+      textTransform: "capitalize",
+    },
+    moodChipLabelSelected: {
+      color: c.tint,
+    },
 
-  /* Integration rows */
-  integrationRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    paddingVertical: Spacing.sm,
-  },
-  integrationHeadingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: Spacing.sm,
-  },
-  integrationHeadingBadges: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  integrationTitle: {
-    ...Typography.body,
-    color: c.text,
-  },
-  integrationSub: {
-    ...Typography.callout,
-    color: c.textSecondary,
-    marginTop: 4,
-  },
-  integrationSubMuted: {
-    ...Typography.caption1,
-    color: c.textTertiary,
-    marginTop: 4,
-  },
-  integrationErrorText: {
-    ...Typography.caption1,
-    color: c.error,
-    marginTop: 4,
-  },
-  integrationStatusBadge: {
-    borderRadius: Radius.full,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
-    borderWidth: 1,
-  },
-  integrationStatusConnected: {
-    backgroundColor: "#ECFDF3",
-    borderColor: "#BBF7D0",
-  },
-  integrationStatusError: {
-    backgroundColor: "#FEF2F2",
-    borderColor: "#FECACA",
-  },
-  integrationStatusDisconnected: {
-    backgroundColor: c.surfaceSecondary,
-    borderColor: c.divider,
-  },
-  integrationStatusSetupRequired: {
-    backgroundColor: c.tintLight,
-    borderColor: c.tint,
-  },
-  integrationStatusText: {
-    ...Typography.caption1,
-    color: c.textSecondary,
-    textTransform: "capitalize",
-  },
-  integrationActionsRow: {
-    flexDirection: "row",
-    gap: Spacing.sm,
-    marginTop: Spacing.sm,
-  },
-  integrationPrimaryBtn: {
-    backgroundColor: c.tint,
-    borderRadius: Radius.sm,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
-  integrationPrimaryBtnText: {
-    ...Typography.caption1,
-    color: "#FFFFFF",
-    fontWeight: "600",
-  },
-  integrationSecondaryBtn: {
-    borderWidth: 1,
-    borderColor: c.divider,
-    backgroundColor: c.background,
-    borderRadius: Radius.sm,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
-  integrationSecondaryBtnText: {
-    ...Typography.caption1,
-    color: c.text,
-    fontWeight: "600",
-  },
-  integrationFeedback: {
-    borderRadius: Radius.sm,
-    borderWidth: 1,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    marginBottom: Spacing.sm,
-  },
-  integrationFeedbackSuccess: {
-    borderColor: "#BBF7D0",
-    backgroundColor: "#F0FDF4",
-  },
-  integrationFeedbackError: {
-    borderColor: "#FECACA",
-    backgroundColor: "#FEF2F2",
-  },
-  integrationFeedbackText: {
-    ...Typography.caption1,
-  },
-  appleHealthHintCard: {
-    marginTop: Spacing.sm,
-    borderWidth: 1,
-    borderColor: c.divider,
-    borderRadius: Radius.sm,
-    backgroundColor: c.surfaceSecondary,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: Spacing.sm,
-    gap: 6,
-  },
-  appleHealthHintText: {
-    ...Typography.caption1,
-    color: c.textSecondary,
-  },
-  appleHealthHintAction: {
-    ...Typography.caption1,
-    color: c.tint,
-    fontWeight: "600",
-  },
-  emptyRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.sm,
-    paddingVertical: Spacing.xs,
-  },
-  emptyText: {
-    ...Typography.callout,
-    color: c.textTertiary,
-  },
+    /* Integration rows */
+    integrationRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      paddingVertical: Spacing.sm,
+    },
+    integrationHeadingRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: Spacing.sm,
+    },
+    integrationHeadingBadges: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    integrationTitle: {
+      ...Typography.body,
+      color: c.text,
+    },
+    integrationSub: {
+      ...Typography.callout,
+      color: c.textSecondary,
+      marginTop: 4,
+    },
+    integrationSubMuted: {
+      ...Typography.caption1,
+      color: c.textTertiary,
+      marginTop: 4,
+    },
+    integrationErrorText: {
+      ...Typography.caption1,
+      color: c.error,
+      marginTop: 4,
+    },
+    integrationStatusBadge: {
+      borderRadius: Radius.full,
+      paddingHorizontal: Spacing.sm,
+      paddingVertical: 2,
+      borderWidth: 1,
+    },
+    integrationStatusConnected: {
+      backgroundColor: withOpacity(c.success, 0.16),
+      borderColor: withOpacity(c.success, 0.45),
+    },
+    integrationStatusError: {
+      backgroundColor: withOpacity(c.error, 0.16),
+      borderColor: withOpacity(c.error, 0.45),
+    },
+    integrationStatusDisconnected: {
+      backgroundColor: c.surfaceSecondary,
+      borderColor: c.divider,
+    },
+    integrationStatusSetupRequired: {
+      backgroundColor: c.tintLight,
+      borderColor: c.tint,
+    },
+    integrationStatusText: {
+      ...Typography.caption1,
+      color: c.textSecondary,
+      textTransform: "capitalize",
+    },
+    integrationActionsRow: {
+      flexDirection: "row",
+      gap: Spacing.sm,
+      marginTop: Spacing.sm,
+    },
+    integrationPrimaryBtn: {
+      backgroundColor: c.tint,
+      borderRadius: Radius.sm,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.sm,
+    },
+    integrationPrimaryBtnText: {
+      ...Typography.caption1,
+      color: c.inverseText,
+      fontWeight: "600",
+    },
+    integrationSecondaryBtn: {
+      borderWidth: 1,
+      borderColor: c.divider,
+      backgroundColor: c.background,
+      borderRadius: Radius.sm,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.sm,
+    },
+    integrationSecondaryBtnText: {
+      ...Typography.caption1,
+      color: c.text,
+      fontWeight: "600",
+    },
+    integrationFeedback: {
+      borderRadius: Radius.sm,
+      borderWidth: 1,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.sm,
+      marginBottom: Spacing.sm,
+    },
+    integrationFeedbackSuccess: {
+      borderColor: withOpacity(c.success, 0.45),
+      backgroundColor: withOpacity(c.success, 0.12),
+    },
+    integrationFeedbackError: {
+      borderColor: withOpacity(c.error, 0.45),
+      backgroundColor: withOpacity(c.error, 0.12),
+    },
+    integrationFeedbackText: {
+      ...Typography.caption1,
+    },
+    appleHealthHintCard: {
+      marginTop: Spacing.sm,
+      borderWidth: 1,
+      borderColor: c.divider,
+      borderRadius: Radius.sm,
+      backgroundColor: c.surfaceSecondary,
+      paddingHorizontal: Spacing.sm,
+      paddingVertical: Spacing.sm,
+      gap: 6,
+    },
+    appleHealthHintText: {
+      ...Typography.caption1,
+      color: c.textSecondary,
+    },
+    appleHealthHintAction: {
+      ...Typography.caption1,
+      color: c.tint,
+      fontWeight: "600",
+    },
+    emptyRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: Spacing.sm,
+      paddingVertical: Spacing.xs,
+    },
+    emptyText: {
+      ...Typography.callout,
+      color: c.textTertiary,
+    },
 
-  /* Divider */
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: c.divider,
-    marginVertical: Spacing.sm,
-  },
+    /* Divider */
+    divider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: c.divider,
+      marginVertical: Spacing.sm,
+    },
 
-  /* Sync */
-  syncHeading: {
-    ...Typography.caption1,
-    color: c.text,
-    textTransform: "uppercase",
-    marginBottom: 4,
-  },
-  syncText: {
-    ...Typography.callout,
-    color: c.textSecondary,
-  },
+    /* Sync */
+    syncHeading: {
+      ...Typography.caption1,
+      color: c.text,
+      textTransform: "uppercase",
+      marginBottom: 4,
+    },
+    syncText: {
+      ...Typography.callout,
+      color: c.textSecondary,
+    },
 
-  /* Version / About */
-  versionRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: Spacing.xs,
-  },
-  versionLabel: {
-    ...Typography.caption1,
-    color: c.textTertiary,
-  },
-  versionValue: {
-    ...Typography.caption1,
-    color: c.text,
-  },
-  aboutRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: Spacing.sm,
-  },
-  aboutText: {
-    ...Typography.body,
-    color: c.text,
-    flex: 1,
-    marginLeft: Spacing.md,
-  },
+    /* Version / About */
+    versionRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      paddingVertical: Spacing.xs,
+    },
+    versionLabel: {
+      ...Typography.caption1,
+      color: c.textTertiary,
+    },
+    versionValue: {
+      ...Typography.caption1,
+      color: c.text,
+    },
+    aboutRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingVertical: Spacing.sm,
+    },
+    aboutText: {
+      ...Typography.body,
+      color: c.text,
+      flex: 1,
+      marginLeft: Spacing.md,
+    },
 
-  /* Danger */
-  dangerBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: Spacing.sm,
-    paddingVertical: Spacing.md,
-  },
-  dangerBtnDisabled: {
-    opacity: 0.55,
-  },
-  dangerText: {
-    ...Typography.callout,
-    color: c.error,
-  },
-  dangerStatusCard: {
-    marginTop: Spacing.sm,
-    borderWidth: 1,
-    borderColor: c.divider,
-    borderRadius: Radius.md,
-    padding: Spacing.sm,
-    gap: Spacing.xs,
-  },
-  dangerStatusHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: Spacing.sm,
-  },
-  dangerStateBadge: {
-    borderRadius: 999,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
-  },
-  dangerStateBadgeRequested: {
-    backgroundColor: "#E2E8F0",
-  },
-  dangerStateBadgeProcessing: {
-    backgroundColor: "#FEF3C7",
-  },
-  dangerStateBadgeCompleted: {
-    backgroundColor: "#DCFCE7",
-  },
-  dangerStateBadgeFailed: {
-    backgroundColor: "#DC2626",
-  },
-  dangerStateBadgeText: {
-    ...Typography.caption1,
-    color: c.text,
-    fontWeight: "700",
-  },
-  dangerStateBadgeTextInverted: {
-    color: "#FFFFFF",
-  },
-  dangerJobIdText: {
-    ...Typography.caption2,
-    color: c.textTertiary,
-  },
-  dangerProgressMetaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  dangerProgressMetaText: {
-    ...Typography.caption2,
-    color: c.textSecondary,
-  },
-  dangerProgressTrack: {
-    height: 6,
-    borderRadius: 999,
-    backgroundColor: c.divider,
-    overflow: "hidden",
-  },
-  dangerProgressFill: {
-    height: "100%",
-    borderRadius: 999,
-  },
-  dangerProgressFillActive: {
-    backgroundColor: c.tint,
-  },
-  dangerProgressFillCompleted: {
-    backgroundColor: "#10B981",
-  },
-  dangerProgressFillFailed: {
-    backgroundColor: c.error,
-  },
-  dangerStatusText: {
-    ...Typography.caption1,
-    color: c.textSecondary,
-    textAlign: "center",
-    marginTop: Spacing.xs,
-  },
-  dangerStatusTextError: {
-    color: c.error,
-  },
-});
+    /* Danger */
+    dangerBtn: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: Spacing.sm,
+      paddingVertical: Spacing.md,
+    },
+    dangerBtnDisabled: {
+      opacity: 0.55,
+    },
+    dangerText: {
+      ...Typography.callout,
+      color: c.error,
+    },
+    dangerStatusCard: {
+      marginTop: Spacing.sm,
+      borderWidth: 1,
+      borderColor: c.divider,
+      borderRadius: Radius.md,
+      padding: Spacing.sm,
+      gap: Spacing.xs,
+    },
+    dangerStatusHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: Spacing.sm,
+    },
+    dangerStateBadge: {
+      borderRadius: 999,
+      paddingHorizontal: Spacing.sm,
+      paddingVertical: 2,
+    },
+    dangerStateBadgeRequested: {
+      backgroundColor: c.surfaceSecondary,
+    },
+    dangerStateBadgeProcessing: {
+      backgroundColor: c.warningLight,
+    },
+    dangerStateBadgeCompleted: {
+      backgroundColor: withOpacity(c.success, 0.18),
+    },
+    dangerStateBadgeFailed: {
+      backgroundColor: c.error,
+    },
+    dangerStateBadgeText: {
+      ...Typography.caption1,
+      color: c.text,
+      fontWeight: "700",
+    },
+    dangerStateBadgeTextInverted: {
+      color: c.inverseText,
+    },
+    dangerJobIdText: {
+      ...Typography.caption2,
+      color: c.textTertiary,
+    },
+    dangerProgressMetaRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    dangerProgressMetaText: {
+      ...Typography.caption2,
+      color: c.textSecondary,
+    },
+    dangerProgressTrack: {
+      height: 6,
+      borderRadius: 999,
+      backgroundColor: c.divider,
+      overflow: "hidden",
+    },
+    dangerProgressFill: {
+      height: "100%",
+      borderRadius: 999,
+    },
+    dangerProgressFillActive: {
+      backgroundColor: c.tint,
+    },
+    dangerProgressFillCompleted: {
+      backgroundColor: c.success,
+    },
+    dangerProgressFillFailed: {
+      backgroundColor: c.error,
+    },
+    dangerStatusText: {
+      ...Typography.caption1,
+      color: c.textSecondary,
+      textAlign: "center",
+      marginTop: Spacing.xs,
+    },
+    dangerStatusTextError: {
+      color: c.error,
+    },
+  });
+}

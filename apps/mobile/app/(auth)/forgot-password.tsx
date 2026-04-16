@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -14,6 +14,15 @@ import {
 import { useRouter } from "expo-router";
 import { useSignIn } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
+import {
+  Colors,
+  Radius,
+  Spacing,
+  Typography,
+  type ThemeColors,
+} from "@/constants/theme";
+import { useColorScheme } from "@/hooks/use-color-scheme";
+import { withOpacity } from "@/lib/color-utils";
 import { captureException } from "@/lib/observability";
 
 type ClerkErrorLike = {
@@ -33,6 +42,13 @@ function getClerkError(err: unknown): ClerkErrorLike {
 export default function ForgotPasswordScreen() {
   const router = useRouter();
   const { signIn } = useSignIn();
+  const colorScheme = useColorScheme();
+  const colors = Colors[colorScheme ?? "light"];
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const successBackground = useMemo(
+    () => withOpacity(colors.success, colorScheme === "dark" ? 0.18 : 0.12),
+    [colors.success, colorScheme],
+  );
 
   const [email, setEmail] = useState("");
   const [isPending, setIsPending] = useState(false);
@@ -379,7 +395,7 @@ export default function ForgotPasswordScreen() {
                 disabled={!email.trim() || isPending}
               >
                 {isPending ? (
-                  <ActivityIndicator color="#ffffff" />
+                  <ActivityIndicator color={colors.inverseText} />
                 ) : (
                   <Text style={styles.buttonText}>Send Reset Link</Text>
                 )}
@@ -428,7 +444,7 @@ export default function ForgotPasswordScreen() {
                   disabled={!code.trim() || code.length !== 6 || isPending}
                 >
                   {isPending ? (
-                    <ActivityIndicator color="#ffffff" />
+                    <ActivityIndicator color={colors.inverseText} />
                   ) : (
                     <Text style={styles.buttonText}>Verify Code</Text>
                   )}
@@ -505,7 +521,7 @@ export default function ForgotPasswordScreen() {
                 }
               >
                 {isPending ? (
-                  <ActivityIndicator color="#ffffff" />
+                  <ActivityIndicator color={colors.inverseText} />
                 ) : (
                   <Text style={styles.buttonText}>Reset Password</Text>
                 )}
@@ -515,8 +531,17 @@ export default function ForgotPasswordScreen() {
 
           {/* Success Message */}
           {success && (
-            <View style={styles.successContainer}>
-              <Ionicons name="checkmark-circle" size={20} color="#22c55e" />
+            <View
+              style={[
+                styles.successContainer,
+                { backgroundColor: successBackground },
+              ]}
+            >
+              <Ionicons
+                name="checkmark-circle"
+                size={20}
+                color={colors.success}
+              />
               <Text style={styles.successText}>{success}</Text>
             </View>
           )}
@@ -524,7 +549,7 @@ export default function ForgotPasswordScreen() {
           {/* Error Message */}
           {error && (
             <View style={styles.errorContainer}>
-              <Ionicons name="alert-circle" size={20} color="#dc2626" />
+              <Ionicons name="alert-circle" size={20} color={colors.error} />
               <Text style={styles.errorText}>{error}</Text>
             </View>
           )}
@@ -532,7 +557,11 @@ export default function ForgotPasswordScreen() {
           {/* Help Text */}
           <View style={styles.helpContainer}>
             <Text style={styles.helpText}>
-              <Ionicons name="information-circle" size={16} color="#64748b" />{" "}
+              <Ionicons
+                name="information-circle"
+                size={16}
+                color={colors.textSecondary}
+              />{" "}
               {step === "email" &&
                 "Check your spam folder if you don't see the email"}
               {step === "code" && "The code expires in 30 minutes"}
@@ -546,225 +575,219 @@ export default function ForgotPasswordScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f8fafc",
-  },
-  scrollContainer: {
-    flexGrow: 1,
-  },
-  content: {
-    flex: 1,
-    padding: 24,
-    maxWidth: 400,
-    alignSelf: "center",
-    width: "100%",
-  },
-  header: {
-    alignItems: "center",
-    marginBottom: 32,
-    marginTop: 20,
-  },
-  logo: {
-    width: 60,
-    height: 60,
-    marginBottom: 16,
-    borderRadius: 10,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "700",
-    color: "#0f172a",
-    marginBottom: 8,
-    textAlign: "center",
-  },
-  subtitle: {
-    fontSize: 16,
-    color: "#64748b",
-    textAlign: "center",
-    lineHeight: 22,
-  },
-  stepIndicator: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 32,
-    paddingHorizontal: 20,
-  },
-  step: {
-    alignItems: "center",
-    width: 60,
-  },
-  activeStep: {
-    transform: [{ scale: 1.1 }],
-  },
-  stepText: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "#e2e8f0",
-    textAlign: "center",
-    lineHeight: 32,
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#94a3b8",
-    marginBottom: 4,
-  },
-  activeStepText: {
-    backgroundColor: "#6366f1",
-    color: "#ffffff",
-  },
-  stepLabel: {
-    fontSize: 12,
-    color: "#94a3b8",
-    fontWeight: "500",
-  },
-  activeStepLabel: {
-    color: "#6366f1",
-    fontWeight: "600",
-  },
-  stepLine: {
-    flex: 1,
-    height: 2,
-    backgroundColor: "#e2e8f0",
-    marginHorizontal: 8,
-    maxWidth: 40,
-  },
-  activeStepLine: {
-    backgroundColor: "#6366f1",
-  },
-  card: {
-    backgroundColor: "#ffffff",
-    borderRadius: 20,
-    padding: 24,
-    shadowColor: "#0f172a",
-    shadowOffset: {
-      width: 0,
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    scrollContainer: {
+      flexGrow: 1,
+    },
+    content: {
+      flex: 1,
+      padding: Spacing["2xl"],
+      maxWidth: 400,
+      alignSelf: "center",
+      width: "100%",
+    },
+    header: {
+      alignItems: "center",
+      marginBottom: Spacing["3xl"],
+      marginTop: Spacing.xl,
+    },
+    logo: {
+      width: 60,
+      height: 60,
+      marginBottom: Spacing.lg,
+      borderRadius: Radius.sm + 2,
+    },
+    title: {
+      ...Typography.largeTitle,
+      color: colors.text,
+      marginBottom: Spacing.sm,
+      textAlign: "center",
+    },
+    subtitle: {
+      ...Typography.body,
+      color: colors.textSecondary,
+      textAlign: "center",
+    },
+    stepIndicator: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: Spacing["3xl"],
+      paddingHorizontal: Spacing.xl,
+    },
+    step: {
+      alignItems: "center",
+      width: 60,
+    },
+    activeStep: {
+      transform: [{ scale: 1.1 }],
+    },
+    stepText: {
+      width: 32,
+      height: 32,
+      borderRadius: Radius.full,
+      backgroundColor: colors.surfaceSecondary,
+      textAlign: "center",
+      lineHeight: 32,
+      ...Typography.callout,
+      fontWeight: "600",
+      color: colors.textTertiary,
+      marginBottom: 4,
+    },
+    activeStepText: {
+      backgroundColor: colors.tint,
+      color: colors.inverseText,
+    },
+    stepLabel: {
+      ...Typography.caption1,
+      color: colors.textTertiary,
+      fontWeight: "500",
+    },
+    activeStepLabel: {
+      color: colors.tint,
+      fontWeight: "600",
+    },
+    stepLine: {
+      flex: 1,
       height: 2,
+      backgroundColor: colors.surfaceSecondary,
+      marginHorizontal: Spacing.sm,
+      maxWidth: 40,
     },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 3,
-    marginBottom: 24,
-  },
-  label: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#334155",
-    marginBottom: 8,
-  },
-  instruction: {
-    fontSize: 14,
-    color: "#64748b",
-    marginBottom: 16,
-    lineHeight: 20,
-  },
-  input: {
-    borderWidth: 1.5,
-    borderColor: "#e2e8f0",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    backgroundColor: "#ffffff",
-    color: "#0f172a",
-    marginBottom: 20,
-  },
-  button: {
-    backgroundColor: "#6366f1",
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: "center",
-    shadowColor: "#6366f1",
-    shadowOffset: {
-      width: 0,
-      height: 4,
+    activeStepLine: {
+      backgroundColor: colors.tint,
     },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
-    marginBottom: 12,
-  },
-  buttonDisabled: {
-    backgroundColor: "#c7d2fe",
-    shadowOpacity: 0,
-  },
-  buttonText: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  cancelButton: {
-    alignItems: "center",
-    paddingVertical: 12,
-  },
-  cancelText: {
-    color: "#64748b",
-    fontSize: 14,
-    fontWeight: "500",
-  },
-  codeActions: {
-    gap: 12,
-  },
-  resendButton: {
-    alignItems: "center",
-    paddingVertical: 12,
-  },
-  resendText: {
-    color: "#6366f1",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  passwordHint: {
-    fontSize: 12,
-    color: "#64748b",
-    lineHeight: 18,
-    marginBottom: 20,
-  },
-  successContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#f0fdf4",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: "#22c55e",
-    gap: 8,
-  },
-  successText: {
-    color: "#15803d",
-    fontSize: 14,
-    flex: 1,
-    lineHeight: 20,
-  },
-  errorContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#fef2f2",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: "#dc2626",
-    gap: 8,
-  },
-  errorText: {
-    color: "#dc2626",
-    fontSize: 14,
-    flex: 1,
-    lineHeight: 20,
-  },
-  helpContainer: {
-    backgroundColor: "#f1f5f9",
-    borderRadius: 12,
-    padding: 16,
-    marginTop: 8,
-  },
-  helpText: {
-    color: "#64748b",
-    fontSize: 14,
-    lineHeight: 20,
-  },
-});
+    card: {
+      backgroundColor: colors.surface,
+      borderRadius: Radius.xl,
+      padding: Spacing["2xl"],
+      shadowColor: colors.cardShadow,
+      shadowOffset: {
+        width: 0,
+        height: 2,
+      },
+      shadowOpacity: 0.05,
+      shadowRadius: 10,
+      elevation: 3,
+      marginBottom: Spacing.xl,
+    },
+    label: {
+      ...Typography.bodyMedium,
+      color: colors.textSecondary,
+      marginBottom: Spacing.sm,
+    },
+    instruction: {
+      ...Typography.callout,
+      color: colors.textSecondary,
+      marginBottom: Spacing.lg,
+    },
+    input: {
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      borderRadius: Radius.md,
+      paddingHorizontal: Spacing.lg,
+      paddingVertical: 14,
+      ...Typography.body,
+      backgroundColor: colors.inputBg,
+      color: colors.text,
+      marginBottom: Spacing.xl,
+    },
+    button: {
+      backgroundColor: colors.tint,
+      borderRadius: Radius.md,
+      paddingVertical: Spacing.lg,
+      alignItems: "center",
+      shadowColor: colors.tint,
+      shadowOffset: {
+        width: 0,
+        height: 4,
+      },
+      shadowOpacity: 0.2,
+      shadowRadius: 8,
+      elevation: 4,
+      marginBottom: Spacing.md,
+    },
+    buttonDisabled: {
+      backgroundColor: colors.tintMuted,
+      shadowOpacity: 0,
+    },
+    buttonText: {
+      ...Typography.bodyMedium,
+      color: colors.inverseText,
+      fontWeight: "600",
+    },
+    cancelButton: {
+      alignItems: "center",
+      paddingVertical: Spacing.md,
+    },
+    cancelText: {
+      ...Typography.callout,
+      color: colors.textSecondary,
+      fontWeight: "500",
+    },
+    codeActions: {
+      gap: Spacing.md,
+    },
+    resendButton: {
+      alignItems: "center",
+      paddingVertical: Spacing.md,
+    },
+    resendText: {
+      ...Typography.callout,
+      color: colors.tint,
+      fontWeight: "600",
+    },
+    passwordHint: {
+      ...Typography.caption1,
+      color: colors.textSecondary,
+      lineHeight: 18,
+      marginBottom: Spacing.xl,
+    },
+    successContainer: {
+      flexDirection: "row",
+      alignItems: "center",
+      borderRadius: Radius.md,
+      padding: Spacing.lg,
+      marginBottom: Spacing.lg,
+      borderLeftWidth: 4,
+      borderLeftColor: colors.success,
+      gap: Spacing.sm,
+    },
+    successText: {
+      ...Typography.callout,
+      color: colors.success,
+      flex: 1,
+    },
+    errorContainer: {
+      flexDirection: "row",
+      alignItems: "center",
+      backgroundColor: colors.errorLight,
+      borderRadius: Radius.md,
+      padding: Spacing.lg,
+      marginBottom: Spacing.lg,
+      borderLeftWidth: 4,
+      borderLeftColor: colors.error,
+      gap: Spacing.sm,
+    },
+    errorText: {
+      ...Typography.callout,
+      color: colors.error,
+      flex: 1,
+    },
+    helpContainer: {
+      backgroundColor: colors.surfaceSecondary,
+      borderRadius: Radius.md,
+      padding: Spacing.lg,
+      marginTop: Spacing.sm,
+    },
+    helpText: {
+      ...Typography.callout,
+      color: colors.textSecondary,
+    },
+  });
+}

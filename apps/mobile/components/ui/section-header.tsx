@@ -1,6 +1,7 @@
 import React from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
-import { Colors, Spacing, Typography } from "@/constants/theme";
+import { Spacing, Typography, type ThemeColors } from "@/constants/theme";
+import { useAppTheme } from "@/components/theme-provider";
 
 interface SectionHeaderProps {
   title: string;
@@ -9,6 +10,9 @@ interface SectionHeaderProps {
 }
 
 export function SectionHeader({ title, action, onAction }: SectionHeaderProps) {
+  const { colors } = useAppTheme();
+  const styles = React.useMemo(() => createStyles(colors), [colors]);
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>{title}</Text>
@@ -21,22 +25,22 @@ export function SectionHeader({ title, action, onAction }: SectionHeaderProps) {
   );
 }
 
-const c = Colors.light;
-
-const styles = StyleSheet.create({
-  container: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: Spacing.md,
-  },
-  title: {
-    ...Typography.title3,
-    color: c.text,
-  },
-  action: {
-    ...Typography.callout,
-    color: c.tint,
-    fontWeight: "500",
-  },
-});
+function createStyles(c: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: Spacing.md,
+    },
+    title: {
+      ...Typography.title3,
+      color: c.text,
+    },
+    action: {
+      ...Typography.callout,
+      color: c.tint,
+      fontWeight: "500",
+    },
+  });
+}

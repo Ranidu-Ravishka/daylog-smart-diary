@@ -365,7 +365,14 @@ export default function QuickSetupScreen() {
                   },
                 ]}
               >
-                <Text style={styles.primaryButtonText}>{primaryLabel}</Text>
+                <Text
+                  style={[
+                    styles.primaryButtonText,
+                    { color: colors.inverseText },
+                  ]}
+                >
+                  {primaryLabel}
+                </Text>
               </Pressable>
             </Animated.View>
           </View>
@@ -432,7 +439,7 @@ export default function QuickSetupScreen() {
                   display="spinner"
                   onChange={handleTimeChange}
                   style={styles.picker}
-                  textColor={colorScheme === "dark" ? "#F8F9FA" : "#212529"}
+                  textColor={colors.text}
                 />
               </View>
             </View>
@@ -525,7 +532,6 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     ...Typography.bodyMedium,
-    color: "#FFFFFF",
     letterSpacing: 0.2,
   },
   skipText: {

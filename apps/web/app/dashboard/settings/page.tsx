@@ -42,6 +42,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { captureException, logInfo } from "@/lib/observability";
+import { useWebThemePreference } from "@/lib/theme-preference";
 import { cn } from "@/lib/utils";
 import { toastError, toastInfo, toastSuccess } from "@/lib/toast";
 
@@ -132,6 +133,7 @@ function isOAuthProvider(provider: string): boolean {
 export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { setThemePreference } = useWebThemePreference();
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
   const { user } = useUser();
   const userTimeZone = getResolvedTimeZone();
@@ -570,9 +572,10 @@ export default function SettingsPage() {
           <Label htmlFor="theme">Theme</Label>
           <Select
             value={theme}
-            onValueChange={(value: "light" | "dark" | "system") =>
-              setTheme(value)
-            }
+            onValueChange={(value: "light" | "dark" | "system") => {
+              setTheme(value);
+              setThemePreference(value);
+            }}
           >
             <SelectTrigger id="theme" className="max-w-[220px]">
               <SelectValue />
@@ -782,9 +785,9 @@ export default function SettingsPage() {
                     className={cn(
                       "inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium",
                       status === "connected"
-                        ? "bg-green-100 text-green-700"
+                        ? "bg-success/15 text-success"
                         : status === "error"
-                          ? "bg-red-100 text-red-700"
+                          ? "bg-destructive/15 text-destructive"
                           : "bg-muted text-muted-foreground",
                     )}
                   >
@@ -801,7 +804,7 @@ export default function SettingsPage() {
                     </p>
                   ) : null}
                   {integration?.lastError ? (
-                    <p className="text-red-600">
+                    <p className="text-destructive">
                       Error: {integration.lastError}
                     </p>
                   ) : null}

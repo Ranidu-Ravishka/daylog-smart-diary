@@ -17,18 +17,17 @@ import { api } from "@repo/backend/convex";
 import type { GenericId } from "convex/values";
 import { MOOD_EMOJI } from "@repo/ui/lib/constants";
 import {
-  Colors,
   Spacing,
   Typography,
   Radius,
   Shadows,
+  type ThemeColors,
 } from "@/constants/theme";
+import { useAppTheme } from "@/components/theme-provider";
 import { AppCard } from "@/components/ui/app-card";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
 import { EmptyState } from "@/components/ui/empty-state";
-
-const c = Colors.light;
 
 function getTodayDayKey(): string {
   const now = new Date();
@@ -79,6 +78,9 @@ function formatLastSyncTime(lastSyncAt: number | null, now: number): string {
 
 // ── Loading skeleton ────────────────────────────────────────
 function HomeScreenSkeleton() {
+  const { colors: c } = useAppTheme();
+  const styles = React.useMemo(() => createStyles(c), [c]);
+
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.scroll}>
@@ -104,6 +106,8 @@ function HomeScreenSkeleton() {
 
 // ── Main component ──────────────────────────────────────────
 const HomeScreen = () => {
+  const { colors: c } = useAppTheme();
+  const styles = React.useMemo(() => createStyles(c), [c]);
   const router = useRouter();
   const { user } = useUser();
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
@@ -426,176 +430,178 @@ const HomeScreen = () => {
 export default HomeScreen;
 
 // ── Styles ──────────────────────────────────────────────────
-const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: c.background,
-  },
-  scroll: {
-    paddingTop: Spacing.lg,
-    paddingBottom: Spacing["2xl"],
-  },
+function createStyles(c: ThemeColors) {
+  return StyleSheet.create({
+    safe: {
+      flex: 1,
+      backgroundColor: c.background,
+    },
+    scroll: {
+      paddingTop: Spacing.lg,
+      paddingBottom: Spacing["2xl"],
+    },
 
-  // Header
-  headerRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: Spacing.xl,
-    marginBottom: Spacing["2xl"],
-  },
-  greeting: {
-    ...Typography.callout,
-    color: c.textSecondary,
-  },
-  userName: {
-    ...Typography.title1,
-    color: c.text,
-    marginTop: 2,
-  },
-  syncText: {
-    ...Typography.caption2,
-    color: c.textSecondary,
-    marginTop: 4,
-  },
-  avatarBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: c.tintLight,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+    // Header
+    headerRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      paddingHorizontal: Spacing.xl,
+      marginBottom: Spacing["2xl"],
+    },
+    greeting: {
+      ...Typography.callout,
+      color: c.textSecondary,
+    },
+    userName: {
+      ...Typography.title1,
+      color: c.text,
+      marginTop: 2,
+    },
+    syncText: {
+      ...Typography.caption2,
+      color: c.textSecondary,
+      marginTop: 4,
+    },
+    avatarBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: c.tintLight,
+      alignItems: "center",
+      justifyContent: "center",
+    },
 
-  // Stats
-  statsRow: {
-    flexDirection: "row",
-    gap: Spacing.md,
-    paddingHorizontal: Spacing.xl,
-    marginBottom: Spacing["2xl"],
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: c.surface,
-    borderRadius: Radius.lg,
-    padding: Spacing.lg,
-    alignItems: "center",
-    ...Shadows.sm,
-  },
-  statValue: {
-    ...Typography.title2,
-    color: c.text,
-    marginTop: Spacing.sm,
-  },
-  statLabel: {
-    ...Typography.caption2,
-    color: c.textSecondary,
-    marginTop: 2,
-  },
+    // Stats
+    statsRow: {
+      flexDirection: "row",
+      gap: Spacing.md,
+      paddingHorizontal: Spacing.xl,
+      marginBottom: Spacing["2xl"],
+    },
+    statCard: {
+      flex: 1,
+      backgroundColor: c.surface,
+      borderRadius: Radius.lg,
+      padding: Spacing.lg,
+      alignItems: "center",
+      ...Shadows.sm,
+    },
+    statValue: {
+      ...Typography.title2,
+      color: c.text,
+      marginTop: Spacing.sm,
+    },
+    statLabel: {
+      ...Typography.caption2,
+      color: c.textSecondary,
+      marginTop: 2,
+    },
 
-  // Sections
-  section: {
-    paddingHorizontal: Spacing.xl,
-    marginBottom: Spacing["2xl"],
-  },
+    // Sections
+    section: {
+      paddingHorizontal: Spacing.xl,
+      marginBottom: Spacing["2xl"],
+    },
 
-  // Summary
-  summaryText: {
-    ...Typography.body,
-    color: c.text,
-    marginBottom: Spacing.md,
-  },
-  highlightsWrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: Spacing.sm,
-    marginTop: Spacing.sm,
-  },
-  highlightChip: {
-    backgroundColor: c.tintLight,
-    borderRadius: Radius.full,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-  },
-  highlightText: {
-    ...Typography.caption1,
-    color: c.tint,
-  },
+    // Summary
+    summaryText: {
+      ...Typography.body,
+      color: c.text,
+      marginBottom: Spacing.md,
+    },
+    highlightsWrap: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: Spacing.sm,
+      marginTop: Spacing.sm,
+    },
+    highlightChip: {
+      backgroundColor: c.tintLight,
+      borderRadius: Radius.full,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.xs,
+    },
+    highlightText: {
+      ...Typography.caption1,
+      color: c.tint,
+    },
 
-  // Quick Actions
-  actionsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  actionItem: {
-    alignItems: "center",
-    flex: 1,
-  },
-  actionIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    backgroundColor: c.tintLight,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: Spacing.sm,
-  },
-  actionLabel: {
-    ...Typography.caption1,
-    color: c.textSecondary,
-  },
+    // Quick Actions
+    actionsRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+    },
+    actionItem: {
+      alignItems: "center",
+      flex: 1,
+    },
+    actionIcon: {
+      width: 52,
+      height: 52,
+      borderRadius: 16,
+      backgroundColor: c.tintLight,
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: Spacing.sm,
+    },
+    actionLabel: {
+      ...Typography.caption1,
+      color: c.textSecondary,
+    },
 
-  // Memory list
-  memoryRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.lg,
-  },
-  memoryBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: c.divider,
-  },
-  moodDot: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: c.surfaceSecondary,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: Spacing.md,
-  },
-  memoryInfo: {
-    flex: 1,
-  },
-  memoryTitle: {
-    ...Typography.bodyMedium,
-    color: c.text,
-  },
-  memoryMood: {
-    ...Typography.caption2,
-    color: c.textTertiary,
-    marginTop: 2,
-    textTransform: "capitalize",
-  },
-  memoryTime: {
-    alignItems: "flex-end",
-    marginLeft: Spacing.md,
-  },
-  memoryThumb: {
-    width: 36,
-    height: 36,
-    borderRadius: Radius.sm,
-    marginLeft: Spacing.sm,
-    backgroundColor: c.surfaceSecondary,
-  },
-  timeText: {
-    ...Typography.caption1,
-    color: c.textSecondary,
-  },
-  dayText: {
-    ...Typography.caption2,
-    color: c.textTertiary,
-    marginTop: 2,
-  },
-});
+    // Memory list
+    memoryRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: Spacing.xl,
+      paddingVertical: Spacing.lg,
+    },
+    memoryBorder: {
+      borderBottomWidth: 1,
+      borderBottomColor: c.divider,
+    },
+    moodDot: {
+      width: 36,
+      height: 36,
+      borderRadius: 12,
+      backgroundColor: c.surfaceSecondary,
+      alignItems: "center",
+      justifyContent: "center",
+      marginRight: Spacing.md,
+    },
+    memoryInfo: {
+      flex: 1,
+    },
+    memoryTitle: {
+      ...Typography.bodyMedium,
+      color: c.text,
+    },
+    memoryMood: {
+      ...Typography.caption2,
+      color: c.textTertiary,
+      marginTop: 2,
+      textTransform: "capitalize",
+    },
+    memoryTime: {
+      alignItems: "flex-end",
+      marginLeft: Spacing.md,
+    },
+    memoryThumb: {
+      width: 36,
+      height: 36,
+      borderRadius: Radius.sm,
+      marginLeft: Spacing.sm,
+      backgroundColor: c.surfaceSecondary,
+    },
+    timeText: {
+      ...Typography.caption1,
+      color: c.textSecondary,
+    },
+    dayText: {
+      ...Typography.caption2,
+      color: c.textTertiary,
+      marginTop: 2,
+    },
+  });
+}

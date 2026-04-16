@@ -17,7 +17,13 @@ import { useQuery, useMutation, useAction, useConvexAuth } from "convex/react";
 import { api } from "@repo/backend/convex";
 import type { GenericId } from "convex/values";
 import { MOOD_EMOJI } from "@repo/ui/lib/constants";
-import { Colors, Spacing, Typography, Radius } from "@/constants/theme";
+import {
+  Spacing,
+  Typography,
+  Radius,
+  type ThemeColors,
+} from "@/constants/theme";
+import { useAppTheme } from "@/components/theme-provider";
 import { AppCard } from "@/components/ui/app-card";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
@@ -28,8 +34,6 @@ import {
   isLikelyTransientNetworkError,
 } from "@/lib/offline-outbox";
 import { captureException, logInfo, logWarn } from "@/lib/observability";
-
-const c = Colors.light;
 
 type MemoryDoc = {
   _id: GenericId<"memories">;
@@ -200,6 +204,9 @@ function getSummaryGenerationFailureResultMessage(
 }
 
 function MemorySkeleton() {
+  const { colors: c } = useAppTheme();
+  const styles = React.useMemo(() => createStyles(c), [c]);
+
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.scroll}>
@@ -218,6 +225,8 @@ function MemorySkeleton() {
 }
 
 const DailyDetailView = () => {
+  const { colors: c } = useAppTheme();
+  const styles = React.useMemo(() => createStyles(c), [c]);
   const router = useRouter();
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
   const dayKey = getTodayDayKey();
@@ -902,7 +911,7 @@ const DailyDetailView = () => {
                   <Ionicons
                     name={star <= rating ? "star" : "star-outline"}
                     size={32}
-                    color={star <= rating ? "#FBBF24" : c.textTertiary}
+                    color={star <= rating ? c.warning : c.textTertiary}
                   />
                 </TouchableOpacity>
               ))}
@@ -932,234 +941,236 @@ const DailyDetailView = () => {
 export default DailyDetailView;
 
 // ── Styles ──────────────────────────────────────────────────
-const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: c.background,
-  },
-  scroll: {
-    paddingTop: Spacing.lg,
-    paddingBottom: Spacing["2xl"],
-  },
+function createStyles(c: ThemeColors) {
+  return StyleSheet.create({
+    safe: {
+      flex: 1,
+      backgroundColor: c.background,
+    },
+    scroll: {
+      paddingTop: Spacing.lg,
+      paddingBottom: Spacing["2xl"],
+    },
 
-  // Header
-  headerRow: {
-    paddingHorizontal: Spacing.xl,
-    marginBottom: Spacing.md,
-  },
-  pageTitle: {
-    ...Typography.title1,
-    color: c.text,
-  },
-  dateText: {
-    ...Typography.callout,
-    color: c.textSecondary,
-    marginTop: 2,
-  },
-  syncText: {
-    ...Typography.caption2,
-    color: c.textSecondary,
-    marginTop: 4,
-  },
+    // Header
+    headerRow: {
+      paddingHorizontal: Spacing.xl,
+      marginBottom: Spacing.md,
+    },
+    pageTitle: {
+      ...Typography.title1,
+      color: c.text,
+    },
+    dateText: {
+      ...Typography.callout,
+      color: c.textSecondary,
+      marginTop: 2,
+    },
+    syncText: {
+      ...Typography.caption2,
+      color: c.textSecondary,
+      marginTop: 4,
+    },
 
-  // Metrics
-  metricsRow: {
-    flexDirection: "row",
-    gap: Spacing.sm,
-    paddingHorizontal: Spacing.xl,
-    marginBottom: Spacing["2xl"],
-    flexWrap: "wrap",
-  },
-  metricChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: c.tintLight,
-    borderRadius: Radius.full,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-  },
-  metricText: {
-    ...Typography.caption1,
-    color: c.tint,
-  },
+    // Metrics
+    metricsRow: {
+      flexDirection: "row",
+      gap: Spacing.sm,
+      paddingHorizontal: Spacing.xl,
+      marginBottom: Spacing["2xl"],
+      flexWrap: "wrap",
+    },
+    metricChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      backgroundColor: c.tintLight,
+      borderRadius: Radius.full,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.xs,
+    },
+    metricText: {
+      ...Typography.caption1,
+      color: c.tint,
+    },
 
-  // Section
-  section: {
-    paddingHorizontal: Spacing.xl,
-    marginBottom: Spacing["2xl"],
-  },
+    // Section
+    section: {
+      paddingHorizontal: Spacing.xl,
+      marginBottom: Spacing["2xl"],
+    },
 
-  // Story
-  storyText: {
-    ...Typography.body,
-    color: c.text,
-  },
-  summaryMetaText: {
-    ...Typography.caption2,
-    color: c.textSecondary,
-    marginTop: Spacing.md,
-  },
-  summaryHintText: {
-    ...Typography.caption2,
-    color: c.textSecondary,
-  },
-  summaryBlockedHintText: {
-    ...Typography.caption2,
-    color: c.textSecondary,
-  },
-  summaryErrorText: {
-    ...Typography.caption2,
-    color: c.error,
-  },
-  highlightsWrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: Spacing.sm,
-    marginTop: Spacing.lg,
-  },
-  highlightChip: {
-    backgroundColor: c.tintLight,
-    borderRadius: Radius.full,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-  },
-  highlightText: {
-    ...Typography.caption1,
-    color: c.tint,
-  },
+    // Story
+    storyText: {
+      ...Typography.body,
+      color: c.text,
+    },
+    summaryMetaText: {
+      ...Typography.caption2,
+      color: c.textSecondary,
+      marginTop: Spacing.md,
+    },
+    summaryHintText: {
+      ...Typography.caption2,
+      color: c.textSecondary,
+    },
+    summaryBlockedHintText: {
+      ...Typography.caption2,
+      color: c.textSecondary,
+    },
+    summaryErrorText: {
+      ...Typography.caption2,
+      color: c.error,
+    },
+    highlightsWrap: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: Spacing.sm,
+      marginTop: Spacing.lg,
+    },
+    highlightChip: {
+      backgroundColor: c.tintLight,
+      borderRadius: Radius.full,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.xs,
+    },
+    highlightText: {
+      ...Typography.caption1,
+      color: c.tint,
+    },
 
-  // Memories list
-  memoryRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.lg,
-  },
-  memoryBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: c.divider,
-  },
-  moodDot: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    backgroundColor: c.surfaceSecondary,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: Spacing.md,
-  },
-  memoryTitle: {
-    ...Typography.bodyMedium,
-    color: c.text,
-  },
-  memoryDesc: {
-    ...Typography.callout,
-    color: c.textSecondary,
-    marginTop: 2,
-  },
-  memoryThumb: {
-    width: 42,
-    height: 42,
-    borderRadius: Radius.md,
-    marginLeft: Spacing.md,
-    backgroundColor: c.surfaceSecondary,
-  },
+    // Memories list
+    memoryRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: Spacing.xl,
+      paddingVertical: Spacing.lg,
+    },
+    memoryBorder: {
+      borderBottomWidth: 1,
+      borderBottomColor: c.divider,
+    },
+    moodDot: {
+      width: 32,
+      height: 32,
+      borderRadius: 10,
+      backgroundColor: c.surfaceSecondary,
+      alignItems: "center",
+      justifyContent: "center",
+      marginRight: Spacing.md,
+    },
+    memoryTitle: {
+      ...Typography.bodyMedium,
+      color: c.text,
+    },
+    memoryDesc: {
+      ...Typography.callout,
+      color: c.textSecondary,
+      marginTop: 2,
+    },
+    memoryThumb: {
+      width: 42,
+      height: 42,
+      borderRadius: Radius.md,
+      marginLeft: Spacing.md,
+      backgroundColor: c.surfaceSecondary,
+    },
 
-  // Sources
-  sourcesWrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: Spacing.sm,
-  },
-  sourcesHeaderText: {
-    ...Typography.caption,
-    color: c.textSecondary,
-    marginBottom: Spacing.sm,
-  },
-  sourcesEmptyText: {
-    ...Typography.caption,
-    color: c.textSecondary,
-  },
-  sourceChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: c.surfaceSecondary,
-    borderRadius: Radius.full,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-  },
-  sourceText: {
-    ...Typography.caption1,
-    color: c.textSecondary,
-  },
+    // Sources
+    sourcesWrap: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: Spacing.sm,
+    },
+    sourcesHeaderText: {
+      ...Typography.caption,
+      color: c.textSecondary,
+      marginBottom: Spacing.sm,
+    },
+    sourcesEmptyText: {
+      ...Typography.caption,
+      color: c.textSecondary,
+    },
+    sourceChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      backgroundColor: c.surfaceSecondary,
+      borderRadius: Radius.full,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.xs,
+    },
+    sourceText: {
+      ...Typography.caption1,
+      color: c.textSecondary,
+    },
 
-  // Notes
-  noteRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    marginBottom: Spacing.sm,
-  },
-  noteBullet: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: c.tint,
-    marginTop: 7,
-    marginRight: Spacing.sm,
-  },
-  noteText: {
-    ...Typography.body,
-    color: c.text,
-    flex: 1,
-  },
-  input: {
-    backgroundColor: c.inputBg,
-    borderRadius: Radius.md,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    minHeight: 44,
-    ...Typography.body,
-    color: c.text,
-  },
+    // Notes
+    noteRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      marginBottom: Spacing.sm,
+    },
+    noteBullet: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: c.tint,
+      marginTop: 7,
+      marginRight: Spacing.sm,
+    },
+    noteText: {
+      ...Typography.body,
+      color: c.text,
+      flex: 1,
+    },
+    input: {
+      backgroundColor: c.inputBg,
+      borderRadius: Radius.md,
+      paddingHorizontal: Spacing.lg,
+      paddingVertical: Spacing.md,
+      minHeight: 44,
+      ...Typography.body,
+      color: c.text,
+    },
 
-  // People
-  personInputRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: Spacing.md,
-  },
-  tagsWrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: Spacing.sm,
-  },
-  personTag: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: c.tintLight,
-    borderRadius: Radius.full,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs + 2,
-  },
-  personTagText: {
-    ...Typography.caption1,
-    color: c.tint,
-  },
+    // People
+    personInputRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginBottom: Spacing.md,
+    },
+    tagsWrap: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: Spacing.sm,
+    },
+    personTag: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      backgroundColor: c.tintLight,
+      borderRadius: Radius.full,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.xs + 2,
+    },
+    personTagText: {
+      ...Typography.caption1,
+      color: c.tint,
+    },
 
-  // Stars
-  starsRow: {
-    flexDirection: "row",
-    gap: Spacing.md,
-    marginBottom: Spacing.sm,
-  },
-  starBtn: {
-    padding: 4,
-  },
-  ratingLabel: {
-    ...Typography.callout,
-    color: c.textSecondary,
-  },
-});
+    // Stars
+    starsRow: {
+      flexDirection: "row",
+      gap: Spacing.md,
+      marginBottom: Spacing.sm,
+    },
+    starBtn: {
+      padding: 4,
+    },
+    ratingLabel: {
+      ...Typography.callout,
+      color: c.textSecondary,
+    },
+  });
+}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -19,21 +19,21 @@ import { api } from "@repo/backend/convex";
 import { SETTINGS_DEFAULTS } from "@repo/ui/lib/constants";
 import type { GenericId } from "convex/values";
 import {
-  Colors,
   Spacing,
   Typography,
   Radius,
   Shadows,
+  type ThemeColors,
 } from "@/constants/theme";
+import { useAppTheme } from "@/components/theme-provider";
 import { AppButton } from "@/components/ui/app-button";
 import {
   enqueueOfflineCreateMemory,
   enqueueOfflineMemoryMediaUpload,
   isLikelyTransientNetworkError,
 } from "@/lib/offline-outbox";
+import { withOpacity } from "@/lib/color-utils";
 import { captureException, logInfo } from "@/lib/observability";
-
-const c = Colors.light;
 
 function getTodayDayKey(): string {
   const now = new Date();
@@ -58,6 +58,8 @@ type SelectedImage = {
 type MemoryId = GenericId<"memories">;
 
 export default function AddMemoryScreen() {
+  const { colors: c } = useAppTheme();
+  const styles = useMemo(() => createStyles(c), [c]);
   const router = useRouter();
   const { isAuthenticated } = useConvexAuth();
   const createMemory = useMutation(api.memories.createMemory);
@@ -431,17 +433,18 @@ export default function AddMemoryScreen() {
                   <Image source={{ uri: img.uri }} style={styles.imageThumb} />
                   {img.uploading && (
                     <View style={styles.imageOverlay}>
-                      <ActivityIndicator color="#fff" />
+                      <ActivityIndicator color={c.inverseText} />
                     </View>
                   )}
                   {img.error && (
                     <View
-                      style={[
-                        styles.imageOverlay,
-                        { backgroundColor: "rgba(239,68,68,0.5)" },
-                      ]}
+                      style={[styles.imageOverlay, styles.imageErrorOverlay]}
                     >
-                      <Ionicons name="alert-circle" size={20} color="#fff" />
+                      <Ionicons
+                        name="alert-circle"
+                        size={20}
+                        color={c.inverseText}
+                      />
                     </View>
                   )}
                   {!isSubmitting && (
@@ -449,7 +452,7 @@ export default function AddMemoryScreen() {
                       style={styles.removeBtn}
                       onPress={() => removeImage(index)}
                     >
-                      <Ionicons name="close" size={14} color="#fff" />
+                      <Ionicons name="close" size={14} color={c.inverseText} />
                     </TouchableOpacity>
                   )}
                 </View>
@@ -476,155 +479,160 @@ export default function AddMemoryScreen() {
 }
 
 // ── Styles ──────────────────────────────────────────────────
-const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: c.background,
-  },
-  scroll: {
-    paddingTop: Spacing.lg,
-    paddingBottom: Spacing["2xl"],
-  },
+function createStyles(c: ThemeColors) {
+  return StyleSheet.create({
+    safe: {
+      flex: 1,
+      backgroundColor: c.background,
+    },
+    scroll: {
+      paddingTop: Spacing.lg,
+      paddingBottom: Spacing["2xl"],
+    },
 
-  // Header
-  headerRow: {
-    paddingHorizontal: Spacing.xl,
-    marginBottom: Spacing["2xl"],
-  },
-  pageTitle: {
-    ...Typography.title1,
-    color: c.text,
-  },
-  pageSubtitle: {
-    ...Typography.callout,
-    color: c.textSecondary,
-    marginTop: 2,
-  },
+    // Header
+    headerRow: {
+      paddingHorizontal: Spacing.xl,
+      marginBottom: Spacing["2xl"],
+    },
+    pageTitle: {
+      ...Typography.title1,
+      color: c.text,
+    },
+    pageSubtitle: {
+      ...Typography.callout,
+      color: c.textSecondary,
+      marginTop: 2,
+    },
 
-  // Sections
-  section: {
-    paddingHorizontal: Spacing.xl,
-    marginBottom: Spacing.xl,
-  },
-  label: {
-    ...Typography.title3,
-    color: c.text,
-    marginBottom: Spacing.sm,
-  },
+    // Sections
+    section: {
+      paddingHorizontal: Spacing.xl,
+      marginBottom: Spacing.xl,
+    },
+    label: {
+      ...Typography.title3,
+      color: c.text,
+      marginBottom: Spacing.sm,
+    },
 
-  // Inputs
-  input: {
-    backgroundColor: c.surface,
-    borderRadius: Radius.md,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    ...Typography.body,
-    color: c.text,
-    borderWidth: 1,
-    borderColor: c.border,
-    ...Shadows.sm,
-  },
-  textArea: {
-    minHeight: 110,
-    textAlignVertical: "top",
-    paddingTop: Spacing.md,
-  },
+    // Inputs
+    input: {
+      backgroundColor: c.surface,
+      borderRadius: Radius.md,
+      paddingHorizontal: Spacing.lg,
+      paddingVertical: Spacing.md,
+      ...Typography.body,
+      color: c.text,
+      borderWidth: 1,
+      borderColor: c.border,
+      ...Shadows.sm,
+    },
+    textArea: {
+      minHeight: 110,
+      textAlignVertical: "top",
+      paddingTop: Spacing.md,
+    },
 
-  // Error
-  errorBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: c.errorLight,
-    borderRadius: Radius.md,
-    padding: Spacing.md,
-    marginHorizontal: Spacing.xl,
-    marginBottom: Spacing.xl,
-    gap: Spacing.sm,
-  },
-  errorText: {
-    ...Typography.callout,
-    color: c.error,
-    flex: 1,
-  },
+    // Error
+    errorBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      backgroundColor: c.errorLight,
+      borderRadius: Radius.md,
+      padding: Spacing.md,
+      marginHorizontal: Spacing.xl,
+      marginBottom: Spacing.xl,
+      gap: Spacing.sm,
+    },
+    errorText: {
+      ...Typography.callout,
+      color: c.error,
+      flex: 1,
+    },
 
-  // Mood
-  moodRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: Spacing.sm,
-  },
-  moodBtn: {
-    backgroundColor: c.surface,
-    borderRadius: Radius.xl,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    alignItems: "center",
-    borderWidth: 1.5,
-    borderColor: c.border,
-    minWidth: 72,
-  },
-  moodBtnSelected: {
-    backgroundColor: c.tintLight,
-    borderColor: c.tint,
-  },
-  moodEmoji: {
-    fontSize: 22,
-    marginBottom: 4,
-  },
-  moodLabel: {
-    ...Typography.caption1,
-    color: c.textSecondary,
-  },
-  moodLabelSelected: {
-    color: c.tint,
-    fontWeight: "600",
-  },
+    // Mood
+    moodRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: Spacing.sm,
+    },
+    moodBtn: {
+      backgroundColor: c.surface,
+      borderRadius: Radius.xl,
+      paddingHorizontal: Spacing.lg,
+      paddingVertical: Spacing.md,
+      alignItems: "center",
+      borderWidth: 1.5,
+      borderColor: c.border,
+      minWidth: 72,
+    },
+    moodBtnSelected: {
+      backgroundColor: c.tintLight,
+      borderColor: c.tint,
+    },
+    moodEmoji: {
+      fontSize: 22,
+      marginBottom: 4,
+    },
+    moodLabel: {
+      ...Typography.caption1,
+      color: c.textSecondary,
+    },
+    moodLabelSelected: {
+      color: c.tint,
+      fontWeight: "600",
+    },
 
-  // Photos
-  photoBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: Spacing.sm,
-    backgroundColor: c.tintLight,
-    borderRadius: Radius.md,
-    paddingVertical: Spacing.lg,
-    borderWidth: 1,
-    borderColor: c.tintMuted,
-    borderStyle: "dashed",
-  },
-  photoBtnText: {
-    ...Typography.bodyMedium,
-    color: c.tint,
-  },
-  imageScroll: {
-    marginTop: Spacing.md,
-  },
-  imageWrap: {
-    position: "relative",
-    marginRight: Spacing.md,
-  },
-  imageThumb: {
-    width: 88,
-    height: 88,
-    borderRadius: Radius.md,
-  },
-  imageOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.4)",
-    borderRadius: Radius.md,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  removeBtn: {
-    position: "absolute",
-    top: -6,
-    right: -6,
-    backgroundColor: c.error,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-});
+    // Photos
+    photoBtn: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: Spacing.sm,
+      backgroundColor: c.tintLight,
+      borderRadius: Radius.md,
+      paddingVertical: Spacing.lg,
+      borderWidth: 1,
+      borderColor: c.tintMuted,
+      borderStyle: "dashed",
+    },
+    photoBtnText: {
+      ...Typography.bodyMedium,
+      color: c.tint,
+    },
+    imageScroll: {
+      marginTop: Spacing.md,
+    },
+    imageWrap: {
+      position: "relative",
+      marginRight: Spacing.md,
+    },
+    imageThumb: {
+      width: 88,
+      height: 88,
+      borderRadius: Radius.md,
+    },
+    imageOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: c.overlay,
+      borderRadius: Radius.md,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    imageErrorOverlay: {
+      backgroundColor: withOpacity(c.error, 0.5),
+    },
+    removeBtn: {
+      position: "absolute",
+      top: -6,
+      right: -6,
+      backgroundColor: c.error,
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+  });
+}

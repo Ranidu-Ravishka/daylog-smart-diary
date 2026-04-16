@@ -16,6 +16,8 @@ import { ConvexProviderWithClerk } from "convex/react-clerk";
 
 import { ClerkProvider, useAuth, useUser } from "@clerk/clerk-expo";
 import { api } from "@repo/backend/convex";
+import { Colors } from "@/constants/theme";
+import { AppThemeProvider, useAppTheme } from "@/components/theme-provider";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import {
   captureException,
@@ -181,19 +183,57 @@ function ConvexAuthProvider({
   );
 }
 
-function StartupConfigErrorScreen({ message }: { message: string }) {
+function StartupConfigErrorScreen({
+  message,
+  isDark,
+}: {
+  message: string;
+  isDark: boolean;
+}) {
+  const theme = Colors[isDark ? "dark" : "light"];
+
   return (
-    <View style={styles.configErrorContainer}>
-      <Text style={styles.configErrorTitle}>Startup configuration error</Text>
-      <Text style={styles.configErrorBody}>
+    <View
+      style={[
+        styles.configErrorContainer,
+        { backgroundColor: theme.background },
+      ]}
+    >
+      <Text style={[styles.configErrorTitle, { color: theme.text }]}>
+        Startup configuration error
+      </Text>
+      <Text style={[styles.configErrorBody, { color: theme.textSecondary }]}>
         DayLog could not start because Convex is not configured for this build.
       </Text>
-      <Text style={styles.configErrorCode}>{CONVEX_URL_ENV_VAR}</Text>
-      <Text style={styles.configErrorBody}>{message}</Text>
-      <Text style={styles.configErrorHint}>
+      <Text
+        style={[
+          styles.configErrorCode,
+          {
+            color: theme.error,
+            backgroundColor: theme.errorLight,
+          },
+        ]}
+      >
+        {CONVEX_URL_ENV_VAR}
+      </Text>
+      <Text style={[styles.configErrorBody, { color: theme.textSecondary }]}>
+        {message}
+      </Text>
+      <Text style={[styles.configErrorHint, { color: theme.textTertiary }]}>
         Update your app environment with a valid Convex URL and restart.
       </Text>
     </View>
+  );
+}
+
+function AppThemedShell({ children }: { children: React.ReactNode }) {
+  const { isDark } = useAppTheme();
+
+  return (
+    <ThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
+      {children}
+      <StatusBar style={isDark ? "light" : "dark"} />
+    </ThemeProvider>
   );
 }
 
@@ -248,15 +288,18 @@ export default function RootLayout() {
   const convexClient = convexBootstrap.client;
 
   if (startupError || !convexClient) {
+    const isDark = colorScheme === "dark";
+
     return (
-      <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
+      <ThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
         <StartupConfigErrorScreen
+          isDark={isDark}
           message={
             startupError?.message ??
             "Convex client could not be initialized at startup."
           }
         />
-        <StatusBar style="auto" />
+        <StatusBar style={isDark ? "light" : "dark"} />
       </ThemeProvider>
     );
   }
@@ -266,33 +309,32 @@ export default function RootLayout() {
       publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!}
     >
       <ConvexAuthProvider client={convexClient}>
-        <ThemeProvider
-          value={colorScheme === "dark" ? DarkTheme : DefaultTheme}
-        >
-          <SyncClerkUserToConvex />
-          <RootAuthBoundary>
-            <Stack>
-              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen
-                name="oauth-complete"
-                options={{ headerShown: false }}
-              />
-              <Stack.Screen
-                name="(auth)/sign-in"
-                options={{ headerShown: false }}
-              />
-              <Stack.Screen
-                name="(auth)/sign-up"
-                options={{ headerShown: false }}
-              />
-              <Stack.Screen
-                name="(auth)/forgot-password"
-                options={{ headerShown: false }}
-              />
-            </Stack>
-          </RootAuthBoundary>
-          <StatusBar style="auto" />
-        </ThemeProvider>
+        <AppThemeProvider>
+          <AppThemedShell>
+            <SyncClerkUserToConvex />
+            <RootAuthBoundary>
+              <Stack>
+                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                <Stack.Screen
+                  name="oauth-complete"
+                  options={{ headerShown: false }}
+                />
+                <Stack.Screen
+                  name="(auth)/sign-in"
+                  options={{ headerShown: false }}
+                />
+                <Stack.Screen
+                  name="(auth)/sign-up"
+                  options={{ headerShown: false }}
+                />
+                <Stack.Screen
+                  name="(auth)/forgot-password"
+                  options={{ headerShown: false }}
+                />
+              </Stack>
+            </RootAuthBoundary>
+          </AppThemedShell>
+        </AppThemeProvider>
       </ConvexAuthProvider>
     </ClerkProvider>
   );
@@ -308,24 +350,19 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 24,
     justifyContent: "center",
-    backgroundColor: "#fff",
     gap: 12,
   },
   configErrorTitle: {
     fontSize: 24,
     fontWeight: "700",
-    color: "#0f172a",
   },
   configErrorBody: {
     fontSize: 15,
     lineHeight: 22,
-    color: "#334155",
   },
   configErrorCode: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#b91c1c",
-    backgroundColor: "#fee2e2",
     alignSelf: "flex-start",
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -334,6 +371,5 @@ const styles = StyleSheet.create({
   configErrorHint: {
     fontSize: 13,
     lineHeight: 20,
-    color: "#475569",
   },
 });

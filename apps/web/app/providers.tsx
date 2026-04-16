@@ -7,6 +7,10 @@ import { ClerkProvider, useAuth, useUser } from "@clerk/nextjs";
 import { api } from "@repo/backend/convex";
 import { useSyncClerkUserToConvex } from "@repo/ui/hooks/use-sync-clerk";
 import { ToastProvider } from "@/components/ToastProvider";
+import {
+  ThemePreferenceProvider,
+  ThemePreferenceSyncFromBackend,
+} from "@/lib/theme-preference";
 import { captureException } from "@/lib/observability";
 
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
@@ -38,6 +42,7 @@ function ConvexClientProvider({ children }: { children: ReactNode }) {
   return (
     <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
       <SyncClerkUserToConvex />
+      <ThemePreferenceSyncFromBackend />
       {children}
     </ConvexProviderWithClerk>
   );
@@ -47,16 +52,22 @@ export function Providers({ children }: { children: ReactNode }) {
   const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
   if (!clerkPublishableKey) {
-    return <ToastProvider>{children}</ToastProvider>;
+    return (
+      <ThemePreferenceProvider>
+        <ToastProvider>{children}</ToastProvider>
+      </ThemePreferenceProvider>
+    );
   }
 
   const inner = <ConvexClientProvider>{children}</ConvexClientProvider>;
 
   return (
-    <ToastProvider>
-      <ClerkProvider publishableKey={clerkPublishableKey}>
-        {inner}
-      </ClerkProvider>
-    </ToastProvider>
+    <ThemePreferenceProvider>
+      <ToastProvider>
+        <ClerkProvider publishableKey={clerkPublishableKey}>
+          {inner}
+        </ClerkProvider>
+      </ToastProvider>
+    </ThemePreferenceProvider>
   );
 }

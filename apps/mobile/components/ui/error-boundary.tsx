@@ -1,11 +1,15 @@
 import React, { Component, type ErrorInfo, type ReactNode } from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { Appearance, View, Text, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Colors, Spacing, Typography } from "@/constants/theme";
+import {
+  Colors,
+  Spacing,
+  Typography,
+  type ThemeColors,
+} from "@/constants/theme";
+import { AppThemeContext } from "@/components/theme-provider";
 import { AppButton } from "@/components/ui/app-button";
 import { captureException } from "@/lib/observability";
-
-const c = Colors.light;
 
 interface Props {
   children: ReactNode;
@@ -17,6 +21,8 @@ interface State {
 }
 
 export class ErrorBoundary extends Component<Props, State> {
+  static contextType = AppThemeContext;
+
   state: State = { hasError: false };
 
   static getDerivedStateFromError(): State {
@@ -34,6 +40,14 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   render() {
+    const fallbackTheme =
+      Appearance.getColorScheme() === "dark" ? "dark" : "light";
+    const themeContext = this.context as
+      | React.ContextType<typeof AppThemeContext>
+      | undefined;
+    const c = themeContext?.colors ?? Colors[fallbackTheme];
+    const styles = createStyles(c);
+
     if (this.state.hasError) {
       if (this.props.fallback) return this.props.fallback;
 
@@ -60,34 +74,36 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: Spacing["3xl"],
-    backgroundColor: c.background,
-  },
-  iconCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: c.errorLight,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: Spacing.xl,
-  },
-  title: {
-    ...Typography.title3,
-    color: c.text,
-    textAlign: "center",
-    marginBottom: Spacing.sm,
-  },
-  subtitle: {
-    ...Typography.callout,
-    color: c.textSecondary,
-    textAlign: "center",
-    maxWidth: 260,
-    lineHeight: 20,
-  },
-});
+function createStyles(c: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      padding: Spacing["3xl"],
+      backgroundColor: c.background,
+    },
+    iconCircle: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      backgroundColor: c.errorLight,
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: Spacing.xl,
+    },
+    title: {
+      ...Typography.title3,
+      color: c.text,
+      textAlign: "center",
+      marginBottom: Spacing.sm,
+    },
+    subtitle: {
+      ...Typography.callout,
+      color: c.textSecondary,
+      textAlign: "center",
+      maxWidth: 260,
+      lineHeight: 20,
+    },
+  });
+}
