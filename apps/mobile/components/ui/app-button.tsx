@@ -50,10 +50,10 @@ export function AppButton({
   };
 
   const textColorMap = {
-    primary: "#FFFFFF",
+    primary: c.inverseText,
     secondary: c.tint,
     ghost: c.tint,
-    danger: "#FFFFFF",
+    danger: c.inverseText,
   };
 
   const heightMap = { sm: 36, md: 44, lg: 52 };

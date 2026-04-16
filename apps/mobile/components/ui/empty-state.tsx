@@ -85,7 +85,7 @@ function createStyles(c: ThemeColors) {
     },
     buttonText: {
       ...Typography.bodyMedium,
-      color: "#fff",
+      color: c.inverseText,
     },
   });
 }

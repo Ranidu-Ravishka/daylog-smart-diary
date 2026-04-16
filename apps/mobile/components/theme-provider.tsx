@@ -126,7 +126,7 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
-  const preference = backendThemePreference ?? localPreference;
+  const preference = localPreference;
   const effectiveTheme = resolveEffectiveTheme(preference, systemTheme);
 
   const contextValue = useMemo<AppThemeContextValue>(

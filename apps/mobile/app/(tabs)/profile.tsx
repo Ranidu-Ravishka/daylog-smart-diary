@@ -75,6 +75,7 @@ import {
 import { collectAndroidScreenTimeDailyDataForDay } from "../../lib/android-screen-time-sync";
 import { collectIosScreenTimeDailyDataForDay } from "../../lib/ios-screen-time-sync";
 import { getOfflineOutboxSnapshot } from "@/lib/offline-outbox";
+import { withOpacity } from "@/lib/color-utils";
 import { captureException, logInfo, logWarn } from "@/lib/observability";
 import {
   Spacing,
@@ -191,23 +192,6 @@ function snapToQuarterHour(value: Date): Date {
 
   snapped.setMinutes(snappedMinutes, 0, 0);
   return snapped;
-}
-
-function withOpacity(hexColor: string, alpha: number): string {
-  const normalized = hexColor.replace("#", "");
-  if (normalized.length !== 6) {
-    return hexColor;
-  }
-
-  const red = Number.parseInt(normalized.slice(0, 2), 16);
-  const green = Number.parseInt(normalized.slice(2, 4), 16);
-  const blue = Number.parseInt(normalized.slice(4, 6), 16);
-
-  if ([red, green, blue].some((value) => Number.isNaN(value))) {
-    return hexColor;
-  }
-
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
 /* ── Skeleton ──────────────────────────────────────────── */
@@ -3212,7 +3196,7 @@ function createStyles(c: ThemeColors) {
     },
     integrationPrimaryBtnText: {
       ...Typography.caption1,
-      color: "#FFFFFF",
+      color: c.inverseText,
       fontWeight: "600",
     },
     integrationSecondaryBtn: {
@@ -3374,7 +3358,7 @@ function createStyles(c: ThemeColors) {
       fontWeight: "700",
     },
     dangerStateBadgeTextInverted: {
-      color: "#FFFFFF",
+      color: c.inverseText,
     },
     dangerJobIdText: {
       ...Typography.caption2,

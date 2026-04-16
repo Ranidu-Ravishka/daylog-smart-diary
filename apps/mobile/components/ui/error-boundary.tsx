@@ -1,5 +1,5 @@
 import React, { Component, type ErrorInfo, type ReactNode } from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { Appearance, View, Text, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
   Colors,
@@ -41,7 +41,9 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   render() {
-    const c = this.context?.colors ?? Colors.light;
+    const fallbackTheme =
+      Appearance.getColorScheme() === "dark" ? "dark" : "light";
+    const c = this.context?.colors ?? Colors[fallbackTheme];
     const styles = createStyles(c);
 
     if (this.state.hasError) {

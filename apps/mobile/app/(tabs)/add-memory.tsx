@@ -32,24 +32,8 @@ import {
   enqueueOfflineMemoryMediaUpload,
   isLikelyTransientNetworkError,
 } from "@/lib/offline-outbox";
+import { withOpacity } from "@/lib/color-utils";
 import { captureException, logInfo } from "@/lib/observability";
-
-function withOpacity(hexColor: string, alpha: number): string {
-  const normalized = hexColor.replace("#", "");
-  if (normalized.length !== 6) {
-    return hexColor;
-  }
-
-  const red = Number.parseInt(normalized.slice(0, 2), 16);
-  const green = Number.parseInt(normalized.slice(2, 4), 16);
-  const blue = Number.parseInt(normalized.slice(4, 6), 16);
-
-  if ([red, green, blue].some((value) => Number.isNaN(value))) {
-    return hexColor;
-  }
-
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
-}
 
 function getTodayDayKey(): string {
   const now = new Date();
@@ -449,14 +433,18 @@ export default function AddMemoryScreen() {
                   <Image source={{ uri: img.uri }} style={styles.imageThumb} />
                   {img.uploading && (
                     <View style={styles.imageOverlay}>
-                      <ActivityIndicator color="#fff" />
+                      <ActivityIndicator color={c.inverseText} />
                     </View>
                   )}
                   {img.error && (
                     <View
                       style={[styles.imageOverlay, styles.imageErrorOverlay]}
                     >
-                      <Ionicons name="alert-circle" size={20} color="#fff" />
+                      <Ionicons
+                        name="alert-circle"
+                        size={20}
+                        color={c.inverseText}
+                      />
                     </View>
                   )}
                   {!isSubmitting && (
@@ -464,7 +452,7 @@ export default function AddMemoryScreen() {
                       style={styles.removeBtn}
                       onPress={() => removeImage(index)}
                     >
-                      <Ionicons name="close" size={14} color="#fff" />
+                      <Ionicons name="close" size={14} color={c.inverseText} />
                     </TouchableOpacity>
                   )}
                 </View>

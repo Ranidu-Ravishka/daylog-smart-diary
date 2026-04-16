@@ -364,7 +364,11 @@ export default function SignUpScreen() {
                 onPress={() => handleOAuthSignIn("oauth_google")}
                 disabled={isPending}
               >
-                <Ionicons name="logo-google" size={18} color="#FFFFFF" />
+                <Ionicons
+                  name="logo-google"
+                  size={18}
+                  color={colors.inverseText}
+                />
                 <Text style={styles.socialButtonText}>
                   Continue with Google
                 </Text>
@@ -380,7 +384,11 @@ export default function SignUpScreen() {
                   onPress={() => handleOAuthSignIn("oauth_apple")}
                   disabled={isPending}
                 >
-                  <Ionicons name="logo-apple" size={18} color="#FFFFFF" />
+                  <Ionicons
+                    name="logo-apple"
+                    size={18}
+                    color={colors.inverseText}
+                  />
                   <Text style={styles.socialButtonText}>
                     Continue with Apple
                   </Text>
@@ -690,7 +698,7 @@ export default function SignUpScreen() {
             disabled={isPrimaryActionDisabled || isPending}
           >
             {isPending ? (
-              <ActivityIndicator color="#FFFFFF" />
+              <ActivityIndicator color={colors.inverseText} />
             ) : (
               <Text style={styles.ctaLabel}>
                 {pendingVerification ? "Verify Email" : "Create Account"}
@@ -798,13 +806,13 @@ function createStyles(colors: ThemeColors) {
       gap: Spacing.sm,
     },
     googleButton: {
-      backgroundColor: "#4285F4",
+      backgroundColor: colors.oauthGoogle,
     },
     appleButton: {
-      backgroundColor: "#111111",
+      backgroundColor: colors.oauthApple,
     },
     socialButtonText: {
-      color: "#FFFFFF",
+      color: colors.inverseText,
       ...Typography.bodyMedium,
     },
     divider: {
@@ -909,7 +917,7 @@ function createStyles(colors: ThemeColors) {
       ...Shadows.sm,
     },
     ctaLabel: {
-      color: "#FFFFFF",
+      color: colors.inverseText,
       ...Typography.bodyMedium,
       letterSpacing: 0.2,
     },

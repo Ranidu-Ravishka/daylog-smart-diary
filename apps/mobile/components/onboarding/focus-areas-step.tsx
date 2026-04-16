@@ -91,7 +91,11 @@ export function FocusAreasStep({
                   ]}
                 >
                   {isSelected ? (
-                    <Ionicons name="checkmark" size={12} color="#FFFFFF" />
+                    <Ionicons
+                      name="checkmark"
+                      size={12}
+                      color={colors.inverseText}
+                    />
                   ) : null}
                 </View>
               </Pressable>
