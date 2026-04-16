@@ -46,6 +46,7 @@ Backend/integration encryption:
 
 - Values inside `INTEGRATION_SECRETS_KEYRING_JSON`
 - `INTEGRATION_SECRETS_ACTIVE_KEY_ID` when rotating active key selection
+- `EXPORT_SIGNING_SECRET`
 
 Observability:
 

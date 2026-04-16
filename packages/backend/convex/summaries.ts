@@ -785,29 +785,54 @@ function normalizeSignedExportPayloadForSigning(
   return JSON.stringify(sortObjectForStableJson(payload));
 }
 
-function getRestoreSigningSecret(): string {
-  const explicitRestoreSecret =
-    process.env.EXPORT_RESTORE_SIGNING_SECRET?.trim();
-  if (explicitRestoreSecret) {
-    return explicitRestoreSecret;
+function isProductionEnvironment(): boolean {
+  const envCandidates = [
+    process.env.DAYLOG_APP_ENV,
+    process.env.APP_ENV,
+    process.env.DEPLOY_ENV,
+    process.env.VERCEL_ENV,
+    process.env.NODE_ENV,
+  ];
+
+  return envCandidates.some((value) => {
+    const normalized = value?.trim().toLowerCase();
+    return normalized === "production" || normalized === "prod";
+  });
+}
+
+function ensureExportSigningSecretConfiguredInProduction(): void {
+  if (!isProductionEnvironment()) {
+    return;
   }
 
-  const clerkWebhookSecret = process.env.CLERK_WEBHOOK_SECRET?.trim();
-  if (clerkWebhookSecret) {
-    return clerkWebhookSecret;
+  if (process.env.EXPORT_SIGNING_SECRET?.trim()) {
+    return;
   }
 
   throw new Error(
-    "Missing restore signing secret. Configure EXPORT_RESTORE_SIGNING_SECRET or CLERK_WEBHOOK_SECRET.",
+    "Missing export signing secret in production. Configure EXPORT_SIGNING_SECRET.",
   );
 }
+
+function getExportSigningSecret(): string {
+  const exportSigningSecret = process.env.EXPORT_SIGNING_SECRET?.trim();
+  if (exportSigningSecret) {
+    return exportSigningSecret;
+  }
+
+  throw new Error(
+    "Missing export signing secret. Configure EXPORT_SIGNING_SECRET.",
+  );
+}
+
+ensureExportSigningSecretConfiguredInProduction();
 
 async function computeSignedPayloadSignature(
   payload: SignedDiaryExportPayload,
 ): Promise<string> {
   const signerKey = await crypto.subtle.importKey(
     "raw",
-    new TextEncoder().encode(getRestoreSigningSecret()),
+    new TextEncoder().encode(getExportSigningSecret()),
     {
       name: "HMAC",
       hash: "SHA-256",

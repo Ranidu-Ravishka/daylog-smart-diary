@@ -99,6 +99,7 @@ Required:
 ```dotenv
 CLERK_JWT_ISSUER_DOMAIN=
 CLERK_WEBHOOK_SECRET=
+EXPORT_SIGNING_SECRET=
 OPENAI_API_KEY=
 SUMMARY_DAILY_GENERATION_LIMIT=5
 ```
@@ -154,6 +155,8 @@ Validation behavior already enforced in code:
 
 - `CLERK_JWT_ISSUER_DOMAIN` must be valid `https` URL.
 - `CLERK_WEBHOOK_SECRET` must start with `whsec_`.
+- `EXPORT_SIGNING_SECRET` is required in production for export/restore payload integrity signing.
+- `EXPORT_SIGNING_SECRET` must be dedicated (do not reuse `CLERK_WEBHOOK_SECRET`).
 - `OPENAI_API_KEY` must start with `sk-`.
 - Placeholder values are rejected by backend/admin env validation.
 

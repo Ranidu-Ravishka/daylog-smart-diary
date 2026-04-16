@@ -30,6 +30,7 @@ Core required:
 
 - `CLERK_JWT_ISSUER_DOMAIN`
 - `CLERK_WEBHOOK_SECRET`
+- `EXPORT_SIGNING_SECRET`
 - `OPENAI_API_KEY`
 - `SUMMARY_DAILY_GENERATION_LIMIT`
 
@@ -64,6 +65,7 @@ Examples:
 
 - non-https issuer domain rejected
 - invalid webhook secret format rejected
+- missing `EXPORT_SIGNING_SECRET` rejected in production
 - placeholder/example values rejected
 
 ## Important Operational Paths
