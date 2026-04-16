@@ -41,6 +41,156 @@ type UseIntegrationSyncParams = {
   moodAssistanceEnabled: boolean;
 };
 
+const BACKGROUND_LOCATION_UPLOAD_CONCURRENCY_LIMIT = 3;
+const BACKGROUND_LOCATION_UPLOAD_TIMEOUT_BUDGET_MS = 45_000;
+const BACKGROUND_LOCATION_UPLOAD_TIMEOUT_MS = 15_000;
+const BACKGROUND_LOCATION_UPLOAD_TIMEOUT_ERROR_PREFIX =
+  "background_location_upload_timeout";
+
+type BackgroundLocationBatchUploadResult = {
+  dayKey: string;
+  observedAt: number;
+  areaLabel: string;
+  status: "succeeded" | "failed" | "timed_out" | "skipped_budget";
+  error?: string;
+};
+
+type BackgroundLocationUploadAggregate = {
+  totalBatches: number;
+  succeeded: number;
+  failed: number;
+  timedOut: number;
+  skippedBudget: number;
+  latestSuccessfulBatch?: {
+    observedAt: number;
+    areaLabel: string;
+  };
+  failures: string[];
+};
+
+function normalizeConcurrencyLimit(limit: number): number {
+  if (!Number.isFinite(limit) || limit <= 0) {
+    return 1;
+  }
+
+  return Math.max(1, Math.round(limit));
+}
+
+function isBackgroundLocationUploadTimeout(error: unknown): boolean {
+  return toErrorMessage(error).startsWith(
+    BACKGROUND_LOCATION_UPLOAD_TIMEOUT_ERROR_PREFIX,
+  );
+}
+
+async function withTimeout<T>(operation: Promise<T>, timeoutMs: number) {
+  if (timeoutMs <= 0) {
+    throw new Error(`${BACKGROUND_LOCATION_UPLOAD_TIMEOUT_ERROR_PREFIX}:0`);
+  }
+
+  return await new Promise<T>((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(
+        new Error(
+          `${BACKGROUND_LOCATION_UPLOAD_TIMEOUT_ERROR_PREFIX}:${timeoutMs}`,
+        ),
+      );
+    }, timeoutMs);
+
+    operation.then(
+      (value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function runWithConcurrencyLimit<TItem, TResult>(
+  items: readonly TItem[],
+  concurrencyLimit: number,
+  runItem: (item: TItem, index: number) => Promise<TResult>,
+): Promise<TResult[]> {
+  if (items.length === 0) {
+    return [];
+  }
+
+  const results = new Array<TResult>(items.length);
+  const workerCount = Math.min(
+    items.length,
+    normalizeConcurrencyLimit(concurrencyLimit),
+  );
+  let nextIndex = 0;
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        results[currentIndex] = await runItem(
+          items[currentIndex] as TItem,
+          currentIndex,
+        );
+      }
+    }),
+  );
+
+  return results;
+}
+
+function aggregateBackgroundLocationUploadResults(
+  results: BackgroundLocationBatchUploadResult[],
+): BackgroundLocationUploadAggregate {
+  const aggregate: BackgroundLocationUploadAggregate = {
+    totalBatches: results.length,
+    succeeded: 0,
+    failed: 0,
+    timedOut: 0,
+    skippedBudget: 0,
+    failures: [],
+  };
+
+  for (const result of results) {
+    if (result.status === "succeeded") {
+      aggregate.succeeded += 1;
+      if (
+        !aggregate.latestSuccessfulBatch ||
+        result.observedAt > aggregate.latestSuccessfulBatch.observedAt
+      ) {
+        aggregate.latestSuccessfulBatch = {
+          observedAt: result.observedAt,
+          areaLabel: result.areaLabel,
+        };
+      }
+      continue;
+    }
+
+    if (result.status === "failed") {
+      aggregate.failed += 1;
+      aggregate.failures.push(
+        `${result.dayKey}:${result.error ?? "unknown_error"}`,
+      );
+      continue;
+    }
+
+    if (result.status === "timed_out") {
+      aggregate.timedOut += 1;
+      aggregate.failures.push(`${result.dayKey}:timed_out`);
+      continue;
+    }
+
+    aggregate.skippedBudget += 1;
+    aggregate.failures.push(
+      `${result.dayKey}:${result.error ?? "budget_exhausted"}`,
+    );
+  }
+
+  return aggregate;
+}
+
 export function useIntegrationSync({
   isAuthenticated,
   hasLaunchPreferencesRecord,
@@ -237,34 +387,126 @@ export function useIntegrationSync({
       }
 
       const batches = preparedFlush?.batches ?? [];
-      let uploadSucceeded =
-        preparedFlush !== null && pipelineErrors.length === 0;
+      let uploadAggregate: BackgroundLocationUploadAggregate = {
+        totalBatches: batches.length,
+        succeeded: 0,
+        failed: 0,
+        timedOut: 0,
+        skippedBudget: 0,
+        failures: [],
+      };
 
-      for (const batch of batches) {
+      if (
+        preparedFlush !== null &&
+        pipelineErrors.length === 0 &&
+        batches.length > 0
+      ) {
+        const uploadBudgetStartedAt = Date.now();
+        const uploadResults = await runWithConcurrencyLimit(
+          batches,
+          BACKGROUND_LOCATION_UPLOAD_CONCURRENCY_LIMIT,
+          async (batch): Promise<BackgroundLocationBatchUploadResult> => {
+            if (cancelled) {
+              return {
+                dayKey: batch.dayKey,
+                observedAt: batch.observedAt,
+                areaLabel: batch.areaLabel,
+                status: "skipped_budget",
+                error: "cancelled",
+              };
+            }
+
+            const elapsedMs = Date.now() - uploadBudgetStartedAt;
+            const remainingBudgetMs =
+              BACKGROUND_LOCATION_UPLOAD_TIMEOUT_BUDGET_MS - elapsedMs;
+
+            if (remainingBudgetMs <= 0) {
+              return {
+                dayKey: batch.dayKey,
+                observedAt: batch.observedAt,
+                areaLabel: batch.areaLabel,
+                status: "skipped_budget",
+                error: "budget_exhausted",
+              };
+            }
+
+            const timeoutMs = Math.min(
+              BACKGROUND_LOCATION_UPLOAD_TIMEOUT_MS,
+              remainingBudgetMs,
+            );
+
+            try {
+              await withTimeout(
+                upsertMyIntegrationDailyData({
+                  provider: "location",
+                  dayKey: batch.dayKey,
+                  summary: batch.summary,
+                  signals: batch.signals,
+                  context: batch.context,
+                }),
+                timeoutMs,
+              );
+
+              return {
+                dayKey: batch.dayKey,
+                observedAt: batch.observedAt,
+                areaLabel: batch.areaLabel,
+                status: "succeeded",
+              };
+            } catch (error) {
+              return {
+                dayKey: batch.dayKey,
+                observedAt: batch.observedAt,
+                areaLabel: batch.areaLabel,
+                status: isBackgroundLocationUploadTimeout(error)
+                  ? "timed_out"
+                  : "failed",
+                error: toErrorMessage(error),
+              };
+            }
+          },
+        );
+
         if (cancelled) {
           return;
         }
 
-        try {
-          await upsertMyIntegrationDailyData({
-            provider: "location",
-            dayKey: batch.dayKey,
-            summary: batch.summary,
-            signals: batch.signals,
-            context: batch.context,
-          });
+        uploadAggregate =
+          aggregateBackgroundLocationUploadResults(uploadResults);
 
-          await updateMyLocationTrackingState({
-            locationLastUpdatedAt: batch.observedAt,
-            locationLastArea: batch.areaLabel,
-          });
-        } catch (error) {
-          uploadSucceeded = false;
-          pipelineErrors.push(
-            `upload:${batch.dayKey}:${toErrorMessage(error)}`,
-          );
+        logInfo("mobile_background_location_flush_upload_summary", {
+          totalBatches: uploadAggregate.totalBatches,
+          succeeded: uploadAggregate.succeeded,
+          failed: uploadAggregate.failed,
+          timedOut: uploadAggregate.timedOut,
+          skippedBudget: uploadAggregate.skippedBudget,
+          concurrencyLimit: BACKGROUND_LOCATION_UPLOAD_CONCURRENCY_LIMIT,
+          timeoutBudgetMs: BACKGROUND_LOCATION_UPLOAD_TIMEOUT_BUDGET_MS,
+        });
+
+        if (uploadAggregate.latestSuccessfulBatch) {
+          try {
+            await updateMyLocationTrackingState({
+              locationLastUpdatedAt:
+                uploadAggregate.latestSuccessfulBatch.observedAt,
+              locationLastArea: uploadAggregate.latestSuccessfulBatch.areaLabel,
+            });
+          } catch (error) {
+            pipelineErrors.push(`location_state:${toErrorMessage(error)}`);
+          }
+        }
+
+        for (const failure of uploadAggregate.failures) {
+          pipelineErrors.push(`upload:${failure}`);
         }
       }
+
+      const uploadSucceeded =
+        preparedFlush !== null &&
+        pipelineErrors.length === 0 &&
+        uploadAggregate.failed === 0 &&
+        uploadAggregate.timedOut === 0 &&
+        uploadAggregate.skippedBudget === 0;
 
       if (preparedFlush && uploadSucceeded) {
         try {
