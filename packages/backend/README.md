@@ -74,9 +74,8 @@ Examples:
   - `summaries:prepareMyDiaryExportArtifact`
   - `summaries:listMyExportJobsPaginated`
   - `summaries:getMyExportJobDownloadUrl`
-- Integration secret migration/audit:
+- Integration secret encryption audit:
   - `integrations:adminAuditIntegrationSecretsEncryptionStatus`
-  - `integrations:adminMigrateLegacyIntegrationSecretsAll`
 
 ## Troubleshooting
 

@@ -458,9 +458,6 @@ export default defineSchema(
       tokenRef: v.string(),
       encryptedAccessToken: v.optional(encryptedSecretEnvelopeValidator),
       encryptedRefreshToken: v.optional(encryptedSecretEnvelopeValidator),
-      // Legacy plaintext fields are retained temporarily for migration.
-      accessToken: v.optional(v.string()),
-      refreshToken: v.optional(v.string()),
       accessTokenExpiresAt: v.optional(v.number()),
       lastRefreshAt: v.optional(v.number()),
       createdAt: v.number(),
