@@ -149,6 +149,18 @@ async function loadModule(): Promise<IntegrationSyncModule> {
   return await import("./use-integration-sync");
 }
 
+function getRegisteredTask(taskId: string): { run: () => Promise<void> } {
+  const task = runtime.runner.registerTask.mock.calls
+    .map((call) => call[0])
+    .find((registeredTask) => registeredTask?.taskId === taskId);
+
+  if (!task) {
+    throw new Error(`Task not registered: ${taskId}`);
+  }
+
+  return task as { run: () => Promise<void> };
+}
+
 function runRegisteredCleanups(): void {
   while (runtime.effectCleanups.length > 0) {
     const cleanup = runtime.effectCleanups.pop();
@@ -159,6 +171,7 @@ function runRegisteredCleanups(): void {
 describe("useIntegrationSync", () => {
   beforeEach(() => {
     vi.resetModules();
+    vi.useRealTimers();
     vi.clearAllMocks();
     runtime.effectCleanups.length = 0;
   });
@@ -319,5 +332,226 @@ describe("useIntegrationSync", () => {
     });
 
     runRegisteredCleanups();
+  });
+
+  it("runs background location uploads with bounded concurrency and aggregates success", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const module = await loadModule();
+      const backgroundLocationTrackerModule = await import(
+        "@/lib/background-location-tracker"
+      );
+
+      const prepareFlushMock = vi.mocked(
+        backgroundLocationTrackerModule.prepareBackgroundLocationFlushBatches,
+      );
+      const acknowledgeFlushMock = vi.mocked(
+        backgroundLocationTrackerModule.acknowledgeBackgroundLocationFlush,
+      );
+      const telemetryMock = vi.mocked(
+        backgroundLocationTrackerModule.getBackgroundLocationTelemetry,
+      );
+
+      prepareFlushMock.mockResolvedValue({
+        flushId: "flush_bounded_concurrency",
+        preparedAt: Date.now(),
+        queuedPointCount: 4,
+        batches: [
+          {
+            dayKey: "2026-04-13",
+            summary: "batch 1",
+            signals: [],
+            observedAt: 10,
+            areaLabel: "A",
+          },
+          {
+            dayKey: "2026-04-14",
+            summary: "batch 2",
+            signals: [],
+            observedAt: 20,
+            areaLabel: "B",
+          },
+          {
+            dayKey: "2026-04-15",
+            summary: "batch 3",
+            signals: [],
+            observedAt: 30,
+            areaLabel: "C",
+          },
+          {
+            dayKey: "2026-04-16",
+            summary: "batch 4",
+            signals: [],
+            observedAt: 40,
+            areaLabel: "D",
+          },
+        ],
+      });
+      acknowledgeFlushMock.mockResolvedValue({
+        acknowledged: true,
+        flushId: "flush_bounded_concurrency",
+        removedPointCount: 4,
+        remainingQueueSize: 0,
+      });
+      telemetryMock.mockResolvedValue({
+        updatesInWindow: 0,
+        windowStartedAt: Date.now(),
+        autoDisabled: false,
+        queueSize: 0,
+      });
+
+      let activeUploads = 0;
+      let maxActiveUploads = 0;
+      runtime.mutations.upsertMyIntegrationDailyData.mockImplementation(
+        async () => {
+          activeUploads += 1;
+          maxActiveUploads = Math.max(maxActiveUploads, activeUploads);
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 25);
+          });
+          activeUploads -= 1;
+        },
+      );
+
+      module.useIntegrationSync({
+        isAuthenticated: true,
+        hasLaunchPreferencesRecord: true,
+        locationTrackingRuntimeConfig: {
+          enableBackgroundLocationTracking: true,
+          batchMaxPoints: 120,
+          maxUpdatesPerHour: 20,
+          batchFlushIntervalMinutes: 2,
+          maxBatteryDrainPercentPerHour: 6,
+        },
+        fitnessTrackingEnabled: true,
+        calendarContextEnabled: false,
+        callSummaryEnabled: false,
+        moodAssistanceEnabled: true,
+      });
+
+      const backgroundTask = getRegisteredTask("background_location_flush");
+      const runPromise = backgroundTask.run();
+
+      await vi.advanceTimersByTimeAsync(200);
+      await runPromise;
+
+      expect(maxActiveUploads).toBe(3);
+      expect(acknowledgeFlushMock).toHaveBeenCalledWith(
+        "flush_bounded_concurrency",
+      );
+      expect(
+        runtime.mutations.updateMyLocationTrackingState,
+      ).toHaveBeenCalledWith({
+        locationLastUpdatedAt: 40,
+        locationLastArea: "D",
+      });
+      expect(runtime.logInfoMock).toHaveBeenCalledWith(
+        "mobile_background_location_flush_upload_summary",
+        expect.objectContaining({
+          totalBatches: 4,
+          succeeded: 4,
+          failed: 0,
+          timedOut: 0,
+          skippedBudget: 0,
+          concurrencyLimit: 3,
+        }),
+      );
+
+      runRegisteredCleanups();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("applies upload timeout budget and aggregates timeout failures", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const module = await loadModule();
+      const backgroundLocationTrackerModule = await import(
+        "@/lib/background-location-tracker"
+      );
+
+      const prepareFlushMock = vi.mocked(
+        backgroundLocationTrackerModule.prepareBackgroundLocationFlushBatches,
+      );
+      const acknowledgeFlushMock = vi.mocked(
+        backgroundLocationTrackerModule.acknowledgeBackgroundLocationFlush,
+      );
+      const telemetryMock = vi.mocked(
+        backgroundLocationTrackerModule.getBackgroundLocationTelemetry,
+      );
+
+      prepareFlushMock.mockResolvedValue({
+        flushId: "flush_timeout_budget",
+        preparedAt: Date.now(),
+        queuedPointCount: 1,
+        batches: [
+          {
+            dayKey: "2026-04-16",
+            summary: "timeout batch",
+            signals: [],
+            observedAt: 50,
+            areaLabel: "Timeout City",
+          },
+        ],
+      });
+      acknowledgeFlushMock.mockResolvedValue({
+        acknowledged: true,
+        flushId: "flush_timeout_budget",
+        removedPointCount: 1,
+        remainingQueueSize: 0,
+      });
+      telemetryMock.mockResolvedValue({
+        updatesInWindow: 0,
+        windowStartedAt: Date.now(),
+        autoDisabled: false,
+        queueSize: 1,
+      });
+
+      runtime.mutations.upsertMyIntegrationDailyData.mockImplementation(
+        () => new Promise<void>(() => undefined),
+      );
+
+      module.useIntegrationSync({
+        isAuthenticated: true,
+        hasLaunchPreferencesRecord: true,
+        locationTrackingRuntimeConfig: {
+          enableBackgroundLocationTracking: true,
+          batchMaxPoints: 120,
+          maxUpdatesPerHour: 20,
+          batchFlushIntervalMinutes: 2,
+          maxBatteryDrainPercentPerHour: 6,
+        },
+        fitnessTrackingEnabled: true,
+        calendarContextEnabled: false,
+        callSummaryEnabled: false,
+        moodAssistanceEnabled: true,
+      });
+
+      const backgroundTask = getRegisteredTask("background_location_flush");
+      const runPromise = backgroundTask.run();
+      const runExpectation = expect(runPromise).rejects.toThrow(
+        /background_location_pipeline_failed/,
+      );
+
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      await runExpectation;
+      expect(acknowledgeFlushMock).not.toHaveBeenCalled();
+      expect(runtime.logInfoMock).toHaveBeenCalledWith(
+        "mobile_background_location_flush_upload_summary",
+        expect.objectContaining({
+          totalBatches: 1,
+          succeeded: 0,
+          timedOut: 1,
+        }),
+      );
+
+      runRegisteredCleanups();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
