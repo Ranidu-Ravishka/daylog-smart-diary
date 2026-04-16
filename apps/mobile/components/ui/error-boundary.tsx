@@ -22,7 +22,6 @@ interface State {
 
 export class ErrorBoundary extends Component<Props, State> {
   static contextType = AppThemeContext;
-  declare context: React.ContextType<typeof AppThemeContext>;
 
   state: State = { hasError: false };
 
@@ -43,7 +42,10 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     const fallbackTheme =
       Appearance.getColorScheme() === "dark" ? "dark" : "light";
-    const c = this.context?.colors ?? Colors[fallbackTheme];
+    const themeContext = this.context as
+      | React.ContextType<typeof AppThemeContext>
+      | undefined;
+    const c = themeContext?.colors ?? Colors[fallbackTheme];
     const styles = createStyles(c);
 
     if (this.state.hasError) {
