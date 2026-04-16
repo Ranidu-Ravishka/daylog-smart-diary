@@ -200,6 +200,98 @@ describe("summary generation behavior", () => {
     );
   });
 
+  it("generates a summary from integration-only context", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  story: "Integration only summary",
+                  highlights: ["stayed active"],
+                  sourcesUsed: ["Model"],
+                }),
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const runQuery = vi
+      .fn()
+      .mockResolvedValueOnce({
+        flags: {
+          aiSummaryEnabled: true,
+        },
+      })
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce([
+        {
+          provider: "google_fit",
+          metrics: {
+            steps: 11234,
+            sleepMinutes: 415,
+          },
+          summary: "Long walk with steady activity",
+          signals: ["morning walk", "morning walk"],
+          context: {
+            fitness: {
+              distanceMeters: 3200,
+              activeMinutes: 52,
+            },
+          },
+          syncedAt: 1,
+        },
+      ])
+      .mockResolvedValueOnce({ userId: "user_001" });
+
+    const runMutation = vi
+      .fn()
+      .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce({ _id: "summary_002", generatedAt: 456 })
+      .mockResolvedValueOnce({ success: true });
+
+    const generateSummaryForDay = handler<
+      { dayKey: string },
+      { success: boolean; summaryId?: string; generatedAt?: number }
+    >(summaryGenerationModule.generateSummaryForDay);
+
+    const result = await generateSummaryForDay(
+      {
+        runQuery,
+        runMutation,
+      },
+      { dayKey: "2026-04-03" },
+    );
+
+    expect(result).toEqual({
+      success: true,
+      summaryId: "summary_002",
+      generatedAt: 456,
+    });
+
+    const upsertCallArgs = runMutation.mock.calls[1]?.[1] as {
+      metrics?: {
+        steps?: number;
+        sleepMinutes?: number;
+      };
+      sourcesUsed?: string[];
+    };
+
+    expect(upsertCallArgs.metrics).toMatchObject({
+      steps: 11234,
+      sleepMinutes: 415,
+    });
+    expect(upsertCallArgs.sourcesUsed).toEqual(
+      expect.arrayContaining(["Model", "Integrations", "Google Fit"]),
+    );
+  });
+
   it("rejects generation when no data is available and logs model failures", async () => {
     const generateSummaryForDay = handler<
       { dayKey: string },

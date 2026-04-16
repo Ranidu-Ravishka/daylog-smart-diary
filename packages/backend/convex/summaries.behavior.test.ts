@@ -83,7 +83,52 @@ function seededDb() {
 }
 
 async function buildSignedRestorePayloadText(): Promise<string> {
+  return buildSignedRestorePayloadTextWithRows();
+}
+
+type RestorePayloadRowOverrides = {
+  summaries?: unknown[];
+  memories?: unknown[];
+  days?: unknown[];
+  integrationDailyData?: unknown[];
+};
+
+async function buildSignedRestorePayloadTextWithRows(
+  overrides?: RestorePayloadRowOverrides,
+): Promise<string> {
   let signedPayloadText = "";
+
+  const summariesRows = overrides?.summaries ?? [
+    {
+      dayKey: "2026-04-02",
+      story: "A good day",
+      highlights: ["shipping"],
+      sourcesUsed: ["Memories"],
+      generatedAt: 100,
+    },
+  ];
+  const memoriesRows = overrides?.memories ?? [
+    {
+      dayKey: "2026-04-02",
+      title: "Memory",
+      happenedAt: 100,
+    },
+  ];
+  const daysRows = overrides?.days ?? [
+    {
+      dayKey: "2026-04-02",
+      manualNotes: [],
+      peopleTags: [],
+    },
+  ];
+  const integrationRows = overrides?.integrationDailyData ?? [
+    {
+      provider: "spotify",
+      dayKey: "2026-04-02",
+      syncedAt: 100,
+      signals: ["music"],
+    },
+  ];
 
   const runQuery = vi.fn(
     async (_ref: unknown, args: Record<string, unknown>) => {
@@ -104,15 +149,7 @@ async function buildSignedRestorePayloadText(): Promise<string> {
         return {
           exportedAt: 1,
           dataset,
-          page: [
-            {
-              dayKey: "2026-04-02",
-              story: "A good day",
-              highlights: ["shipping"],
-              sourcesUsed: ["Memories"],
-              generatedAt: 100,
-            },
-          ],
+          page: summariesRows,
           continueCursor: null,
           isDone: true,
         };
@@ -122,13 +159,7 @@ async function buildSignedRestorePayloadText(): Promise<string> {
         return {
           exportedAt: 1,
           dataset,
-          page: [
-            {
-              dayKey: "2026-04-02",
-              title: "Memory",
-              happenedAt: 100,
-            },
-          ],
+          page: memoriesRows,
           continueCursor: null,
           isDone: true,
         };
@@ -138,13 +169,7 @@ async function buildSignedRestorePayloadText(): Promise<string> {
         return {
           exportedAt: 1,
           dataset,
-          page: [
-            {
-              dayKey: "2026-04-02",
-              manualNotes: [],
-              peopleTags: [],
-            },
-          ],
+          page: daysRows,
           continueCursor: null,
           isDone: true,
         };
@@ -153,14 +178,7 @@ async function buildSignedRestorePayloadText(): Promise<string> {
       return {
         exportedAt: 1,
         dataset,
-        page: [
-          {
-            provider: "spotify",
-            dayKey: "2026-04-02",
-            syncedAt: 100,
-            signals: ["music"],
-          },
-        ],
+        page: integrationRows,
         continueCursor: null,
         isDone: true,
       };
@@ -1216,6 +1234,137 @@ describe("summaries behavior", () => {
     expect(
       (completedCall?.[1] as { status?: "succeeded" | "partial" }).status,
     ).toBe("partial");
+  });
+
+  it("restores large datasets in multiple internal batches", async () => {
+    const restoreMyDiaryData = handler<
+      {
+        payloadText: string;
+        datasets?: Array<
+          "summaries" | "memories" | "days" | "integrationDailyData"
+        >;
+        conflictMode?: "skip" | "overwrite";
+        allowPartial?: boolean;
+      },
+      {
+        status: "success" | "partial";
+        selectedDatasets: string[];
+        totals: { processed: number; inserted: number; failed: number };
+      }
+    >(summariesModule.restoreMyDiaryData);
+
+    const largeMemoryRows = Array.from({ length: 205 }, (_, index) => ({
+      dayKey: `2026-04-${String((index % 28) + 1).padStart(2, "0")}`,
+      title: `Memory ${index}`,
+      description: `desc ${index}`,
+      mood: "focused",
+      happenedAt: 1_000 + index,
+    }));
+
+    const payloadText = await buildSignedRestorePayloadTextWithRows({
+      summaries: [],
+      memories: largeMemoryRows,
+      days: [],
+      integrationDailyData: [],
+    });
+
+    const runMutation = vi.fn(
+      async (_ref: unknown, args: Record<string, unknown>) => {
+        if (
+          "requestedAt" in args &&
+          "selectedDatasets" in args &&
+          !("rows" in args)
+        ) {
+          return {
+            jobId: "restore_job_large_001",
+            status: "running",
+            requestedAt: args.requestedAt,
+          };
+        }
+
+        if ("dataset" in args && "rows" in args) {
+          const rows = args.rows as unknown[];
+          return {
+            processed: rows.length,
+            inserted: rows.length,
+            updated: 0,
+            skipped: 0,
+            conflicts: 0,
+            failed: 0,
+            errorSamples: [],
+          };
+        }
+
+        if ("completedAt" in args && "datasetResults" in args) {
+          return {
+            jobId: args.jobId,
+            status: args.status,
+            completedAt: args.completedAt,
+          };
+        }
+
+        if ("failedAt" in args && "error" in args) {
+          return {
+            jobId: args.jobId,
+            status: "failed",
+            failedAt: args.failedAt,
+          };
+        }
+
+        throw new Error("Unexpected restore mutation args");
+      },
+    );
+
+    const result = await restoreMyDiaryData(
+      {
+        runQuery: vi.fn(async () => ({
+          userId: USER_ID,
+          clerkUserId: "clerk_member_001",
+        })),
+        runMutation,
+      } as any,
+      {
+        payloadText,
+        datasets: ["memories"],
+        conflictMode: "skip",
+        allowPartial: false,
+      },
+    );
+
+    expect(result.status).toBe("success");
+    expect(result.selectedDatasets).toEqual(["memories"]);
+    expect(result.totals.processed).toBe(205);
+    expect(result.totals.inserted).toBe(205);
+    expect(result.totals.failed).toBe(0);
+
+    const batchCalls = runMutation.mock.calls.filter(
+      ([, mutationArgs]) =>
+        typeof mutationArgs === "object" &&
+        mutationArgs !== null &&
+        "dataset" in mutationArgs &&
+        "rows" in mutationArgs,
+    );
+
+    expect(batchCalls).toHaveLength(3);
+    expect((batchCalls[0]?.[1] as { rows: unknown[] }).rows).toHaveLength(100);
+    expect((batchCalls[1]?.[1] as { rows: unknown[] }).rows).toHaveLength(100);
+    expect((batchCalls[2]?.[1] as { rows: unknown[] }).rows).toHaveLength(5);
+
+    const completedCall = runMutation.mock.calls.find(
+      ([, mutationArgs]) =>
+        typeof mutationArgs === "object" &&
+        mutationArgs !== null &&
+        "completedAt" in mutationArgs,
+    );
+
+    expect(completedCall).toBeDefined();
+    expect(
+      (
+        completedCall?.[1] as {
+          totals?: { inserted?: number; processed?: number };
+        }
+      ).totals,
+    ).toMatchObject({ inserted: 205, processed: 205 });
   });
 
   it("marks restore job failed and rethrows when payload parsing fails", async () => {
