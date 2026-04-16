@@ -51,6 +51,50 @@ function formatSyncTimestamp(value: number | undefined): string {
   return value ? new Date(value).toLocaleString() : "Never";
 }
 
+function formatDashboardUpdatedTimestamp(value: number): string {
+  if (value <= 0) return "No health events yet";
+
+  const absolute = new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+
+  const elapsedMs = Date.now() - value;
+  const elapsedMinutes = Math.floor(elapsedMs / (60 * 1000));
+
+  if (elapsedMinutes < 1) return `${absolute} (just now)`;
+  if (elapsedMinutes < 60) return `${absolute} (${elapsedMinutes}m ago)`;
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${absolute} (${elapsedHours}h ago)`;
+
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  return `${absolute} (${elapsedDays}d ago)`;
+}
+
+function sanitizeProviderFailureMessage(args: {
+  message: string | undefined;
+  providerKey: string;
+  providerLabel: string;
+  fallback: string;
+}): string {
+  if (!args.message) return args.fallback;
+
+  let normalized = args.message;
+  normalized = normalized.replaceAll(
+    `"${args.providerKey}"`,
+    args.providerLabel,
+  );
+  normalized = normalized.replaceAll(args.providerKey, args.providerLabel);
+  normalized = normalized.replaceAll('provider "', "");
+  normalized = normalized.replaceAll("provider '", "");
+  normalized = normalized.replaceAll("provider", "");
+  normalized = normalized.replaceAll('".', ".");
+  normalized = normalized.replace(/\s{2,}/g, " ").trim();
+
+  return normalized || args.fallback;
+}
+
 type IntegrationsSectionProps = {
   styles: ProfileStyles;
   colors: ThemeColors;
@@ -110,6 +154,7 @@ export function IntegrationsSection({
     const integration = integrationByProvider.get(provider);
     const healthSnapshot = integrationHealthByProvider.get(provider);
     const health = healthSnapshot?.health ?? null;
+    const providerLabel = getProviderLabel(provider);
     const integrationStatus =
       integration?.status ??
       healthSnapshot?.integrationStatus ??
@@ -128,7 +173,7 @@ export function IntegrationsSection({
 
     return {
       provider,
-      providerLabel: getProviderLabel(provider),
+      providerLabel,
       integrationStatus,
       syncState,
       healthUpdatedAt: health?.updatedAt,
@@ -139,10 +184,16 @@ export function IntegrationsSection({
         integration?.lastSyncAt,
       warningMessage:
         syncState === "failure"
-          ? (latestFailure?.error ??
-            healthSnapshot?.integrationLastError ??
-            integration?.lastError ??
-            "Latest sync failed. Retry sync to restore reliability.")
+          ? sanitizeProviderFailureMessage({
+              message:
+                latestFailure?.error ??
+                healthSnapshot?.integrationLastError ??
+                integration?.lastError,
+              providerKey: provider,
+              providerLabel,
+              fallback:
+                "Latest provider sync failed. Retry sync to restore reliability.",
+            })
           : undefined,
     };
   });
@@ -166,7 +217,7 @@ export function IntegrationsSection({
 
   const dashboardLastUpdatedLabel =
     dashboardLastUpdatedAt > 0
-      ? new Date(dashboardLastUpdatedAt).toLocaleString()
+      ? formatDashboardUpdatedTimestamp(dashboardLastUpdatedAt)
       : "No health events yet";
 
   const connectedCount = integrationHealthRows.filter(
@@ -233,6 +284,9 @@ export function IntegrationsSection({
             <Text style={styles.integrationSubMuted}>
               Connection status, last sync time, and sync reliability from
               backend health snapshots.
+            </Text>
+            <Text style={styles.integrationSubMuted}>
+              Provider health can differ from your latest personal sync run.
             </Text>
             <Text style={styles.integrationHealthUpdatedText}>
               Last updated: {dashboardLastUpdatedLabel}
@@ -411,9 +465,7 @@ export function IntegrationsSection({
                     </Text>
 
                     <View style={styles.integrationHealthStateRow}>
-                      <Text style={styles.integrationSubMuted}>
-                        Sync state:
-                      </Text>
+                      <Text style={styles.integrationSubMuted}>Provider:</Text>
                       <View
                         style={[
                           styles.integrationHealthStateBadge,
@@ -432,7 +484,7 @@ export function IntegrationsSection({
 
                     {syncRun?.status ? (
                       <Text style={styles.integrationSubMuted}>
-                        Today: {syncRun.status}
+                        Your run today: {syncRun.status}
                         {syncRun.lastError ? ` — ${syncRun.lastError}` : ""}
                       </Text>
                     ) : null}
@@ -574,7 +626,7 @@ export function IntegrationsSection({
                       {formatSyncTimestamp(selectedProviderDetail.lastSyncAt)}
                     </Text>
                     <Text style={styles.integrationSubMuted}>
-                      Sync state: {selectedProviderDetail.syncState}
+                      Provider state: {selectedProviderDetail.syncState}
                     </Text>
 
                     <Text style={styles.integrationDetailFailureHeading}>
@@ -606,7 +658,13 @@ export function IntegrationsSection({
                               <Text
                                 style={styles.integrationDetailFailureMessage}
                               >
-                                {failure.error}
+                                {sanitizeProviderFailureMessage({
+                                  message: failure.error,
+                                  providerKey: selectedProviderDetail.provider,
+                                  providerLabel:
+                                    selectedProviderDetail.providerLabel,
+                                  fallback: "Provider sync failed.",
+                                })}
                               </Text>
                               {failure.dayKey ? (
                                 <Text
