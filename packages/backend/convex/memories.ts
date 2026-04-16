@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import { mutation, query, type MutationCtx } from "./_generated/server";
 import { requireUser, requireOwnership } from "./authz";
 import { validateDayKey, clampLimit } from "./validators";
@@ -9,6 +10,7 @@ import { captureException, logInfo } from "./observability";
 
 const IMAGE_CONTENT_TYPE_PREFIX = "image/";
 const VIDEO_CONTENT_TYPE_PREFIX = "video/";
+const MAX_MEMORY_THUMBNAIL_BATCH_SIZE = 100;
 
 function bytesToMbLabel(bytes: number): string {
   return `${Math.round((bytes / (1024 * 1024)) * 10) / 10}MB`;
@@ -52,9 +54,65 @@ function normalizeClientMediaId(
   return trimmed ? trimmed : undefined;
 }
 
+function getDedupedMemoryIds(
+  memoryIds: Id<"memories">[],
+): Array<Id<"memories">> {
+  return Array.from(new Set(memoryIds.map((id) => String(id))))
+    .map((id) => id as Id<"memories">)
+    .slice(0, MAX_MEMORY_THUMBNAIL_BATCH_SIZE);
+}
+
+async function resolveStorageUrls(
+  ctx: { storage: Pick<MutationCtx["storage"], "getUrl"> },
+  storageIds: string[],
+): Promise<Map<string, string | null>> {
+  if (storageIds.length === 0) {
+    return new Map();
+  }
+
+  const entries = await Promise.all(
+    storageIds.map(
+      async (storageId): Promise<[string, string | null]> => [
+        storageId,
+        await ctx.storage.getUrl(storageId as any),
+      ],
+    ),
+  );
+
+  return new Map(entries);
+}
+
+async function resolveThumbnailStorageIdsForMemories(
+  ctx: { db: Pick<MutationCtx["db"], "get"> },
+  userId: Id<"user">,
+  memoryIds: Array<Id<"memories">>,
+): Promise<Map<string, string | null>> {
+  const memoryRows = await Promise.all(
+    memoryIds.map(async (memoryId) => await ctx.db.get(memoryId)),
+  );
+
+  const storageIdByMemoryId = new Map<string, string | null>();
+
+  memoryIds.forEach((memoryId, index) => {
+    const memory = memoryRows[index];
+    if (!memory || memory.userId !== userId) {
+      storageIdByMemoryId.set(String(memoryId), null);
+      return;
+    }
+
+    storageIdByMemoryId.set(
+      String(memoryId),
+      memory.thumbnailStorageId ?? null,
+    );
+  });
+
+  return storageIdByMemoryId;
+}
+
 async function addMemoryMediaForOwnedMemory(
   ctx: MutationCtx,
   user: Doc<"user">,
+  memory: Doc<"memories">,
   args: AddMemoryMediaArgs,
 ) {
   const clientMediaId = normalizeClientMediaId(args.clientMediaId);
@@ -72,6 +130,12 @@ async function addMemoryMediaForOwnedMemory(
         throw new Error(
           "Conflict: clientMediaId already used for a different media payload.",
         );
+      }
+
+      if (existing.type === "image" && !memory.thumbnailStorageId) {
+        await ctx.db.patch(memory._id, {
+          thumbnailStorageId: existing.storageId,
+        });
       }
 
       return existing;
@@ -137,6 +201,12 @@ async function addMemoryMediaForOwnedMemory(
     width: args.width,
     height: args.height,
   });
+
+  if (args.type === "image" && !memory.thumbnailStorageId) {
+    await ctx.db.patch(memory._id, {
+      thumbnailStorageId: args.storageId,
+    });
+  }
 
   return await ctx.db.get(id);
 }
@@ -286,6 +356,49 @@ export const listMemoriesByDay = query({
         q.eq("userId", user._id).eq("dayKey", args.dayKey),
       )
       .collect();
+  },
+});
+
+// ── List day memories with cursor pagination + thumbnails ──
+export const listMemoriesByDayPaginated = query({
+  args: {
+    dayKey: v.string(),
+    paginationOpts: paginationOptsValidator,
+    refreshToken: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    void args.refreshToken;
+
+    const user = await requireUser(ctx);
+    const paginated = await ctx.db
+      .query("memories")
+      .withIndex("by_user_day_happenedAt", (q) =>
+        q.eq("userId", user._id).eq("dayKey", args.dayKey),
+      )
+      .order("desc")
+      .paginate(args.paginationOpts);
+
+    const uniqueStorageIds = Array.from(
+      new Set(
+        paginated.page
+          .map((memory) => memory.thumbnailStorageId)
+          .filter(
+            (storageId): storageId is string => typeof storageId === "string",
+          ),
+      ),
+    );
+
+    const storageIdToUrl = await resolveStorageUrls(ctx, uniqueStorageIds);
+
+    return {
+      ...paginated,
+      page: paginated.page.map((memory) => ({
+        ...memory,
+        thumbnailUrl: memory.thumbnailStorageId
+          ? (storageIdToUrl.get(memory.thumbnailStorageId) ?? null)
+          : null,
+      })),
+    };
   },
 });
 
@@ -450,7 +563,7 @@ export const addMemoryMedia = mutation({
 
     requireOwnership(user, memory.userId);
 
-    return await addMemoryMediaForOwnedMemory(ctx, user, {
+    return await addMemoryMediaForOwnedMemory(ctx, user, memory, {
       memoryId: args.memoryId,
       clientMediaId: args.clientMediaId,
       storageId: args.storageId,
@@ -486,7 +599,7 @@ export const addMemoryMediaByClientRequestId = mutation({
       throw new Error("Memory not found for clientRequestId.");
     }
 
-    return await addMemoryMediaForOwnedMemory(ctx, user, {
+    return await addMemoryMediaForOwnedMemory(ctx, user, memory, {
       memoryId: memory._id,
       clientMediaId: args.clientMediaId,
       storageId: args.storageId,
@@ -532,59 +645,30 @@ export const listMemoryMediaThumbnailsForMemories = query({
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
+    void args.refreshToken;
 
-    const uniqueIds = Array.from(
-      new Set(args.memoryIds.map((id) => String(id))),
-    )
-      .map((id) => id as Id<"memories">)
-      .slice(0, 100);
+    const uniqueIds = getDedupedMemoryIds(args.memoryIds);
 
     if (uniqueIds.length === 0) {
       return [];
     }
 
-    const firstImageStorageIdByMemoryId = new Map<string, string | null>(
-      await Promise.all(
-        uniqueIds.map(async (memoryId): Promise<[string, string | null]> => {
-          const firstImage = await ctx.db
-            .query("memoryMedia")
-            .withIndex("by_user_memory_type", (q) =>
-              q
-                .eq("userId", user._id)
-                .eq("memoryId", memoryId)
-                .eq("type", "image"),
-            )
-            .take(1);
-
-          return [String(memoryId), firstImage[0]?.storageId ?? null];
-        }),
-      ),
-    );
+    const thumbnailStorageIdByMemoryId =
+      await resolveThumbnailStorageIdsForMemories(ctx, user._id, uniqueIds);
 
     const uniqueStorageIds = Array.from(
       new Set(
-        Array.from(firstImageStorageIdByMemoryId.values()).filter(
+        Array.from(thumbnailStorageIdByMemoryId.values()).filter(
           (storageId): storageId is string => typeof storageId === "string",
         ),
       ),
     );
 
-    const storageIdToUrlEntries = await Promise.all(
-      uniqueStorageIds.map(
-        async (storageId): Promise<[string, string | null]> => [
-          storageId,
-          await ctx.storage.getUrl(storageId as any),
-        ],
-      ),
-    );
-
-    const storageIdToUrl = new Map<string, string | null>(
-      storageIdToUrlEntries,
-    );
+    const storageIdToUrl = await resolveStorageUrls(ctx, uniqueStorageIds);
 
     return uniqueIds.map((memoryId) => {
       const id = String(memoryId);
-      const storageId = firstImageStorageIdByMemoryId.get(id);
+      const storageId = thumbnailStorageIdByMemoryId.get(id);
 
       return {
         memoryId: id,
@@ -626,6 +710,29 @@ export const deleteMemoryMedia = mutation({
       }
 
       await ctx.db.delete(args.mediaId);
+
+      if (media.type === "image") {
+        const memory = await ctx.db.get(media.memoryId);
+        if (
+          memory &&
+          memory.userId === user._id &&
+          memory.thumbnailStorageId === media.storageId
+        ) {
+          const nextImage = await ctx.db
+            .query("memoryMedia")
+            .withIndex("by_user_memory_type", (q) =>
+              q
+                .eq("userId", user._id)
+                .eq("memoryId", media.memoryId)
+                .eq("type", "image"),
+            )
+            .take(1);
+
+          await ctx.db.patch(memory._id, {
+            thumbnailStorageId: nextImage[0]?.storageId,
+          });
+        }
+      }
 
       logInfo("deletion.memory_media.succeeded", {
         status: "succeeded",
