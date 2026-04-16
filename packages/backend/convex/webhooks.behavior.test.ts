@@ -175,4 +175,46 @@ describe("webhooks behavior", () => {
 
     expect(response.status).toBe(500);
   });
+
+  it("returns 500 when user.deleted cleanup fails downstream", async () => {
+    vi.spyOn(Webhook.prototype, "verify").mockImplementation(
+      () => ({}) as never,
+    );
+
+    const runMutation = vi.fn(
+      async (_ref: unknown, _args: Record<string, unknown>) => {
+        throw new Error("deletion cleanup unavailable");
+      },
+    );
+    const webhookHandler = (
+      webhooksModule.clerkWebhook as unknown as {
+        _handler: (ctx: unknown, request: Request) => Promise<Response>;
+      }
+    )._handler;
+
+    const response = await webhookHandler(
+      { runMutation } as never,
+      new Request("https://example.com/clerk/webhook", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "svix-id": "msg_002",
+          "svix-timestamp": "1710000001",
+          "svix-signature": "v1,signature",
+        },
+        body: JSON.stringify({
+          type: "user.deleted",
+          data: {
+            id: "clerk_user_004",
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(runMutation).toHaveBeenCalledTimes(1);
+    expect(runMutation.mock.calls[0]?.[1]).toMatchObject({
+      clerkUserId: "clerk_user_004",
+    });
+  });
 });
