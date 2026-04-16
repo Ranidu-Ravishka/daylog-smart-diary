@@ -9,11 +9,19 @@ import {
   RefreshControl,
   Alert,
   Image,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useQuery, useMutation, useAction, useConvexAuth } from "convex/react";
+import {
+  useQuery,
+  useMutation,
+  useAction,
+  useConvexAuth,
+  usePaginatedQuery,
+} from "convex/react";
 import { api } from "@repo/backend/convex";
 import type { GenericId } from "convex/values";
 import { MOOD_EMOJI } from "@repo/ui/lib/constants";
@@ -40,12 +48,11 @@ type MemoryDoc = {
   title: string;
   description?: string;
   mood?: string;
+  thumbnailUrl?: string | null;
 };
 
-type MemoryThumbnailDoc = {
-  memoryId: string;
-  thumbnailUrl: string | null;
-};
+const MEMORIES_PAGE_SIZE = 20;
+const SCROLL_LOAD_MORE_THRESHOLD_PX = 320;
 
 type IntegrationDailyDataDoc = {
   _id: string;
@@ -63,16 +70,9 @@ function isMemoryDoc(value: unknown): value is MemoryDoc {
     typeof candidate.title === "string" &&
     (candidate.description === undefined ||
       typeof candidate.description === "string") &&
-    (candidate.mood === undefined || typeof candidate.mood === "string")
-  );
-}
-
-function isMemoryThumbnailDoc(value: unknown): value is MemoryThumbnailDoc {
-  if (typeof value !== "object" || value === null) return false;
-  const candidate = value as Record<string, unknown>;
-  return (
-    typeof candidate.memoryId === "string" &&
-    (candidate.thumbnailUrl === null ||
+    (candidate.mood === undefined || typeof candidate.mood === "string") &&
+    (candidate.thumbnailUrl === undefined ||
+      candidate.thumbnailUrl === null ||
       typeof candidate.thumbnailUrl === "string")
   );
 }
@@ -241,14 +241,19 @@ const DailyDetailView = () => {
     api.summaries.getSummaryByDay,
     isAuthenticated ? { dayKey, refreshToken } : "skip",
   );
-  const memories = useQuery(
-    api.memories.listMemoriesByDay,
+  const {
+    results: rawPaginatedMemories,
+    status: memoriesStatus,
+    loadMore: loadMoreMemories,
+  } = usePaginatedQuery(
+    api.memories.listMemoriesByDayPaginated,
     isAuthenticated ? { dayKey, refreshToken } : "skip",
+    { initialNumItems: MEMORIES_PAGE_SIZE },
   );
   const resolvedMemories = React.useMemo(() => {
-    if (!Array.isArray(memories)) return [];
-    return memories.filter(isMemoryDoc);
-  }, [memories]);
+    if (!Array.isArray(rawPaginatedMemories)) return [];
+    return rawPaginatedMemories.filter(isMemoryDoc);
+  }, [rawPaginatedMemories]);
   const day = useQuery(
     api.days.getDay,
     isAuthenticated ? { dayKey, refreshToken } : "skip",
@@ -264,48 +269,46 @@ const DailyDetailView = () => {
   const generateSummaryForDay = useAction(
     api.summaryGeneration.generateSummaryForDay,
   );
-  const memoryIds = React.useMemo(
-    () => resolvedMemories.map((memory) => memory._id),
-    [resolvedMemories],
-  );
-  const rawMemoryThumbnails = useQuery(
-    api.memories.listMemoryMediaThumbnailsForMemories,
-    isAuthenticated ? { memoryIds, refreshToken } : "skip",
-  );
-  const memoryThumbnails = React.useMemo(() => {
-    if (!Array.isArray(rawMemoryThumbnails)) return [];
-    return rawMemoryThumbnails.filter(isMemoryThumbnailDoc);
-  }, [rawMemoryThumbnails]);
 
   const integrationDailyData = React.useMemo(() => {
     if (!Array.isArray(rawIntegrationDailyData)) return [];
     return rawIntegrationDailyData.filter(isIntegrationDailyDataDoc);
   }, [rawIntegrationDailyData]);
 
-  const thumbnailCacheRef = React.useRef<Map<string, string | null>>(new Map());
+  const isLoadingMoreMemories = memoriesStatus === "LoadingMore";
+  const canLoadMoreMemories = memoriesStatus === "CanLoadMore";
+  const loadMoreTriggeredRef = React.useRef(false);
 
   React.useEffect(() => {
-    for (const entry of memoryThumbnails) {
-      thumbnailCacheRef.current.set(entry.memoryId, entry.thumbnailUrl);
+    if (!isLoadingMoreMemories) {
+      loadMoreTriggeredRef.current = false;
     }
-  }, [memoryThumbnails]);
+  }, [isLoadingMoreMemories]);
 
-  const thumbnailByMemoryId = React.useMemo(() => {
-    const fromQuery = new Map(
-      memoryThumbnails.map((entry) => [entry.memoryId, entry.thumbnailUrl]),
-    );
-
-    const result = new Map<string, string | null>();
-    for (const id of memoryIds.map((item: string) => String(item))) {
-      if (fromQuery.has(id)) {
-        result.set(id, fromQuery.get(id) ?? null);
-      } else if (thumbnailCacheRef.current.has(id)) {
-        result.set(id, thumbnailCacheRef.current.get(id) ?? null);
+  const handleMemoryScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (!canLoadMoreMemories || isLoadingMoreMemories) {
+        return;
       }
-    }
 
-    return result;
-  }, [memoryIds, memoryThumbnails]);
+      if (loadMoreTriggeredRef.current) {
+        return;
+      }
+
+      const { layoutMeasurement, contentOffset, contentSize } =
+        event.nativeEvent;
+      const distanceFromBottom =
+        contentSize.height - (contentOffset.y + layoutMeasurement.height);
+
+      if (distanceFromBottom > SCROLL_LOAD_MORE_THRESHOLD_PX) {
+        return;
+      }
+
+      loadMoreTriggeredRef.current = true;
+      loadMoreMemories(MEMORIES_PAGE_SIZE);
+    },
+    [canLoadMoreMemories, isLoadingMoreMemories, loadMoreMemories],
+  );
 
   const upsertDay = useMutation(api.days.upsertDay);
   const appendDayLogEntries = useMutation(api.days.appendDayLogEntries);
@@ -338,16 +341,18 @@ const DailyDetailView = () => {
   );
 
   const isLoading =
-    isAuthLoading || (isAuthenticated && memories === undefined);
+    isAuthLoading ||
+    (isAuthenticated &&
+      memoriesStatus === "LoadingFirstPage" &&
+      resolvedMemories.length === 0);
 
   const isRefreshDataReady =
     !isAuthenticated ||
     (summary !== undefined &&
-      memories !== undefined &&
+      memoriesStatus !== "LoadingFirstPage" &&
       day !== undefined &&
       summaryQuota !== undefined &&
-      rawIntegrationDailyData !== undefined &&
-      rawMemoryThumbnails !== undefined);
+      rawIntegrationDailyData !== undefined);
 
   React.useEffect(() => {
     if (!isRefreshDataReady) return;
@@ -583,6 +588,8 @@ const DailyDetailView = () => {
         ref={scrollRef}
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
+        onScroll={handleMemoryScroll}
+        scrollEventThrottle={120}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -611,7 +618,7 @@ const DailyDetailView = () => {
           <View style={styles.metricChip}>
             <Ionicons name="document-text-outline" size={14} color={c.tint} />
             <Text style={styles.metricText}>
-              {memories?.length ?? 0} memories
+              {resolvedMemories.length} memories
             </Text>
           </View>
           <View style={styles.metricChip}>
@@ -735,10 +742,10 @@ const DailyDetailView = () => {
                       </Text>
                     )}
                   </View>
-                  {thumbnailByMemoryId.get(String(mem._id)) ? (
+                  {mem.thumbnailUrl ? (
                     <Image
                       source={{
-                        uri: thumbnailByMemoryId.get(String(mem._id))!,
+                        uri: mem.thumbnailUrl,
                       }}
                       style={styles.memoryThumb}
                     />
@@ -746,6 +753,11 @@ const DailyDetailView = () => {
                 </View>
               ))}
             </AppCard>
+            {isLoadingMoreMemories ? (
+              <Text style={styles.loadMoreText}>Loading more memories...</Text>
+            ) : canLoadMoreMemories ? (
+              <Text style={styles.loadMoreText}>Scroll to load more</Text>
+            ) : null}
           </View>
         ) : (
           <View style={styles.section}>
@@ -1074,6 +1086,12 @@ function createStyles(c: ThemeColors) {
       borderRadius: Radius.md,
       marginLeft: Spacing.md,
       backgroundColor: c.surfaceSecondary,
+    },
+    loadMoreText: {
+      ...Typography.caption2,
+      color: c.textSecondary,
+      textAlign: "center",
+      marginTop: Spacing.sm,
     },
 
     // Sources

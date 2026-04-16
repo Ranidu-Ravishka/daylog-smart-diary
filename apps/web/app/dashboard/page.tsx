@@ -1,6 +1,11 @@
 "use client";
 
-import { useAction, useQuery, useConvexAuth } from "convex/react";
+import {
+  useAction,
+  useQuery,
+  useConvexAuth,
+  usePaginatedQuery,
+} from "convex/react";
 import { api } from "@repo/backend/convex";
 import { MOOD_EMOJI } from "@repo/ui/lib/constants";
 import {
@@ -165,6 +170,8 @@ function getSummaryGenerationFailureResultMessage(
   return "Failed to generate summary. Please try again.";
 }
 
+const MEMORIES_PAGE_SIZE = 20;
+
 export default function DashboardPage() {
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
   const [selectedDate, setSelectedDate] = useState(() => new Date());
@@ -185,34 +192,39 @@ export default function DashboardPage() {
     api.summaries.getSummaryByDay,
     isAuthenticated ? { dayKey } : "skip",
   );
-  const memories = useQuery(
-    api.memories.listMemoriesByDay,
+  const {
+    results: memories,
+    status: memoriesStatus,
+    loadMore: loadMoreMemories,
+  } = usePaginatedQuery(
+    api.memories.listMemoriesByDayPaginated,
     isAuthenticated ? { dayKey } : "skip",
+    { initialNumItems: MEMORIES_PAGE_SIZE },
   );
   const day = useQuery(api.days.getDay, isAuthenticated ? { dayKey } : "skip");
   const integrationDailyData = useQuery(
     api.integrations.listMyIntegrationDailyDataForDay,
     isAuthenticated ? { dayKey } : "skip",
   );
-  const memoryIds = (memories ?? []).map((memory) => memory._id);
-  const memoryThumbnails = useQuery(
-    api.memories.listMemoryMediaThumbnailsForMemories,
-    isAuthenticated ? { memoryIds } : "skip",
-  ) as { memoryId: string; thumbnailUrl: string | null }[] | undefined;
 
-  const thumbnailByMemoryId = new Map(
-    (memoryThumbnails ?? []).map((entry) => [
-      entry.memoryId,
-      entry.thumbnailUrl,
-    ]),
-  );
+  const memoriesWithThumbnail = memories as Array<
+    MemoryData & { thumbnailUrl?: string | null }
+  >;
 
   const isLoading =
-    isAuthLoading || (isAuthenticated && memories === undefined);
+    isAuthLoading ||
+    (isAuthenticated &&
+      memoriesStatus === "LoadingFirstPage" &&
+      memoriesWithThumbnail.length === 0);
   const isSummaryLoading = isAuthenticated && summary === undefined;
-  const isMemoriesLoading = isAuthenticated && memories === undefined;
+  const isMemoriesLoading =
+    isAuthenticated &&
+    memoriesStatus === "LoadingFirstPage" &&
+    memoriesWithThumbnail.length === 0;
+  const canLoadMoreMemories = memoriesStatus === "CanLoadMore";
+  const isLoadingMoreMemories = memoriesStatus === "LoadingMore";
 
-  const hasMemories = (memories?.length ?? 0) > 0;
+  const hasMemories = memoriesWithThumbnail.length > 0;
   const hasDayMetadata =
     day?.rating !== undefined ||
     (day?.manualNotes?.length ?? 0) > 0 ||
@@ -289,7 +301,9 @@ export default function DashboardPage() {
   if (isLoading) return <LoadingSkeleton />;
 
   const moodFromMemories =
-    memories && memories.length > 0 ? (memories[0]?.mood ?? null) : null;
+    memoriesWithThumbnail.length > 0
+      ? (memoriesWithThumbnail[0]?.mood ?? null)
+      : null;
 
   const latestMemoryMood = moodFromMemories
     ? (MOOD_EMOJI[moodFromMemories] ?? "😐")
@@ -349,7 +363,9 @@ export default function DashboardPage() {
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
-            <p className="text-xl font-semibold">{memories?.length ?? 0}</p>
+            <p className="text-xl font-semibold">
+              {memoriesWithThumbnail.length}
+            </p>
             <p className="mt-1 text-xs text-muted-foreground">Memories</p>
           </CardContent>
         </Card>
@@ -551,17 +567,33 @@ export default function DashboardPage() {
         </div>
         {isMemoriesLoading ? (
           <MemoriesSkeleton />
-        ) : memories && memories.length > 0 ? (
+        ) : memoriesWithThumbnail.length > 0 ? (
           <div className="space-y-2">
-            {memories.map((memory) => (
+            {memoriesWithThumbnail.map((memory) => (
               <MemoryCard
                 key={memory._id}
                 memory={memory as MemoryData}
-                thumbnailUrl={thumbnailByMemoryId.get(String(memory._id))}
+                thumbnailUrl={memory.thumbnailUrl}
                 onEdit={handleEditMemory}
                 onDeleteSuccess={handleDeleteSuccess}
               />
             ))}
+
+            {(canLoadMoreMemories || isLoadingMoreMemories) && (
+              <div className="pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => loadMoreMemories(MEMORIES_PAGE_SIZE)}
+                  disabled={isLoadingMoreMemories}
+                >
+                  {isLoadingMoreMemories
+                    ? "Loading more..."
+                    : "Load more memories"}
+                </Button>
+              </div>
+            )}
           </div>
         ) : (
           <Card>

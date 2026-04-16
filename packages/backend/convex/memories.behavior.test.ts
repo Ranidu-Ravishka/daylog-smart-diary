@@ -100,6 +100,15 @@ describe("memories behavior", () => {
       { dayKey: string },
       Array<{ _id: Id<"memories"> }>
     >(memoriesModule.listMemoriesByDay);
+    const listMemoriesByDayPaginated = handler<
+      {
+        dayKey: string;
+        paginationOpts: { numItems: number; cursor: string | null };
+      },
+      {
+        page: Array<{ _id: Id<"memories">; thumbnailUrl: string | null }>;
+      }
+    >(memoriesModule.listMemoriesByDayPaginated);
     const listRecentMemories = handler<
       { limit?: number },
       Array<{ _id: Id<"memories"> }>
@@ -167,6 +176,12 @@ describe("memories behavior", () => {
     const byDay = await listMemoriesByDay(ctx, { dayKey: "2026-04-02" });
     expect(byDay).toHaveLength(1);
 
+    const byDayPage = await listMemoriesByDayPaginated(ctx, {
+      dayKey: "2026-04-02",
+      paginationOpts: { numItems: 1, cursor: null },
+    });
+    expect(byDayPage.page).toHaveLength(1);
+
     const recent = await listRecentMemories(ctx, { limit: 10 });
     expect(recent[0]?._id).toBe(memoryId);
 
@@ -219,6 +234,16 @@ describe("memories behavior", () => {
       width: 1000,
       height: 600,
     });
+
+    ctx.storage.getUrl.mockClear();
+
+    const byDayWithThumbnail = await listMemoriesByDayPaginated(ctx, {
+      dayKey: "2026-04-02",
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(byDayWithThumbnail.page[0]?.thumbnailUrl).toBe(
+      "https://cdn.example.com/storage_img_001",
+    );
 
     ctx.storage.getUrl.mockClear();
 

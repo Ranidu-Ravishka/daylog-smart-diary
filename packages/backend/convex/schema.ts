@@ -251,8 +251,10 @@ export default defineSchema(
       mood: v.optional(v.string()),
       happenedAt: v.number(),
       dayKey: v.string(), // "YYYY-MM-DD" in user timezone
+      thumbnailStorageId: v.optional(v.string()),
     })
       .index("by_user_day", ["userId", "dayKey"])
+      .index("by_user_day_happenedAt", ["userId", "dayKey", "happenedAt"])
       .index("by_user_clientRequestId", ["userId", "clientRequestId"])
       .index("by_user_happenedAt", ["userId", "happenedAt"])
       .index("by_happenedAt", ["happenedAt"])
