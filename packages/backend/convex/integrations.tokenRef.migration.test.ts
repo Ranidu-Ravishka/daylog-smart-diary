@@ -44,7 +44,6 @@ type IntegrationSecretDoc = {
   provider: string;
   tokenRef: string;
   encryptedAccessToken?: unknown;
-  accessToken?: string;
 };
 
 type AuditLogDoc = {
@@ -267,7 +266,7 @@ describe("integrations tokenRef migration regression suite", () => {
     );
     expect(spotifySecret?.tokenRef).toBe(spotifyIntegration.tokenRef);
     expect(spotifySecret?.encryptedAccessToken).toBeDefined();
-    expect(spotifySecret?.accessToken).toBeUndefined();
+    expect(spotifySecret ? "accessToken" in spotifySecret : false).toBe(false);
 
     const googleFitSecret = secrets.find(
       (row) => row.userId === USER_BETA_ID && row.provider === "google_fit",

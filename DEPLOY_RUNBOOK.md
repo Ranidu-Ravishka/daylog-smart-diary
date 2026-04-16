@@ -217,8 +217,7 @@ Security/integration data:
 
 1. Audit encrypted integration secrets:
    - `integrations:adminAuditIntegrationSecretsEncryptionStatus`
-2. If needed, run migration sweep:
-   - `integrations:adminMigrateLegacyIntegrationSecretsAll`
+2. If `legacyPlaintextRows` is non-zero, stop rollout and complete a controlled data cleanup before continuing.
 
 ## 6) Operational Commands
 

@@ -13,7 +13,6 @@ import { requireAdmin, requireUser, requireOwnership } from "./authz";
 import { clampLimit, validateDayKey } from "./validators";
 import { api, internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
-import { paginationOptsValidator } from "convex/server";
 import {
   asIntegrationProvider,
   asOAuthRefreshProvider,
@@ -233,8 +232,6 @@ type IntegrationSecretRecord = {
   tokenRef: string;
   encryptedAccessToken?: EncryptedSecretEnvelope;
   encryptedRefreshToken?: EncryptedSecretEnvelope;
-  accessToken?: string;
-  refreshToken?: string;
   accessTokenExpiresAt?: number;
   lastRefreshAt?: number;
   createdAt?: number;
@@ -282,90 +279,34 @@ type LegacyIntegrationTokenRefMigrationCounts = {
   missingTokenRefRows: number;
 };
 
-type LegacySecretMigrationCounts = {
-  migratedCount: number;
-  skippedCount: number;
-  failedCount: number;
-};
+function hasLegacyPlaintextSecretFields(
+  secret: IntegrationSecretRecord,
+): boolean {
+  const legacySecret = secret as {
+    accessToken?: unknown;
+    refreshToken?: unknown;
+  };
 
-function hasLegacyPlaintextSecret(secret: IntegrationSecretRecord): boolean {
   return (
-    typeof secret.accessToken === "string" ||
-    typeof secret.refreshToken === "string"
+    typeof legacySecret.accessToken === "string" ||
+    typeof legacySecret.refreshToken === "string"
   );
 }
 
-async function migrateLegacySecretRecord(
-  db: MutationCtx["db"],
+function assertEncryptedOnlySecretRecord(
   secret: IntegrationSecretRecord,
-): Promise<"migrated" | "skipped"> {
-  const hasLegacyAccessToken = typeof secret.accessToken === "string";
-  const hasLegacyRefreshToken = typeof secret.refreshToken === "string";
-  const hasLegacyPlaintext = hasLegacyAccessToken || hasLegacyRefreshToken;
-
-  if (!hasLegacyPlaintext) {
-    return "skipped";
+  context: {
+    provider: string;
+    userId: Id<"user">;
+  },
+): void {
+  if (!hasLegacyPlaintextSecretFields(secret)) {
+    return;
   }
 
-  const provider = assertIntegrationProvider(secret.provider);
-  const cryptoContext = {
-    userId: String(secret.userId),
-    provider,
-    tokenRef: secret.tokenRef,
-  };
-
-  let accessTokenForMigration: string | undefined;
-
-  if (hasLegacyAccessToken) {
-    accessTokenForMigration = secret.accessToken;
-  } else if (secret.encryptedAccessToken) {
-    accessTokenForMigration = await decryptIntegrationSecret(
-      secret.encryptedAccessToken,
-      cryptoContext,
-    );
-  }
-
-  if (!accessTokenForMigration) {
-    return "skipped";
-  }
-
-  await upsertIntegrationSecret(db as never, {
-    userId: secret.userId,
-    provider,
-    accessToken: accessTokenForMigration,
-    refreshToken: hasLegacyRefreshToken ? secret.refreshToken : undefined,
-    accessTokenExpiresAt: secret.accessTokenExpiresAt,
-    lastRefreshAt: secret.lastRefreshAt,
-    existingTokenRef: secret.tokenRef,
-  });
-
-  return "migrated";
-}
-
-async function migrateLegacySecretPage(
-  db: MutationCtx["db"],
-  pageRecords: IntegrationSecretRecord[],
-): Promise<LegacySecretMigrationCounts> {
-  const counts: LegacySecretMigrationCounts = {
-    migratedCount: 0,
-    skippedCount: 0,
-    failedCount: 0,
-  };
-
-  for (const secret of pageRecords) {
-    try {
-      const status = await migrateLegacySecretRecord(db, secret);
-      if (status === "migrated") {
-        counts.migratedCount += 1;
-      } else {
-        counts.skippedCount += 1;
-      }
-    } catch {
-      counts.failedCount += 1;
-    }
-  }
-
-  return counts;
+  throw new Error(
+    `Legacy plaintext integration secret fields detected for provider "${context.provider}". Encrypted-only secret storage is required before processing this record.`,
+  );
 }
 
 function normalizeAuditPageSize(value: number | undefined): number {
@@ -1055,8 +996,8 @@ async function upsertIntegrationSecret(
           tokenRef: string;
           encryptedAccessToken?: EncryptedSecretEnvelope;
           encryptedRefreshToken?: EncryptedSecretEnvelope;
-          accessToken?: string;
-          refreshToken?: string;
+          accessToken?: unknown;
+          refreshToken?: unknown;
           accessTokenExpiresAt?: number;
           lastRefreshAt?: number;
         } | null>;
@@ -1094,6 +1035,13 @@ async function upsertIntegrationSecret(
     .withIndex("by_tokenRef", (q) => q.eq("tokenRef", tokenRef))
     .unique();
 
+  if (existing) {
+    assertEncryptedOnlySecretRecord(existing, {
+      provider,
+      userId: args.userId,
+    });
+  }
+
   const cryptoContext = {
     userId: String(args.userId),
     provider,
@@ -1106,16 +1054,9 @@ async function upsertIntegrationSecret(
     now,
   );
 
-  const refreshTokenSource =
-    args.refreshToken !== undefined
-      ? args.refreshToken
-      : existing?.refreshToken !== undefined
-        ? existing.refreshToken
-        : undefined;
-
   const encryptedRefreshToken =
-    refreshTokenSource !== undefined
-      ? await encryptIntegrationSecret(refreshTokenSource, cryptoContext, now)
+    args.refreshToken !== undefined
+      ? await encryptIntegrationSecret(args.refreshToken, cryptoContext, now)
       : undefined;
 
   if (existing) {
@@ -1125,15 +1066,10 @@ async function upsertIntegrationSecret(
       encryptedAccessToken,
       accessTokenExpiresAt: args.accessTokenExpiresAt,
       lastRefreshAt: args.lastRefreshAt,
-      accessToken: undefined,
-      refreshToken: undefined,
       updatedAt: now,
     };
 
-    if (
-      args.refreshToken !== undefined ||
-      existing.refreshToken !== undefined
-    ) {
+    if (args.refreshToken !== undefined) {
       patchPayload.encryptedRefreshToken = encryptedRefreshToken;
     }
 
@@ -1498,10 +1434,11 @@ export const getIntegrationAccessTokenByRefInternal = internalQuery({
       _id: Id<"integrationSecrets">;
       userId: Id<"user">;
       provider: string;
+      tokenRef: string;
       encryptedAccessToken?: EncryptedSecretEnvelope;
       encryptedRefreshToken?: EncryptedSecretEnvelope;
-      accessToken?: string;
-      refreshToken?: string;
+      accessToken?: unknown;
+      refreshToken?: unknown;
       accessTokenExpiresAt?: number;
     } | null;
 
@@ -1519,33 +1456,29 @@ export const getIntegrationAccessTokenByRefInternal = internalQuery({
       tokenRef: args.tokenRef,
     };
 
-    let accessToken: string;
+    assertEncryptedOnlySecretRecord(secret, {
+      provider,
+      userId: args.userId,
+    });
+
+    if (!secret.encryptedAccessToken) {
+      throw new Error(
+        "Integration secret payload is invalid or missing encrypted access token material.",
+      );
+    }
+
+    const accessToken = await decryptIntegrationSecret(
+      secret.encryptedAccessToken,
+      cryptoContext,
+    );
+
     let refreshToken: string | undefined;
-    let isLegacyPlaintext = false;
     let needsKeyRotation = false;
 
-    if (secret.encryptedAccessToken) {
-      accessToken = await decryptIntegrationSecret(
-        secret.encryptedAccessToken,
-        cryptoContext,
-      );
-
-      if (
-        !constantTimeStringEquals(
-          secret.encryptedAccessToken.keyId,
-          activeKeyId,
-        )
-      ) {
-        needsKeyRotation = true;
-      }
-    } else if (secret.accessToken) {
-      accessToken = secret.accessToken;
-      isLegacyPlaintext = true;
+    if (
+      !constantTimeStringEquals(secret.encryptedAccessToken.keyId, activeKeyId)
+    ) {
       needsKeyRotation = true;
-    } else {
-      throw new Error(
-        "Integration secret payload is invalid or missing token material.",
-      );
     }
 
     if (secret.encryptedRefreshToken) {
@@ -1562,17 +1495,12 @@ export const getIntegrationAccessTokenByRefInternal = internalQuery({
       ) {
         needsKeyRotation = true;
       }
-    } else if (secret.refreshToken !== undefined) {
-      refreshToken = secret.refreshToken;
-      isLegacyPlaintext = true;
-      needsKeyRotation = true;
     }
 
     return {
       accessToken,
       refreshToken,
       accessTokenExpiresAt: secret.accessTokenExpiresAt,
-      isLegacyPlaintext,
       needsKeyRotation,
     };
   },
@@ -2479,7 +2407,6 @@ export async function syncMyIntegrationForDayImpl(
         accessToken: string;
         refreshToken?: string;
         accessTokenExpiresAt?: number;
-        isLegacyPlaintext?: boolean;
         needsKeyRotation?: boolean;
       } | null;
 
@@ -2495,7 +2422,7 @@ export async function syncMyIntegrationForDayImpl(
       latestTokenValidityStatus =
         deriveTokenValidityStatus(accessTokenExpiresAt);
 
-      if (secret.isLegacyPlaintext || secret.needsKeyRotation) {
+      if (secret.needsKeyRotation) {
         currentTokenRef = await ctx.runMutation(
           internal.integrations.storeIntegrationSecretInternal,
           {
@@ -2915,29 +2842,6 @@ export const adminMigrateLegacyIntegrationTokenRefsAll = mutation({
     }),
 });
 
-export const adminMigrateLegacyIntegrationSecretsPage = mutation({
-  args: {
-    paginationOpts: paginationOptsValidator,
-  },
-  handler: async (ctx, args) => {
-    await requireAdmin(ctx);
-
-    const page = await ctx.db
-      .query("integrationSecrets")
-      .paginate(args.paginationOpts);
-    const pageCounts = await migrateLegacySecretPage(
-      ctx.db,
-      page.page as IntegrationSecretRecord[],
-    );
-
-    return {
-      ...pageCounts,
-      continueCursor: page.continueCursor,
-      isDone: page.isDone,
-    };
-  },
-});
-
 export const adminAuditIntegrationSecretsEncryptionStatus = query({
   args: {
     pageSize: v.optional(v.number()),
@@ -2968,7 +2872,7 @@ export const adminAuditIntegrationSecretsEncryptionStatus = query({
       for (const secret of page.page as IntegrationSecretRecord[]) {
         totalRows += 1;
 
-        if (hasLegacyPlaintextSecret(secret)) {
+        if (hasLegacyPlaintextSecretFields(secret)) {
           legacyPlaintextRows += 1;
         }
 
@@ -3001,69 +2905,6 @@ export const adminAuditIntegrationSecretsEncryptionStatus = query({
       encryptedRows,
       legacyPlaintextRows,
       missingEncryptedAccessRows,
-      pagesScanned,
-      pageSize,
-      isDone: false,
-      continueCursor: cursor,
-    };
-  },
-});
-
-export const adminMigrateLegacyIntegrationSecretsAll = mutation({
-  args: {
-    pageSize: v.optional(v.number()),
-    maxPages: v.optional(v.number()),
-  },
-  handler: async (ctx, args) => {
-    await requireAdmin(ctx);
-
-    const pageSize = normalizeAuditPageSize(args.pageSize);
-    const maxPages = normalizeAuditMaxPages(args.maxPages);
-
-    let cursor: string | null = null;
-    let pagesScanned = 0;
-
-    let migratedCount = 0;
-    let skippedCount = 0;
-    let failedCount = 0;
-
-    while (pagesScanned < maxPages) {
-      const page = await ctx.db.query("integrationSecrets").paginate({
-        numItems: pageSize,
-        cursor,
-      });
-
-      pagesScanned += 1;
-
-      const pageCounts = await migrateLegacySecretPage(
-        ctx.db,
-        page.page as IntegrationSecretRecord[],
-      );
-
-      migratedCount += pageCounts.migratedCount;
-      skippedCount += pageCounts.skippedCount;
-      failedCount += pageCounts.failedCount;
-
-      if (page.isDone) {
-        return {
-          migratedCount,
-          skippedCount,
-          failedCount,
-          pagesScanned,
-          pageSize,
-          isDone: true,
-          continueCursor: null,
-        };
-      }
-
-      cursor = page.continueCursor;
-      if (!cursor) break;
-    }
-
-    return {
-      migratedCount,
-      skippedCount,
-      failedCount,
       pagesScanned,
       pageSize,
       isDone: false,
