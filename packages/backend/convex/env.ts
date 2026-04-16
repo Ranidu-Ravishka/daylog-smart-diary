@@ -124,6 +124,21 @@ function parseBootstrapAdminIds(
     });
 }
 
+function isProductionEnvironment(): boolean {
+  const candidates = [
+    process.env.DAYLOG_APP_ENV,
+    process.env.APP_ENV,
+    process.env.DEPLOY_ENV,
+    process.env.VERCEL_ENV,
+    process.env.NODE_ENV,
+  ];
+
+  return candidates.some((value) => {
+    const normalized = value?.trim().toLowerCase();
+    return normalized === "production" || normalized === "prod";
+  });
+}
+
 function failIfInvalid(scope: string, errors: EnvError[]): void {
   if (errors.length === 0) return;
 
@@ -138,6 +153,7 @@ function failIfInvalid(scope: string, errors: EnvError[]): void {
 export type ConvexServerEnv = {
   clerkJwtIssuerDomain: string;
   clerkWebhookSecret: string;
+  exportSigningSecret?: string;
   openAiApiKey: string;
   adminBootstrapClerkUserIds: string[];
 };
@@ -154,6 +170,14 @@ function validateConvexServerEnv(): ConvexServerEnv {
   const clerkWebhookSecret = readRequiredEnv("CLERK_WEBHOOK_SECRET", errors, {
     validate: validateClerkWebhookSecret,
   });
+
+  const exportSigningSecret = readOptionalEnv("EXPORT_SIGNING_SECRET", errors);
+  if (isProductionEnvironment() && !exportSigningSecret) {
+    errors.push({
+      name: "EXPORT_SIGNING_SECRET",
+      reason: "required in production",
+    });
+  }
 
   const openAiApiKey = readRequiredEnv("OPENAI_API_KEY", errors, {
     validate: validateOpenAiApiKey,
@@ -173,6 +197,7 @@ function validateConvexServerEnv(): ConvexServerEnv {
   return {
     clerkJwtIssuerDomain,
     clerkWebhookSecret,
+    exportSigningSecret,
     openAiApiKey,
     adminBootstrapClerkUserIds,
   };

@@ -9,11 +9,13 @@ const originalExportJobsRetentionDays = process.env.RETENTION_EXPORT_JOBS_DAYS;
 const originalRestoreJobsRetentionDays =
   process.env.RETENTION_RESTORE_JOBS_DAYS;
 const originalClerkWebhookSecret = process.env.CLERK_WEBHOOK_SECRET;
-const originalRestoreSigningSecret = process.env.EXPORT_RESTORE_SIGNING_SECRET;
+const originalExportSigningSecret = process.env.EXPORT_SIGNING_SECRET;
 
 beforeEach(() => {
   process.env.CLERK_WEBHOOK_SECRET =
     process.env.CLERK_WEBHOOK_SECRET ?? "whsec_test_restore_signing_secret";
+  process.env.EXPORT_SIGNING_SECRET =
+    process.env.EXPORT_SIGNING_SECRET ?? "test_export_signing_secret";
 });
 
 afterEach(() => {
@@ -41,10 +43,10 @@ afterEach(() => {
     process.env.CLERK_WEBHOOK_SECRET = originalClerkWebhookSecret;
   }
 
-  if (originalRestoreSigningSecret === undefined) {
-    delete process.env.EXPORT_RESTORE_SIGNING_SECRET;
+  if (originalExportSigningSecret === undefined) {
+    delete process.env.EXPORT_SIGNING_SECRET;
   } else {
-    process.env.EXPORT_RESTORE_SIGNING_SECRET = originalRestoreSigningSecret;
+    process.env.EXPORT_SIGNING_SECRET = originalExportSigningSecret;
   }
 
   vi.restoreAllMocks();
@@ -736,6 +738,49 @@ describe("summaries behavior", () => {
         },
       ),
     ).rejects.toThrow("Unable to prepare export download URL. Please retry.");
+  });
+
+  it("requires EXPORT_SIGNING_SECRET and does not fall back to webhook secret", async () => {
+    delete process.env.EXPORT_SIGNING_SECRET;
+    process.env.CLERK_WEBHOOK_SECRET = "whsec_webhook_only_secret";
+
+    const runQuery = vi.fn(
+      async (_ref: unknown, args: Record<string, unknown>) => {
+        if (Object.keys(args).length === 0) {
+          return {
+            userId: USER_ID,
+            clerkUserId: "clerk_member_001",
+          };
+        }
+
+        return {
+          exportedAt: 1,
+          dataset: args.dataset,
+          page: [],
+          continueCursor: null,
+          isDone: true,
+        };
+      },
+    );
+
+    await expect(
+      summariesModule.prepareDiaryExportArtifactImpl(
+        {
+          runQuery,
+          storage: {
+            store: vi.fn(async (_blob: Blob) => "storage_export_001"),
+            getUrl: vi.fn(
+              async (storageId: string) =>
+                `https://cdn.example.com/${storageId}`,
+            ),
+          },
+        } as any,
+        {
+          format: "json",
+          includeLocationSignals: false,
+        },
+      ),
+    ).rejects.toThrow("Configure EXPORT_SIGNING_SECRET");
   });
 
   it("validates restore ownership and rejects tampered backups", async () => {

@@ -144,6 +144,7 @@ Convex deployment environment variables (set in Convex dashboard):
 ```dotenv
 CLERK_JWT_ISSUER_DOMAIN=
 CLERK_WEBHOOK_SECRET=
+EXPORT_SIGNING_SECRET=
 OPENAI_API_KEY=
 SUMMARY_DAILY_GENERATION_LIMIT=5
 
@@ -194,6 +195,7 @@ Where to get each variable:
 - Convex
   - `NEXT_PUBLIC_CONVEX_URL`, `EXPO_PUBLIC_CONVEX_URL`: your Convex deployment URL.
   - Get this when you run `convex dev` or from Convex deployment settings.
+  - `EXPORT_SIGNING_SECRET`: dedicated backend secret used to sign export/restore integrity payloads.
 - OpenAI
   - `OPENAI_API_KEY`: OpenAI dashboard -> API keys.
 - Sentry
