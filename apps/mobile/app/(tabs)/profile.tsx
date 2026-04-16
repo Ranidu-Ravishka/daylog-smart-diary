@@ -81,6 +81,7 @@ import {
   type AboutLink,
   type DeletionState,
   type IntegrationDoc,
+  type IntegrationHealthSnapshot,
   type IntegrationSyncRunDoc,
   type IoniconName,
   type OutboxLastSyncResult,
@@ -259,6 +260,10 @@ const SettingsScreen = () => {
     api.integrations.listMyIntegrations,
     isAuthenticated ? {} : "skip",
   ) as IntegrationDoc[] | undefined;
+  const integrationHealthSnapshots = useQuery(
+    api.integrationHealth.listMyIntegrationHealth,
+    isAuthenticated ? {} : "skip",
+  ) as IntegrationHealthSnapshot[] | undefined;
   const syncRuns = useQuery(
     api.integrations.listMyIntegrationSyncRunsForDay,
     isAuthenticated ? { dayKey: todayDayKey } : "skip",
@@ -2006,6 +2011,12 @@ const SettingsScreen = () => {
       integration,
     ]),
   );
+  const integrationHealthByProvider = new Map(
+    (integrationHealthSnapshots ?? []).map((snapshot) => [
+      snapshot.provider,
+      snapshot,
+    ]),
+  );
   const syncRunByProvider = new Map(
     (syncRuns ?? []).map((syncRun) => [syncRun.provider, syncRun]),
   );
@@ -2256,6 +2267,7 @@ const SettingsScreen = () => {
             integrationFeedback={integrationFeedback}
             providerList={providerList}
             integrationByProvider={integrationByProvider}
+            integrationHealthByProvider={integrationHealthByProvider}
             syncRunByProvider={syncRunByProvider}
             providerPendingAction={providerPendingAction}
             integrationIcons={integrationIcons}
