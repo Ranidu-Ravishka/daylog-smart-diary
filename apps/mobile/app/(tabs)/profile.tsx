@@ -2,10 +2,8 @@ import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
-  StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Switch,
   Alert,
   Modal,
   Platform,
@@ -42,7 +40,6 @@ import {
 } from "@repo/user-settings/lib/user-settings";
 import {
   INTEGRATION_PROVIDER_META,
-  MEMORY_MOOD_OPTIONS,
   SETTINGS_DEFAULTS,
 } from "@repo/ui/lib/constants";
 import {
@@ -75,36 +72,27 @@ import {
 import { collectAndroidScreenTimeDailyDataForDay } from "../../lib/android-screen-time-sync";
 import { collectIosScreenTimeDailyDataForDay } from "../../lib/ios-screen-time-sync";
 import { getOfflineOutboxSnapshot } from "@/lib/offline-outbox";
-import { withOpacity } from "@/lib/color-utils";
 import { captureException, logInfo, logWarn } from "@/lib/observability";
-import {
-  Spacing,
-  Typography,
-  Radius,
-  Shadows,
-  type ThemeColors,
-} from "@/constants/theme";
+import { Spacing } from "@/constants/theme";
 import { useAppTheme } from "@/components/theme-provider";
-import { AppCard } from "@/components/ui/app-card";
-import { SectionHeader } from "@/components/ui/section-header";
 import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
-
-type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
-type IntegrationDoc = {
-  _id: GenericId<"integrations">;
-  provider: string;
-  status: "connected" | "disconnected" | "error";
-  lastSyncAt?: number;
-  lastError?: string;
-};
-
-type IntegrationSyncRunDoc = {
-  provider: string;
-  dayKey: string;
-  status: "in_progress" | "success" | "error";
-  updatedAt: number;
-  lastError?: string;
-};
+import { createProfileStyles } from "@/components/profile/profile-styles";
+import {
+  type AboutLink,
+  type DeletionState,
+  type IntegrationDoc,
+  type IntegrationSyncRunDoc,
+  type IoniconName,
+  type OutboxLastSyncResult,
+  type PreferencesSnapshot,
+  type ProfileSectionKey,
+  type ProfileSectionMeta,
+} from "@/components/profile/types";
+import { ProfileOverviewSection } from "@/components/profile/profile-overview-section";
+import { PrivacySecuritySection } from "@/components/profile/privacy-security-section";
+import { NotificationsSection } from "@/components/profile/notifications-section";
+import { IntegrationsSection } from "@/components/profile/integrations-section";
+import { AccountSection } from "@/components/profile/account-section";
 
 type OfflineOutboxSnapshot = Awaited<
   ReturnType<typeof getOfflineOutboxSnapshot>
@@ -133,6 +121,39 @@ type LifeContextPreferencePatch = Pick<
   | "calendarNotificationsTrackingEnabled"
   | "backgroundLocationTrackingEnabled"
 >;
+
+const PROFILE_SECTIONS: ProfileSectionMeta[] = [
+  {
+    key: "overview",
+    title: "Profile Overview",
+    subtitle: "Identity, defaults, and quick status",
+    icon: "person-circle-outline",
+  },
+  {
+    key: "privacy",
+    title: "Privacy & Security",
+    subtitle: "Data permissions and safety controls",
+    icon: "shield-checkmark-outline",
+  },
+  {
+    key: "notifications",
+    title: "Notifications",
+    subtitle: "Reminder cadence and quiet hours",
+    icon: "notifications-outline",
+  },
+  {
+    key: "integrations",
+    title: "Integrations",
+    subtitle: "Connected apps and sync actions",
+    icon: "link-outline",
+  },
+  {
+    key: "account",
+    title: "Account",
+    subtitle: "Session, export, and deletion",
+    icon: "person-outline",
+  },
+];
 
 function getTodayDayKey(): string {
   const timeZone = getResolvedTimeZone();
@@ -197,7 +218,7 @@ function snapToQuarterHour(value: Date): Date {
 /* ── Skeleton ──────────────────────────────────────────── */
 function ProfileSkeleton() {
   const { colors: c } = useAppTheme();
-  const styles = React.useMemo(() => createStyles(c), [c]);
+  const styles = React.useMemo(() => createProfileStyles(c), [c]);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -218,7 +239,7 @@ function ProfileSkeleton() {
 /* ── Screen ────────────────────────────────────────────── */
 const SettingsScreen = () => {
   const { colors: c, effectiveTheme, setThemePreference } = useAppTheme();
-  const styles = React.useMemo(() => createStyles(c), [c]);
+  const styles = React.useMemo(() => createProfileStyles(c), [c]);
   const router = useRouter();
   const searchParams = useLocalSearchParams<{
     integrationProvider?: string;
@@ -352,6 +373,9 @@ const SettingsScreen = () => {
     hasTriggeredAccountDeletionFinalize,
     setHasTriggeredAccountDeletionFinalize,
   ] = useState(false);
+  const [activeSection, setActiveSection] =
+    useState<ProfileSectionKey>("overview");
+  const [showAdvancedStatus, setShowAdvancedStatus] = useState(false);
   const deletionState = deriveDeletionState(accountDeletionStatus);
   const deletionStateLabel = deletionState
     ? getDeletionStateLabel(deletionState)
@@ -2009,42 +2033,8 @@ const SettingsScreen = () => {
         ? c.warning
         : c.success;
 
-  /* ── Toggle row helper ───────────────── */
-  const ToggleRow = ({
-    label,
-    subtitle,
-    value,
-    onToggle,
-    disabled,
-    testID,
-  }: {
-    label: string;
-    subtitle?: string;
-    value: boolean;
-    onToggle: () => void;
-    disabled?: boolean;
-    testID?: string;
-  }) => (
-    <View style={styles.toggleRow}>
-      <View style={{ flex: 1 }}>
-        <Text style={[styles.toggleLabel, disabled && { opacity: 0.45 }]}>
-          {label}
-        </Text>
-        {subtitle && <Text style={styles.toggleSub}>{subtitle}</Text>}
-      </View>
-      <Switch
-        value={value}
-        onValueChange={onToggle}
-        disabled={disabled}
-        testID={testID}
-        trackColor={{ false: c.border, true: c.tint }}
-        thumbColor={c.surface}
-      />
-    </View>
-  );
-
   /* ── About links ─────────────────────── */
-  const aboutLinks: { title: string; icon: IoniconName; path: string }[] = [
+  const aboutLinks: AboutLink[] = [
     {
       title: "Privacy Policy",
       icon: "shield-checkmark-outline",
@@ -2056,6 +2046,30 @@ const SettingsScreen = () => {
       path: "/terms",
     },
   ];
+  const activeSectionMeta =
+    PROFILE_SECTIONS.find((section) => section.key === activeSection) ??
+    PROFILE_SECTIONS[0];
+  const quietHoursRangeLabel = `${format24hTo12h(quietHoursStart)} — ${format24hTo12h(quietHoursEnd)}`;
+  const preferencesSnapshot: PreferencesSnapshot | undefined = preferences
+    ? {
+        reminderType: preferences.reminderType,
+        formattedTime: preferences.formattedTime,
+        focusAreas: preferences.focusAreas,
+        theme: preferences.theme,
+        defaultMemoryMood: preferences.defaultMemoryMood,
+        locationPermissionStatus: preferences.locationPermissionStatus,
+        locationLastUpdatedAt: preferences.locationLastUpdatedAt,
+        locationLastArea: preferences.locationLastArea,
+      }
+    : undefined;
+  const lastOutboxSyncResult: OutboxLastSyncResult =
+    offlineOutboxSnapshot.lastSyncResult
+      ? {
+          status: offlineOutboxSnapshot.lastSyncResult.status,
+          updatedAt: offlineOutboxSnapshot.lastSyncResult.updatedAt,
+          message: offlineOutboxSnapshot.lastSyncResult.message,
+        }
+      : null;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -2065,848 +2079,219 @@ const SettingsScreen = () => {
       >
         {/* ── Header ──────────────────────────────── */}
         <View style={styles.headerRow}>
-          <Text style={styles.pageTitle}>Settings</Text>
+          <Text style={styles.pageTitle}>Profile</Text>
+          <Text style={styles.pageSubtitle}>{activeSectionMeta.subtitle}</Text>
         </View>
 
-        {/* ── Profile Card ────────────────────────── */}
-        <View style={styles.pad}>
-          <AppCard>
-            <View style={styles.profileRow}>
-              <View style={styles.avatar}>
-                <Ionicons name="person" size={24} color={c.tint} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.profileName}>{userName}</Text>
-                <Text style={styles.profileEmail}>{userEmail}</Text>
-              </View>
-            </View>
-          </AppCard>
-        </View>
-
-        {/* ── Quick Actions ───────────────────────── */}
-        <View style={[styles.pad, styles.quickRow]}>
-          <TouchableOpacity style={styles.quickBtn} onPress={handleExportData}>
-            <Ionicons name="download-outline" size={18} color={c.text} />
-            <Text style={styles.quickText}>Export Data</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.quickBtn} onPress={handleSignOut}>
-            <Ionicons name="log-out-outline" size={18} color={c.error} />
-            <Text style={[styles.quickText, { color: c.error }]}>Sign Out</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* ── App Preferences ─────────────────────── */}
-        <View style={styles.pad}>
-          <SectionHeader title="App Preferences" />
-          <AppCard>
-            <ToggleRow
-              label="Dark Mode"
-              value={darkMode}
-              onToggle={() => {
-                void handleDarkModeToggle();
-              }}
-              disabled={preferences === null}
-            />
-          </AppCard>
-        </View>
-
-        <View style={styles.pad}>
-          <SectionHeader title="Memory Defaults" />
-          <AppCard>
-            <Text style={styles.toggleSub}>Default mood for new memories</Text>
-            <View style={styles.moodChipsRow}>
-              {MEMORY_MOOD_OPTIONS.map((mood) => {
-                const selected = defaultMemoryMood === mood;
-                return (
-                  <TouchableOpacity
-                    key={mood}
-                    style={[
-                      styles.moodChip,
-                      selected && styles.moodChipSelected,
-                    ]}
-                    onPress={() => {
-                      void handleDefaultMemoryMoodChange(mood);
-                    }}
-                    disabled={preferences === null}
-                  >
-                    <Text
-                      style={[
-                        styles.moodChipLabel,
-                        selected && styles.moodChipLabelSelected,
-                      ]}
-                    >
-                      {mood}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </AppCard>
-        </View>
-
-        {/* ── Integrations ────────────────────────── */}
-        <View style={styles.pad}>
-          <SectionHeader title="Integrations" />
-          <AppCard>
-            <Text style={styles.integrationSubMuted}>
-              Connected providers can contribute daily context to AI summaries
-              after you sync them.
-            </Text>
-
-            {integrationFeedback ? (
-              <View
-                style={[
-                  styles.integrationFeedback,
-                  integrationFeedback.type === "success"
-                    ? styles.integrationFeedbackSuccess
-                    : styles.integrationFeedbackError,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.integrationFeedbackText,
-                    integrationFeedback.type === "success"
-                      ? { color: c.success }
-                      : { color: c.error },
-                  ]}
-                >
-                  {integrationFeedback.message}
-                </Text>
-              </View>
-            ) : null}
-
-            {providerList.map((provider, index) => {
-              const integration = integrationByProvider.get(provider);
-              const syncRun = syncRunByProvider.get(provider);
-              const status = integration?.status ?? "disconnected";
-              const pending = providerPendingAction[provider];
-              const appleHealthSetupIssue =
-                provider === "apple_health" ? getAppleHealthSetupIssue() : null;
-              const isAppleHealthSetupBlocked =
-                provider === "apple_health" && Boolean(appleHealthSetupIssue);
-              const isSyncing =
-                pending === "sync" || syncRun?.status === "in_progress";
-              const statusLabel = isAppleHealthSetupBlocked
-                ? Platform.OS === "ios"
-                  ? "setup required"
-                  : "iOS only"
-                : status;
-
-              const label =
-                INTEGRATION_PROVIDER_META[
-                  provider as keyof typeof INTEGRATION_PROVIDER_META
-                ]?.label ??
-                integrationNames[provider] ??
-                provider;
-              const description =
-                INTEGRATION_PROVIDER_META[
-                  provider as keyof typeof INTEGRATION_PROVIDER_META
-                ]?.description ?? "";
-
+        <View style={styles.sectionNavWrap}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.sectionNavContent}
+          >
+            {PROFILE_SECTIONS.map((section) => {
+              const selected = section.key === activeSection;
               return (
-                <View key={provider}>
-                  {index > 0 && <View style={styles.divider} />}
-                  <View style={styles.integrationRow}>
-                    <Ionicons
-                      name={integrationIcons[provider] ?? "link"}
-                      size={20}
-                      color={c.icon}
-                    />
-                    <View style={{ flex: 1, marginLeft: Spacing.md }}>
-                      <View style={styles.integrationHeadingRow}>
-                        <Text style={styles.integrationTitle}>{label}</Text>
-                        <View style={styles.integrationHeadingBadges}>
-                          <View
-                            style={[
-                              styles.integrationStatusBadge,
-                              isAppleHealthSetupBlocked
-                                ? styles.integrationStatusSetupRequired
-                                : status === "connected"
-                                  ? styles.integrationStatusConnected
-                                  : status === "error"
-                                    ? styles.integrationStatusError
-                                    : styles.integrationStatusDisconnected,
-                            ]}
-                          >
-                            <Text style={styles.integrationStatusText}>
-                              {statusLabel}
-                            </Text>
-                          </View>
-                        </View>
-                      </View>
-
-                      {!!description && (
-                        <Text style={styles.integrationSub}>{description}</Text>
-                      )}
-
-                      {provider === "apple_health" && (
-                        <View style={styles.appleHealthHintCard}>
-                          <Text style={styles.appleHealthHintText}>
-                            {Platform.OS === "ios"
-                              ? "Requires iOS native build + HealthKit setup for real device data."
-                              : "Apple Health sync is only available on iOS devices."}
-                          </Text>
-                          <TouchableOpacity
-                            onPress={handleShowAppleHealthSetup}
-                            activeOpacity={0.75}
-                          >
-                            <Text style={styles.appleHealthHintAction}>
-                              How to enable
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-                      )}
-
-                      <Text style={styles.integrationSubMuted}>
-                        Last sync:{" "}
-                        {integration?.lastSyncAt
-                          ? new Date(integration.lastSyncAt).toLocaleString()
-                          : "Never"}
-                      </Text>
-
-                      {syncRun?.status ? (
-                        <Text style={styles.integrationSubMuted}>
-                          Today: {syncRun.status}
-                          {syncRun.lastError ? ` — ${syncRun.lastError}` : ""}
-                        </Text>
-                      ) : null}
-
-                      {integration?.lastError ? (
-                        <Text style={styles.integrationErrorText}>
-                          Error: {integration.lastError}
-                        </Text>
-                      ) : null}
-
-                      <View style={styles.integrationActionsRow}>
-                        {status !== "connected" ? (
-                          <TouchableOpacity
-                            style={styles.integrationPrimaryBtn}
-                            onPress={() => {
-                              if (isAppleHealthSetupBlocked) {
-                                handleShowAppleHealthSetup();
-                                return;
-                              }
-
-                              void handleConnectIntegration(provider);
-                            }}
-                            disabled={pending !== undefined}
-                            activeOpacity={0.75}
-                          >
-                            <Text style={styles.integrationPrimaryBtnText}>
-                              {isAppleHealthSetupBlocked
-                                ? "Setup required"
-                                : pending === "connect"
-                                  ? "Connecting..."
-                                  : "Connect"}
-                            </Text>
-                          </TouchableOpacity>
-                        ) : (
-                          <>
-                            <TouchableOpacity
-                              style={styles.integrationSecondaryBtn}
-                              onPress={() => {
-                                if (!integration) return;
-                                void handleDisconnectIntegration(
-                                  provider,
-                                  integration._id,
-                                );
-                              }}
-                              disabled={pending !== undefined}
-                              activeOpacity={0.75}
-                            >
-                              <Text style={styles.integrationSecondaryBtnText}>
-                                {pending === "disconnect"
-                                  ? "Disconnecting..."
-                                  : "Disconnect"}
-                              </Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                              style={styles.integrationPrimaryBtn}
-                              onPress={() => {
-                                if (isAppleHealthSetupBlocked) {
-                                  handleShowAppleHealthSetup();
-                                  return;
-                                }
-
-                                void handleSyncIntegration(provider);
-                              }}
-                              disabled={
-                                pending !== undefined ||
-                                (!isAppleHealthSetupBlocked && isSyncing)
-                              }
-                              activeOpacity={0.75}
-                            >
-                              <Text style={styles.integrationPrimaryBtnText}>
-                                {isAppleHealthSetupBlocked
-                                  ? "Setup required"
-                                  : isSyncing
-                                    ? "Syncing..."
-                                    : "Sync now"}
-                              </Text>
-                            </TouchableOpacity>
-                          </>
-                        )}
-                      </View>
-                    </View>
-                  </View>
-                </View>
+                <TouchableOpacity
+                  key={section.key}
+                  style={[
+                    styles.sectionChip,
+                    selected ? styles.sectionChipActive : null,
+                  ]}
+                  onPress={() => setActiveSection(section.key)}
+                  activeOpacity={0.75}
+                >
+                  <Ionicons
+                    name={section.icon}
+                    size={14}
+                    color={selected ? c.tint : c.textSecondary}
+                  />
+                  <Text
+                    style={[
+                      styles.sectionChipText,
+                      selected ? styles.sectionChipTextActive : null,
+                    ]}
+                  >
+                    {section.title}
+                  </Text>
+                </TouchableOpacity>
               );
             })}
-          </AppCard>
+          </ScrollView>
         </View>
 
-        {/* ── Notifications ───────────────────────── */}
-        <View style={styles.pad}>
-          <SectionHeader title="Notifications" />
-          <AppCard>
-            <ToggleRow
-              label="All Notifications"
-              subtitle="Master switch"
-              value={allNotifications}
-              onToggle={() => {
-                void handleAllNotificationsToggle();
-              }}
-              disabled={preferences === null}
-            />
-            <View style={styles.divider} />
-            <ToggleRow
-              label="Weekly Insights"
-              value={weeklyInsights}
-              onToggle={() => {
-                void updateReminderType("weekly");
-              }}
-              disabled={
-                !allNotifications ||
-                isUpdatingReminderPreference ||
-                preferences === null
-              }
-            />
-            <View style={styles.divider} />
-            <ToggleRow
-              label="Daily Summary"
-              value={dailySummary}
-              onToggle={() => {
-                void updateReminderType("daily");
-              }}
-              disabled={
-                !allNotifications ||
-                isUpdatingReminderPreference ||
-                preferences === null
-              }
-            />
-            <View style={styles.divider} />
-            <ToggleRow
-              label="Quiet Hours"
-              subtitle={`${format24hTo12h(quietHoursStart)} — ${format24hTo12h(quietHoursEnd)}`}
-              value={quietHours}
-              onToggle={() => {
-                void handleQuietHoursToggle();
-              }}
-              disabled={!allNotifications || preferences === null}
-            />
-            <View style={styles.divider} />
-            <View style={styles.quietHoursConfigRow}>
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={[
-                    styles.toggleLabel,
-                    (!quietHours ||
-                      !allNotifications ||
-                      preferences === null) && {
-                      opacity: 0.45,
-                    },
-                  ]}
-                >
-                  Quiet hours start
-                </Text>
-                <Text style={styles.toggleSub}>
-                  Tap to choose time (15-min steps)
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={styles.quietHoursChip}
-                onPress={() => {
-                  openQuietHoursPicker("start");
-                }}
-                disabled={
-                  !quietHours || !allNotifications || preferences === null
-                }
-              >
-                <Text style={styles.quietHoursChipText}>
-                  {format24hTo12h(quietHoursStart)}
-                </Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.divider} />
-            <View style={styles.quietHoursConfigRow}>
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={[
-                    styles.toggleLabel,
-                    (!quietHours ||
-                      !allNotifications ||
-                      preferences === null) && {
-                      opacity: 0.45,
-                    },
-                  ]}
-                >
-                  Quiet hours end
-                </Text>
-                <Text style={styles.toggleSub}>
-                  Tap to choose time (15-min steps)
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={styles.quietHoursChip}
-                onPress={() => {
-                  openQuietHoursPicker("end");
-                }}
-                disabled={
-                  !quietHours || !allNotifications || preferences === null
-                }
-              >
-                <Text style={styles.quietHoursChipText}>
-                  {format24hTo12h(quietHoursEnd)}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </AppCard>
-        </View>
-
-        <View style={styles.pad}>
-          <SectionHeader title="Integration Preferences" />
-          <AppCard>
-            <ToggleRow
-              label="Auto-sync Integrations"
-              subtitle="Automatically sync connected providers"
-              value={autoSyncIntegrations}
-              onToggle={() => {
-                void handleAutoSyncIntegrationsToggle();
-              }}
-              disabled={preferences === null}
-            />
-            <View style={styles.divider} />
-            <ToggleRow
-              label="Foreground Location Tracking"
-              subtitle={
-                preferences?.locationPermissionStatus === "denied"
-                  ? "Permission denied. Enable location in system settings and turn this back on."
-                  : "Collect coarse location only while the app is open."
-              }
-              value={locationTrackingEnabled}
-              onToggle={() => {
-                void handleLocationTrackingToggle();
-              }}
-              disabled={preferences === null}
-              testID="location-tracking-switch"
-            />
-            <Text style={styles.integrationSubMuted}>
-              Permission: {preferences?.locationPermissionStatus ?? "unknown"}
-            </Text>
-            <Text style={styles.integrationSubMuted}>
-              Last update:{" "}
-              {preferences?.locationLastUpdatedAt
-                ? new Date(preferences.locationLastUpdatedAt).toLocaleString()
-                : "Never"}
-            </Text>
-            <Text style={styles.integrationSubMuted}>
-              Last area: {preferences?.locationLastArea ?? "Not available"}
-            </Text>
-            <View style={styles.divider} />
-            <ToggleRow
-              label="Background Location (Controlled)"
-              subtitle={
-                locationTrackingRuntimeConfig?.enableBackgroundLocationTracking
-                  ? locationTrackingEnabled
-                    ? backgroundLocationTrackingEnabled &&
-                      backgroundLocationRuntimeStatus?.fullyEnabled === false
-                      ? "Not fully enabled on this device. Verify OS background location setup."
-                      : "Collect coarse batches while app is closed with battery safeguards."
-                    : "Enable foreground location first before background mode."
-                  : "Background location is disabled by server runtime policy."
-              }
-              value={backgroundLocationTrackingEnabled}
-              onToggle={() => {
-                void handleBackgroundLocationTrackingToggle();
-              }}
-              disabled={
-                preferences === null ||
-                !locationTrackingEnabled ||
-                !locationTrackingRuntimeConfig?.enableBackgroundLocationTracking
-              }
-            />
-            <View style={styles.divider} />
-            <ToggleRow
-              label="Fitness Context"
-              subtitle={
-                Platform.OS === "ios"
-                  ? "Uses Apple Health signals on-device when available."
-                  : "Requires connected Google Fit integration on Android."
-              }
-              value={fitnessTrackingEnabled}
-              onToggle={() => {
-                void handleFitnessTrackingToggle();
-              }}
-              disabled={preferences === null}
-            />
-            <View style={styles.divider} />
-            <ToggleRow
-              label="Calendar & Reminder Context"
-              subtitle="Uses reminder/calendar density signals, not message content."
-              value={calendarContextEnabled}
-              onToggle={() => {
-                void handleCalendarContextToggle();
-              }}
-              disabled={preferences === null}
-            />
-            <View style={styles.divider} />
-            <ToggleRow
-              label="Communication Summary"
-              subtitle={
-                Platform.OS === "android"
-                  ? callActivityCollectionSupported
-                    ? "Android only: aggregate call count and total minutes."
-                    : callLogsTrackingEnabled
-                      ? "Native call activity module unavailable on this build. You can disable this toggle."
-                      : "Requires native call activity module in an Android development build."
-                  : "Unavailable on iOS due platform restrictions."
-              }
-              value={callLogsTrackingEnabled}
-              onToggle={() => {
-                void handleCallSummaryToggle();
-              }}
-              disabled={
-                preferences === null ||
-                Platform.OS !== "android" ||
-                (!callActivityCollectionSupported && !callLogsTrackingEnabled)
-              }
-            />
-            <Text style={styles.integrationSubMuted}>
-              Call activity diagnostics: module {callActivityModuleStatusLabel},
-              permission {callActivityPermissionStatusLabel}
-            </Text>
-            {callActivityDiagnostics?.detail ? (
-              <Text style={styles.integrationSubMuted}>
-                {callActivityDiagnostics.detail}
-              </Text>
-            ) : null}
-            <View style={styles.divider} />
-            <ToggleRow
-              label="Mood Assistance (Pattern-based)"
-              subtitle="Lightweight non-camera inference from time/activity patterns."
-              value={moodAssistanceEnabled}
-              onToggle={() => {
-                void handleMoodAssistanceToggle();
-              }}
-              disabled={preferences === null}
-            />
-          </AppCard>
-        </View>
-
-        {/* ── Sync Status ─────────────────────────── */}
-        {preferences && (
-          <View style={styles.pad}>
-            <SectionHeader title="Sync Status" />
-            <AppCard>
-              <Text style={styles.syncHeading}>Offline Outbox</Text>
-              <Text style={styles.syncText}>
-                Pending operations: {offlineOutboxSnapshot.pending}
-                {offlineOutboxSnapshot.dueNow > 0
-                  ? ` (${offlineOutboxSnapshot.dueNow} ready now)`
-                  : ""}
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Oldest queued item:{" "}
-                {offlineOutboxSnapshot.oldestCreatedAt
-                  ? new Date(
-                      offlineOutboxSnapshot.oldestCreatedAt,
-                    ).toLocaleString()
-                  : "None"}
-              </Text>
-              {offlineOutboxSnapshot.lastSyncResult ? (
-                <>
-                  <Text style={[styles.syncText, { marginTop: 4 }]}>
-                    Last outbox sync:{" "}
-                    {new Date(
-                      offlineOutboxSnapshot.lastSyncResult.updatedAt,
-                    ).toLocaleString()}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.syncText,
-                      { marginTop: 4, color: outboxLastSyncStatusColor },
-                    ]}
-                  >
-                    Result: {offlineOutboxSnapshot.lastSyncResult.message}
-                  </Text>
-                </>
-              ) : (
-                <Text style={[styles.syncText, { marginTop: 4 }]}>
-                  Last outbox sync: No sync attempts yet.
-                </Text>
-              )}
-              <View style={styles.divider} />
-              <Text style={styles.syncText}>
-                Reminder: {preferences.reminderType} at{" "}
-                {preferences.formattedTime}
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Focus areas: {preferences.focusAreas?.length ?? 0} selected
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Theme: {preferences.theme ?? "system"}
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Default memory mood:{" "}
-                {preferences.defaultMemoryMood ??
-                  SETTINGS_DEFAULTS.defaultMemoryMood}
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Foreground location:{" "}
-                {locationTrackingEnabled ? "enabled" : "disabled"}
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Location permission:{" "}
-                {preferences.locationPermissionStatus ?? "unknown"}
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Location last update:{" "}
-                {preferences.locationLastUpdatedAt
-                  ? new Date(preferences.locationLastUpdatedAt).toLocaleString()
-                  : "Never"}
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Background location: {backgroundLocationStatusLabel}
-              </Text>
-              {backgroundLocationStatusLabel === "Not fully enabled" &&
-              backgroundLocationRuntimeStatus?.reason ? (
-                <Text
-                  style={[styles.syncText, { marginTop: 4, color: c.error }]}
-                >
-                  Background location detail:{" "}
-                  {backgroundLocationRuntimeStatus.reason}
-                </Text>
-              ) : null}
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Fitness context:{" "}
-                {fitnessTrackingEnabled ? "enabled" : "disabled"}
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Calendar context:{" "}
-                {calendarContextEnabled ? "enabled" : "disabled"}
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Communication summary:{" "}
-                {callLogsTrackingEnabled ? "enabled" : "disabled"}
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Mood assistance:{" "}
-                {moodAssistanceEnabled ? "enabled" : "disabled"}
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Notification permission:{" "}
-                {reminderRuntime?.permissionStatus ?? "unknown"}
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Reminder delivery:{" "}
-                {reminderRuntime?.deliveryEnabled ? "active" : "paused"}
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Quiet hours: {format24hTo12h(quietHoursStart)} —{" "}
-                {format24hTo12h(quietHoursEnd)}
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Scheduled reminders: {reminderRuntime?.scheduledCount ?? 0}
-              </Text>
-              {reminderRuntime?.error ? (
-                <Text
-                  style={[styles.syncText, { marginTop: 4, color: c.error }]}
-                >
-                  Reminder error: {reminderRuntime.error}
-                </Text>
-              ) : null}
-            </AppCard>
-          </View>
-        )}
-
-        {preferences === null && (
-          <View style={styles.pad}>
-            <SectionHeader title="Sync Status" />
-            <AppCard>
-              <Text style={styles.syncText}>
-                Preferences not set yet. Complete Quick Setup to sync reminders.
-              </Text>
-              <View style={styles.divider} />
-              <Text style={styles.syncHeading}>Offline Outbox</Text>
-              <Text style={styles.syncText}>
-                Pending operations: {offlineOutboxSnapshot.pending}
-                {offlineOutboxSnapshot.dueNow > 0
-                  ? ` (${offlineOutboxSnapshot.dueNow} ready now)`
-                  : ""}
-              </Text>
-              <Text style={[styles.syncText, { marginTop: 4 }]}>
-                Last outbox sync:{" "}
-                {offlineOutboxSnapshot.lastSyncResult
-                  ? new Date(
-                      offlineOutboxSnapshot.lastSyncResult.updatedAt,
-                    ).toLocaleString()
-                  : "No sync attempts yet"}
-              </Text>
-              {offlineOutboxSnapshot.lastSyncResult ? (
-                <Text
-                  style={[
-                    styles.syncText,
-                    { marginTop: 4, color: outboxLastSyncStatusColor },
-                  ]}
-                >
-                  Result: {offlineOutboxSnapshot.lastSyncResult.message}
-                </Text>
-              ) : null}
-              <TouchableOpacity
-                onPress={() => router.push("/quick-setup")}
-                style={[styles.quickBtn, { marginTop: Spacing.md }]}
-              >
-                <Ionicons name="settings-outline" size={16} color={c.tint} />
-                <Text style={styles.quickText}>Open Quick Setup</Text>
-              </TouchableOpacity>
-            </AppCard>
-          </View>
-        )}
-
-        {/* ── About & Help ────────────────────────── */}
-        <View style={styles.pad}>
-          <SectionHeader title="About & Help" />
-          <AppCard>
-            <View style={styles.versionRow}>
-              <Text style={styles.versionLabel}>Version</Text>
-              <Text style={styles.versionValue}>DayLog v2.1.4</Text>
-            </View>
-            {aboutLinks.map((item, i) => (
-              <View key={i}>
-                <View style={styles.divider} />
-                <TouchableOpacity
-                  style={styles.aboutRow}
-                  activeOpacity={0.6}
-                  onPress={() => handleOpenAboutLink(item.path)}
-                >
-                  <Ionicons name={item.icon} size={18} color={c.icon} />
-                  <Text style={styles.aboutText}>{item.title}</Text>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={16}
-                    color={c.textTertiary}
-                  />
-                </TouchableOpacity>
-              </View>
-            ))}
-          </AppCard>
-        </View>
-
-        {/* ── Danger Zone ─────────────────────────── */}
-        <View style={styles.pad}>
-          <TouchableOpacity
-            style={[
-              styles.dangerBtn,
-              (isRequestingAccountDeletion ||
-                isFinalizingAccountDeletion ||
-                (isAccountDeletionInProgress && !canRetryAccountDeletion)) &&
-                styles.dangerBtnDisabled,
-            ]}
-            onPress={handleDeleteAccount}
-            disabled={
-              isRequestingAccountDeletion ||
-              isFinalizingAccountDeletion ||
-              (isAccountDeletionInProgress && !canRetryAccountDeletion)
+        {activeSection === "overview" ? (
+          <ProfileOverviewSection
+            styles={styles}
+            colors={c}
+            userName={userName}
+            userEmail={userEmail}
+            isPreferencesMissing={preferences === null}
+            darkMode={darkMode}
+            onToggleDarkMode={() => {
+              void handleDarkModeToggle();
+            }}
+            defaultMemoryMood={defaultMemoryMood}
+            onChangeDefaultMemoryMood={(mood) => {
+              void handleDefaultMemoryMoodChange(mood);
+            }}
+            pendingOutboxCount={offlineOutboxSnapshot.pending}
+            dueNowOutboxCount={offlineOutboxSnapshot.dueNow}
+            reminderDeliveryEnabled={Boolean(reminderRuntime?.deliveryEnabled)}
+            locationTrackingEnabled={locationTrackingEnabled}
+            backgroundLocationStatusLabel={backgroundLocationStatusLabel}
+            onOpenQuickSetup={() => router.push("/quick-setup")}
+            showAdvancedStatus={showAdvancedStatus}
+            onToggleAdvancedStatus={() =>
+              setShowAdvancedStatus((previous) => !previous)
             }
-          >
-            <Ionicons name="trash-outline" size={16} color={c.error} />
-            <Text style={styles.dangerText}>
-              {isFinalizingAccountDeletion
-                ? "Finalizing account deletion..."
-                : isRequestingAccountDeletion
-                  ? "Requesting backend deletion..."
-                  : canRetryAccountDeletion
-                    ? "Retry Account Deletion"
-                    : isAccountDeletionInProgress
-                      ? "Cleaning up backend data..."
-                      : "Delete Account"}
-            </Text>
-          </TouchableOpacity>
+            preferencesSnapshot={preferencesSnapshot}
+            fitnessTrackingEnabled={fitnessTrackingEnabled}
+            calendarContextEnabled={calendarContextEnabled}
+            callLogsTrackingEnabled={callLogsTrackingEnabled}
+            moodAssistanceEnabled={moodAssistanceEnabled}
+            notificationPermissionStatus={
+              reminderRuntime?.permissionStatus ?? "unknown"
+            }
+            quietHoursRangeLabel={quietHoursRangeLabel}
+            scheduledReminders={reminderRuntime?.scheduledCount ?? 0}
+            reminderError={reminderRuntime?.error}
+            backgroundLocationDetail={backgroundLocationRuntimeStatus?.reason}
+            oldestQueuedAt={offlineOutboxSnapshot.oldestCreatedAt}
+            lastOutboxSyncResult={lastOutboxSyncResult}
+            outboxLastSyncStatusColor={outboxLastSyncStatusColor}
+          />
+        ) : null}
 
-          {deletionStateLabel ? (
-            <View style={styles.dangerStatusCard}>
-              <View style={styles.dangerStatusHeader}>
-                <View
-                  style={[
-                    styles.dangerStateBadge,
-                    deletionState === "completed"
-                      ? styles.dangerStateBadgeCompleted
-                      : deletionState === "failed"
-                        ? styles.dangerStateBadgeFailed
-                        : deletionState === "processing"
-                          ? styles.dangerStateBadgeProcessing
-                          : styles.dangerStateBadgeRequested,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.dangerStateBadgeText,
-                      deletionState === "failed"
-                        ? styles.dangerStateBadgeTextInverted
-                        : null,
-                    ]}
-                  >
-                    {deletionStateLabel}
-                  </Text>
-                </View>
+        {activeSection === "privacy" ? (
+          <PrivacySecuritySection
+            styles={styles}
+            colors={c}
+            isPreferencesMissing={preferences === null}
+            locationPermissionStatus={preferences?.locationPermissionStatus}
+            locationLastUpdatedAt={preferences?.locationLastUpdatedAt}
+            locationLastArea={preferences?.locationLastArea}
+            locationTrackingEnabled={locationTrackingEnabled}
+            backgroundLocationTrackingEnabled={
+              backgroundLocationTrackingEnabled
+            }
+            isBackgroundLocationRuntimeEnabled={Boolean(
+              locationTrackingRuntimeConfig?.enableBackgroundLocationTracking,
+            )}
+            isBackgroundLocationFullyEnabled={
+              backgroundLocationRuntimeStatus?.fullyEnabled
+            }
+            fitnessTrackingEnabled={fitnessTrackingEnabled}
+            calendarContextEnabled={calendarContextEnabled}
+            callLogsTrackingEnabled={callLogsTrackingEnabled}
+            moodAssistanceEnabled={moodAssistanceEnabled}
+            callActivityCollectionSupported={callActivityCollectionSupported}
+            callActivityModuleStatusLabel={callActivityModuleStatusLabel}
+            callActivityPermissionStatusLabel={
+              callActivityPermissionStatusLabel
+            }
+            callActivityDetail={callActivityDiagnostics?.detail}
+            aboutLinks={aboutLinks}
+            onToggleLocationTracking={() => {
+              void handleLocationTrackingToggle();
+            }}
+            onToggleBackgroundLocationTracking={() => {
+              void handleBackgroundLocationTrackingToggle();
+            }}
+            onToggleFitnessTracking={() => {
+              void handleFitnessTrackingToggle();
+            }}
+            onToggleCalendarContext={() => {
+              void handleCalendarContextToggle();
+            }}
+            onToggleCallSummary={() => {
+              void handleCallSummaryToggle();
+            }}
+            onToggleMoodAssistance={() => {
+              void handleMoodAssistanceToggle();
+            }}
+            onOpenAboutLink={handleOpenAboutLink}
+          />
+        ) : null}
 
-                {accountDeletionStatus?.job?.id ? (
-                  <Text style={styles.dangerJobIdText}>
-                    Job {accountDeletionStatus.job.id}
-                  </Text>
-                ) : null}
-              </View>
+        {activeSection === "notifications" ? (
+          <NotificationsSection
+            styles={styles}
+            colors={c}
+            isPreferencesMissing={preferences === null}
+            allNotifications={allNotifications}
+            weeklyInsights={weeklyInsights}
+            dailySummary={dailySummary}
+            quietHours={quietHours}
+            quietHoursRangeLabel={quietHoursRangeLabel}
+            quietHoursStartLabel={format24hTo12h(quietHoursStart)}
+            quietHoursEndLabel={format24hTo12h(quietHoursEnd)}
+            isUpdatingReminderPreference={isUpdatingReminderPreference}
+            onToggleAllNotifications={() => {
+              void handleAllNotificationsToggle();
+            }}
+            onSetWeeklyInsights={() => {
+              void updateReminderType("weekly");
+            }}
+            onSetDailySummary={() => {
+              void updateReminderType("daily");
+            }}
+            onToggleQuietHours={() => {
+              void handleQuietHoursToggle();
+            }}
+            onOpenQuietHoursStart={() => openQuietHoursPicker("start")}
+            onOpenQuietHoursEnd={() => openQuietHoursPicker("end")}
+          />
+        ) : null}
 
-              <View style={styles.dangerProgressMetaRow}>
-                <Text style={styles.dangerProgressMetaText}>
-                  Stage: {deletionStageLabel}
-                </Text>
-                <Text style={styles.dangerProgressMetaText}>
-                  {deletionProgressPercent}%
-                </Text>
-              </View>
+        {activeSection === "integrations" ? (
+          <IntegrationsSection
+            styles={styles}
+            colors={c}
+            isPreferencesMissing={preferences === null}
+            autoSyncIntegrations={autoSyncIntegrations}
+            onToggleAutoSyncIntegrations={() => {
+              void handleAutoSyncIntegrationsToggle();
+            }}
+            integrationFeedback={integrationFeedback}
+            providerList={providerList}
+            integrationByProvider={integrationByProvider}
+            syncRunByProvider={syncRunByProvider}
+            providerPendingAction={providerPendingAction}
+            integrationIcons={integrationIcons}
+            integrationNames={integrationNames}
+            onShowAppleHealthSetup={handleShowAppleHealthSetup}
+            onConnectIntegration={(provider) => {
+              void handleConnectIntegration(provider);
+            }}
+            onDisconnectIntegration={(provider, integrationId) => {
+              void handleDisconnectIntegration(provider, integrationId);
+            }}
+            onSyncIntegration={(provider) => {
+              void handleSyncIntegration(provider);
+            }}
+          />
+        ) : null}
 
-              <View style={styles.dangerProgressTrack}>
-                <View
-                  style={[
-                    styles.dangerProgressFill,
-                    deletionState === "completed"
-                      ? styles.dangerProgressFillCompleted
-                      : deletionState === "failed"
-                        ? styles.dangerProgressFillFailed
-                        : styles.dangerProgressFillActive,
-                    { width: `${deletionProgressPercent}%` },
-                  ]}
-                />
-              </View>
-            </View>
-          ) : null}
-
-          {accountDeletionStatusMessage ? (
-            <Text
-              style={[
-                styles.dangerStatusText,
-                accountDeletionStatus?.retryable
-                  ? styles.dangerStatusTextError
-                  : null,
-              ]}
-            >
-              {accountDeletionStatusMessage}
-            </Text>
-          ) : null}
-        </View>
+        {activeSection === "account" ? (
+          <AccountSection
+            styles={styles}
+            colors={c}
+            onExportData={handleExportData}
+            onSignOut={handleSignOut}
+            onDeleteAccount={handleDeleteAccount}
+            isRequestingAccountDeletion={isRequestingAccountDeletion}
+            isFinalizingAccountDeletion={isFinalizingAccountDeletion}
+            isAccountDeletionInProgress={isAccountDeletionInProgress}
+            canRetryAccountDeletion={canRetryAccountDeletion}
+            deletionState={deletionState as DeletionState}
+            deletionStateLabel={deletionStateLabel}
+            deletionStageLabel={deletionStageLabel}
+            deletionProgressPercent={deletionProgressPercent}
+            accountDeletionJobId={accountDeletionStatus?.job?.id}
+            accountDeletionStatusMessage={accountDeletionStatusMessage}
+          />
+        ) : null}
 
         <View style={{ height: 100 }} />
       </ScrollView>
@@ -2955,451 +2340,3 @@ const SettingsScreen = () => {
 };
 
 export default SettingsScreen;
-
-/* ── Styles ──────────────────────────────────────────── */
-function createStyles(c: ThemeColors) {
-  return StyleSheet.create({
-    safe: {
-      flex: 1,
-      backgroundColor: c.background,
-    },
-    scroll: {
-      paddingTop: Spacing.lg,
-    },
-    headerRow: {
-      paddingHorizontal: Spacing.xl,
-      marginBottom: Spacing["2xl"],
-    },
-    pageTitle: {
-      ...Typography.title1,
-      color: c.text,
-    },
-    pad: {
-      paddingHorizontal: Spacing.xl,
-      marginBottom: Spacing.xl,
-    },
-
-    /* Profile */
-    profileRow: {
-      flexDirection: "row",
-      alignItems: "center",
-    },
-    avatar: {
-      width: 48,
-      height: 48,
-      borderRadius: 24,
-      backgroundColor: c.tintLight,
-      alignItems: "center",
-      justifyContent: "center",
-      marginRight: Spacing.lg,
-    },
-    profileName: {
-      ...Typography.bodyMedium,
-      color: c.text,
-    },
-    profileEmail: {
-      ...Typography.caption1,
-      color: c.textSecondary,
-      marginTop: 2,
-    },
-
-    /* Quick actions */
-    quickRow: {
-      flexDirection: "row",
-      gap: Spacing.md,
-    },
-    quickBtn: {
-      flex: 1,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: Spacing.sm,
-      backgroundColor: c.surface,
-      borderRadius: Radius.md,
-      paddingVertical: Spacing.md,
-      ...Shadows.sm,
-    },
-    quickText: {
-      ...Typography.callout,
-      color: c.text,
-    },
-
-    /* Toggle rows */
-    toggleRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      paddingVertical: Spacing.xs,
-    },
-    toggleLabel: {
-      ...Typography.body,
-      color: c.text,
-    },
-    toggleSub: {
-      ...Typography.caption1,
-      color: c.textTertiary,
-      marginTop: 2,
-    },
-    quietHoursConfigRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      paddingVertical: Spacing.xs,
-      gap: Spacing.md,
-    },
-    quietHoursChip: {
-      borderWidth: 1,
-      borderColor: c.divider,
-      backgroundColor: c.surfaceSecondary,
-      borderRadius: Radius.sm,
-      paddingHorizontal: Spacing.md,
-      paddingVertical: Spacing.sm,
-    },
-    quietHoursChipText: {
-      ...Typography.caption1,
-      color: c.text,
-      fontWeight: "600",
-    },
-    modalOverlay: {
-      flex: 1,
-      backgroundColor: c.overlay,
-      justifyContent: "flex-end",
-    },
-    pickerContainer: {
-      backgroundColor: c.surface,
-      borderTopLeftRadius: Radius.lg,
-      borderTopRightRadius: Radius.lg,
-      paddingBottom: Spacing.lg,
-    },
-    pickerHeader: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
-      paddingHorizontal: Spacing.xl,
-      paddingVertical: Spacing.lg,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: c.divider,
-    },
-    pickerTitle: {
-      ...Typography.bodyMedium,
-      color: c.text,
-    },
-    pickerCancelText: {
-      ...Typography.callout,
-      color: c.textSecondary,
-    },
-    pickerDoneText: {
-      ...Typography.callout,
-      color: c.tint,
-      fontWeight: "600",
-    },
-    moodChipsRow: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: Spacing.sm,
-      marginTop: Spacing.md,
-    },
-    moodChip: {
-      borderWidth: 1,
-      borderColor: c.divider,
-      borderRadius: Radius.full,
-      paddingHorizontal: Spacing.md,
-      paddingVertical: Spacing.xs,
-      backgroundColor: c.background,
-    },
-    moodChipSelected: {
-      backgroundColor: c.tintLight,
-      borderColor: c.tint,
-    },
-    moodChipLabel: {
-      ...Typography.caption1,
-      color: c.textSecondary,
-      textTransform: "capitalize",
-    },
-    moodChipLabelSelected: {
-      color: c.tint,
-    },
-
-    /* Integration rows */
-    integrationRow: {
-      flexDirection: "row",
-      alignItems: "flex-start",
-      paddingVertical: Spacing.sm,
-    },
-    integrationHeadingRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: Spacing.sm,
-    },
-    integrationHeadingBadges: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6,
-    },
-    integrationTitle: {
-      ...Typography.body,
-      color: c.text,
-    },
-    integrationSub: {
-      ...Typography.callout,
-      color: c.textSecondary,
-      marginTop: 4,
-    },
-    integrationSubMuted: {
-      ...Typography.caption1,
-      color: c.textTertiary,
-      marginTop: 4,
-    },
-    integrationErrorText: {
-      ...Typography.caption1,
-      color: c.error,
-      marginTop: 4,
-    },
-    integrationStatusBadge: {
-      borderRadius: Radius.full,
-      paddingHorizontal: Spacing.sm,
-      paddingVertical: 2,
-      borderWidth: 1,
-    },
-    integrationStatusConnected: {
-      backgroundColor: withOpacity(c.success, 0.16),
-      borderColor: withOpacity(c.success, 0.45),
-    },
-    integrationStatusError: {
-      backgroundColor: withOpacity(c.error, 0.16),
-      borderColor: withOpacity(c.error, 0.45),
-    },
-    integrationStatusDisconnected: {
-      backgroundColor: c.surfaceSecondary,
-      borderColor: c.divider,
-    },
-    integrationStatusSetupRequired: {
-      backgroundColor: c.tintLight,
-      borderColor: c.tint,
-    },
-    integrationStatusText: {
-      ...Typography.caption1,
-      color: c.textSecondary,
-      textTransform: "capitalize",
-    },
-    integrationActionsRow: {
-      flexDirection: "row",
-      gap: Spacing.sm,
-      marginTop: Spacing.sm,
-    },
-    integrationPrimaryBtn: {
-      backgroundColor: c.tint,
-      borderRadius: Radius.sm,
-      paddingHorizontal: Spacing.md,
-      paddingVertical: Spacing.sm,
-    },
-    integrationPrimaryBtnText: {
-      ...Typography.caption1,
-      color: c.inverseText,
-      fontWeight: "600",
-    },
-    integrationSecondaryBtn: {
-      borderWidth: 1,
-      borderColor: c.divider,
-      backgroundColor: c.background,
-      borderRadius: Radius.sm,
-      paddingHorizontal: Spacing.md,
-      paddingVertical: Spacing.sm,
-    },
-    integrationSecondaryBtnText: {
-      ...Typography.caption1,
-      color: c.text,
-      fontWeight: "600",
-    },
-    integrationFeedback: {
-      borderRadius: Radius.sm,
-      borderWidth: 1,
-      paddingHorizontal: Spacing.md,
-      paddingVertical: Spacing.sm,
-      marginBottom: Spacing.sm,
-    },
-    integrationFeedbackSuccess: {
-      borderColor: withOpacity(c.success, 0.45),
-      backgroundColor: withOpacity(c.success, 0.12),
-    },
-    integrationFeedbackError: {
-      borderColor: withOpacity(c.error, 0.45),
-      backgroundColor: withOpacity(c.error, 0.12),
-    },
-    integrationFeedbackText: {
-      ...Typography.caption1,
-    },
-    appleHealthHintCard: {
-      marginTop: Spacing.sm,
-      borderWidth: 1,
-      borderColor: c.divider,
-      borderRadius: Radius.sm,
-      backgroundColor: c.surfaceSecondary,
-      paddingHorizontal: Spacing.sm,
-      paddingVertical: Spacing.sm,
-      gap: 6,
-    },
-    appleHealthHintText: {
-      ...Typography.caption1,
-      color: c.textSecondary,
-    },
-    appleHealthHintAction: {
-      ...Typography.caption1,
-      color: c.tint,
-      fontWeight: "600",
-    },
-    emptyRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: Spacing.sm,
-      paddingVertical: Spacing.xs,
-    },
-    emptyText: {
-      ...Typography.callout,
-      color: c.textTertiary,
-    },
-
-    /* Divider */
-    divider: {
-      height: StyleSheet.hairlineWidth,
-      backgroundColor: c.divider,
-      marginVertical: Spacing.sm,
-    },
-
-    /* Sync */
-    syncHeading: {
-      ...Typography.caption1,
-      color: c.text,
-      textTransform: "uppercase",
-      marginBottom: 4,
-    },
-    syncText: {
-      ...Typography.callout,
-      color: c.textSecondary,
-    },
-
-    /* Version / About */
-    versionRow: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
-      paddingVertical: Spacing.xs,
-    },
-    versionLabel: {
-      ...Typography.caption1,
-      color: c.textTertiary,
-    },
-    versionValue: {
-      ...Typography.caption1,
-      color: c.text,
-    },
-    aboutRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      paddingVertical: Spacing.sm,
-    },
-    aboutText: {
-      ...Typography.body,
-      color: c.text,
-      flex: 1,
-      marginLeft: Spacing.md,
-    },
-
-    /* Danger */
-    dangerBtn: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: Spacing.sm,
-      paddingVertical: Spacing.md,
-    },
-    dangerBtnDisabled: {
-      opacity: 0.55,
-    },
-    dangerText: {
-      ...Typography.callout,
-      color: c.error,
-    },
-    dangerStatusCard: {
-      marginTop: Spacing.sm,
-      borderWidth: 1,
-      borderColor: c.divider,
-      borderRadius: Radius.md,
-      padding: Spacing.sm,
-      gap: Spacing.xs,
-    },
-    dangerStatusHeader: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: Spacing.sm,
-    },
-    dangerStateBadge: {
-      borderRadius: 999,
-      paddingHorizontal: Spacing.sm,
-      paddingVertical: 2,
-    },
-    dangerStateBadgeRequested: {
-      backgroundColor: c.surfaceSecondary,
-    },
-    dangerStateBadgeProcessing: {
-      backgroundColor: c.warningLight,
-    },
-    dangerStateBadgeCompleted: {
-      backgroundColor: withOpacity(c.success, 0.18),
-    },
-    dangerStateBadgeFailed: {
-      backgroundColor: c.error,
-    },
-    dangerStateBadgeText: {
-      ...Typography.caption1,
-      color: c.text,
-      fontWeight: "700",
-    },
-    dangerStateBadgeTextInverted: {
-      color: c.inverseText,
-    },
-    dangerJobIdText: {
-      ...Typography.caption2,
-      color: c.textTertiary,
-    },
-    dangerProgressMetaRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-    },
-    dangerProgressMetaText: {
-      ...Typography.caption2,
-      color: c.textSecondary,
-    },
-    dangerProgressTrack: {
-      height: 6,
-      borderRadius: 999,
-      backgroundColor: c.divider,
-      overflow: "hidden",
-    },
-    dangerProgressFill: {
-      height: "100%",
-      borderRadius: 999,
-    },
-    dangerProgressFillActive: {
-      backgroundColor: c.tint,
-    },
-    dangerProgressFillCompleted: {
-      backgroundColor: c.success,
-    },
-    dangerProgressFillFailed: {
-      backgroundColor: c.error,
-    },
-    dangerStatusText: {
-      ...Typography.caption1,
-      color: c.textSecondary,
-      textAlign: "center",
-      marginTop: Spacing.xs,
-    },
-    dangerStatusTextError: {
-      color: c.error,
-    },
-  });
-}
