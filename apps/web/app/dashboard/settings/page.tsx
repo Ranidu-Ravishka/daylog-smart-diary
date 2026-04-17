@@ -126,7 +126,12 @@ function isOAuthProvider(provider: string): boolean {
   return (
     provider === "google_calendar" ||
     provider === "google_fit" ||
-    provider === "spotify"
+    provider === "gmail_summary" ||
+    provider === "spotify" ||
+    provider === "notion" ||
+    provider === "slack" ||
+    provider === "strava" ||
+    provider === "todoist"
   );
 }
 
@@ -331,10 +336,13 @@ export default function SettingsPage() {
   const syncRunByProvider = new Map(
     (syncRuns ?? []).map((syncRun) => [syncRun.provider, syncRun]),
   );
-  const providerList =
-    supportedProviders && supportedProviders.length > 0
-      ? supportedProviders
-      : Object.keys(INTEGRATION_PROVIDER_META);
+  const providerList = [
+    ...new Set([
+      ...(supportedProviders ?? []),
+      ...Object.keys(INTEGRATION_PROVIDER_META),
+    ]),
+  ];
+  const supportedProviderSet = new Set<string>(supportedProviders ?? []);
 
   const setProviderAction = (
     provider: string,
@@ -344,6 +352,11 @@ export default function SettingsPage() {
   };
 
   const handleConnect = async (provider: string) => {
+    if (!supportedProviderSet.has(provider)) {
+      toastInfo("This integration is coming soon.");
+      return;
+    }
+
     setProviderAction(provider, "connect");
 
     if (isOAuthProvider(provider)) {
@@ -755,10 +768,12 @@ export default function SettingsPage() {
           {providerList.map((provider) => {
             const integration = integrationByProvider.get(provider);
             const syncRun = syncRunByProvider.get(provider);
+            const isSupportedProvider = supportedProviderSet.has(provider);
             const status = integration?.status ?? "disconnected";
             const pending = providerPendingAction[provider];
             const syncing =
               pending === "sync" || syncRun?.status === "in_progress";
+            const statusLabel = isSupportedProvider ? status : "coming soon";
 
             const label =
               INTEGRATION_PROVIDER_META[
@@ -784,34 +799,47 @@ export default function SettingsPage() {
                   <span
                     className={cn(
                       "inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium",
-                      status === "connected"
-                        ? "bg-success/15 text-success"
-                        : status === "error"
-                          ? "bg-destructive/15 text-destructive"
-                          : "bg-muted text-muted-foreground",
+                      !isSupportedProvider
+                        ? "bg-muted text-muted-foreground"
+                        : status === "connected"
+                          ? "bg-success/15 text-success"
+                          : status === "error"
+                            ? "bg-destructive/15 text-destructive"
+                            : "bg-muted text-muted-foreground",
                     )}
                   >
-                    {status}
+                    {statusLabel}
                   </span>
                 </div>
 
-                <div className="text-[11px] text-muted-foreground space-y-0.5">
-                  <p>Last sync: {formatDateTime(integration?.lastSyncAt)}</p>
-                  {syncRun?.status ? (
-                    <p>
-                      Today&apos;s sync: {syncRun.status}
-                      {syncRun.lastError ? ` — ${syncRun.lastError}` : ""}
-                    </p>
-                  ) : null}
-                  {integration?.lastError ? (
-                    <p className="text-destructive">
-                      Error: {integration.lastError}
-                    </p>
-                  ) : null}
-                </div>
+                {isSupportedProvider ? (
+                  <div className="text-[11px] text-muted-foreground space-y-0.5">
+                    <p>Last sync: {formatDateTime(integration?.lastSyncAt)}</p>
+                    {syncRun?.status ? (
+                      <p>
+                        Today&apos;s sync: {syncRun.status}
+                        {syncRun.lastError ? ` — ${syncRun.lastError}` : ""}
+                      </p>
+                    ) : null}
+                    {integration?.lastError ? (
+                      <p className="text-destructive">
+                        Error: {integration.lastError}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">
+                    Planned integration. Availability will roll out in a future
+                    release.
+                  </p>
+                )}
 
                 <div className="flex flex-wrap gap-2">
-                  {status !== "connected" ? (
+                  {!isSupportedProvider ? (
+                    <Button size="sm" variant="outline" disabled>
+                      Coming soon
+                    </Button>
+                  ) : status !== "connected" ? (
                     <Button
                       size="sm"
                       onClick={() => handleConnect(provider)}

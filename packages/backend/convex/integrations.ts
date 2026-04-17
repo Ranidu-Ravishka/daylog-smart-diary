@@ -23,6 +23,10 @@ import {
   type IntegrationProvider,
   type OAuthRefreshProvider,
 } from "./integrationProviders";
+import {
+  getOAuthCredentialEnvNames,
+  getRequiredIntegrationPlugin,
+} from "./integrationPlugins";
 import { applyDashboardMetricsDelta } from "./dashboardMetrics";
 import {
   resolveIntegrationSyncAdapter,
@@ -333,18 +337,19 @@ function normalizeAuditMaxRows(value: number | undefined): number {
 function getProviderOAuthCredentials(
   provider: OAuthRefreshProvider,
 ): ProviderOAuthCredentials {
-  if (provider === "google_calendar" || provider === "google_fit") {
-    return {
-      tokenUrl: "https://oauth2.googleapis.com/token",
-      clientId: process.env.GOOGLE_CLIENT_ID ?? "",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
-    };
+  const plugin = getRequiredIntegrationPlugin(provider);
+  if (!plugin.oauth) {
+    throw new Error(`Provider "${provider}" does not support OAuth refresh.`);
   }
 
+  const { clientIdEnv, clientSecretEnv } = getOAuthCredentialEnvNames(
+    plugin.oauth.credentialSource,
+  );
+
   return {
-    tokenUrl: "https://accounts.spotify.com/api/token",
-    clientId: process.env.SPOTIFY_CLIENT_ID ?? "",
-    clientSecret: process.env.SPOTIFY_CLIENT_SECRET ?? "",
+    tokenUrl: plugin.oauth.tokenUrl,
+    clientId: process.env[clientIdEnv] ?? "",
+    clientSecret: process.env[clientSecretEnv] ?? "",
   };
 }
 
@@ -882,10 +887,20 @@ async function refreshOAuthAccessToken(
   refreshToken: string,
 ): Promise<RefreshedTokenPayload> {
   const credentials = getProviderOAuthCredentials(provider);
+  const plugin = getRequiredIntegrationPlugin(provider);
+  const oauth = plugin.oauth;
+
+  if (!oauth) {
+    throw new Error(`Provider "${provider}" does not support OAuth refresh.`);
+  }
+
+  const { clientIdEnv, clientSecretEnv } = getOAuthCredentialEnvNames(
+    oauth.credentialSource,
+  );
 
   if (!credentials.clientId || !credentials.clientSecret) {
     throw new Error(
-      `OAuth client credentials are missing for provider "${provider}". Configure ${provider === "spotify" ? "SPOTIFY_CLIENT_ID/SPOTIFY_CLIENT_SECRET" : "GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET"} in Convex environment variables.`,
+      `OAuth client credentials are missing for provider "${provider}". Configure ${clientIdEnv}/${clientSecretEnv} in Convex environment variables.`,
     );
   }
 
@@ -1299,6 +1314,66 @@ async function syncProviderForDay(
   });
 }
 
+async function syncDerivedAppleCalendarForDay(
+  ctx: Pick<ActionCtx, "runQuery">,
+  dayKey: string,
+): Promise<NormalizedIntegrationDailySync> {
+  const dailyRows = (await ctx.runQuery(
+    api.integrations.listMyIntegrationDailyDataForDay,
+    {
+      dayKey,
+    },
+  )) as Array<{
+    provider: string;
+    summary?: string;
+    signals?: string[];
+    context?: IntegrationDailyContext;
+  }>;
+
+  const calendarRow = dailyRows.find((row) => row.provider === "calendar");
+  if (!calendarRow) {
+    return {
+      summary: "Apple Calendar: no calendar context captured for this day.",
+      signals: ["No calendar context captured for this day"],
+    };
+  }
+
+  const calendarContext = calendarRow.context?.calendar;
+  const summaryFromSource = sanitizeSummaryText(calendarRow.summary);
+  const summary = summaryFromSource
+    ? `Apple Calendar: ${summaryFromSource}`
+    : calendarContext?.meetingsCount
+      ? `Apple Calendar: ${calendarContext.meetingsCount} event${calendarContext.meetingsCount === 1 ? "" : "s"} captured from device context.`
+      : "Apple Calendar: calendar context captured for this day.";
+
+  return {
+    summary,
+    signals: sanitizeSignals([
+      ...(calendarRow.signals ?? []),
+      calendarContext?.meetingsCount
+        ? `${calendarContext.meetingsCount} calendar events`
+        : "No calendar events captured",
+      calendarContext?.busyMinutes
+        ? `${calendarContext.busyMinutes} busy minutes`
+        : "No busy-time data",
+      calendarContext?.remindersCount
+        ? `${calendarContext.remindersCount} reminders`
+        : "No reminder count",
+    ]),
+    context: calendarContext
+      ? {
+          schemaVersion: 1,
+          calendar: {
+            meetingsCount: calendarContext.meetingsCount,
+            busyMinutes: calendarContext.busyMinutes,
+            remindersCount: calendarContext.remindersCount,
+            eventTitles: calendarContext.eventTitles,
+          },
+        }
+      : undefined,
+  };
+}
+
 // ── Connect a new integration ───────────────────────────────
 export const connectIntegration = mutation({
   args: {
@@ -1312,6 +1387,7 @@ export const connectIntegration = mutation({
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
     const provider = assertIntegrationProvider(args.provider);
+    const plugin = getRequiredIntegrationPlugin(provider);
 
     logInfo("integration_connect.started", {
       status: "started",
@@ -1324,6 +1400,12 @@ export const connectIntegration = mutation({
     });
 
     const accessToken = args.accessToken ?? args.tokenRef;
+
+    if (plugin.connectionMode === "oauth" && !accessToken) {
+      throw new Error(
+        `Provider "${provider}" requires an OAuth access token. Start the OAuth flow before connecting.`,
+      );
+    }
 
     const nextTokenRef = accessToken
       ? await upsertIntegrationSecret(ctx.db as never, {
@@ -1742,6 +1824,63 @@ export const listMyIntegrationSyncRunsForDay = query({
       )
       .order("desc")
       .collect();
+  },
+});
+
+export const listMyIntegrationStatusSnapshots = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await requireUser(ctx);
+
+    const integrations = await ctx.db
+      .query("integrations")
+      .withIndex("by_user_provider", (q) => q.eq("userId", user._id))
+      .collect();
+
+    return await Promise.all(
+      integrations.map(async (integration) => {
+        const runs = await ctx.db
+          .query("integrationSyncRuns")
+          .withIndex("by_user_provider", (q) =>
+            q.eq("userId", user._id).eq("provider", integration.provider),
+          )
+          .order("desc")
+          .take(10);
+
+        const latestRun = runs[0];
+        const recentFailures = runs
+          .filter((run) => run.status === "error")
+          .slice(0, 3)
+          .map((run) => ({
+            dayKey: run.dayKey,
+            updatedAt: run.updatedAt,
+            lastError: run.lastError,
+          }));
+
+        let consecutiveFailures = 0;
+        for (const run of runs) {
+          if (run.status !== "error") {
+            break;
+          }
+
+          consecutiveFailures += 1;
+        }
+
+        const lastSuccessfulRun = runs.find((run) => run.status === "success");
+
+        return {
+          provider: integration.provider,
+          integrationStatus: integration.status,
+          integrationLastSyncAt: integration.lastSyncAt,
+          integrationLastError: integration.lastError,
+          latestRunStatus: latestRun?.status,
+          latestRunUpdatedAt: latestRun?.updatedAt,
+          lastSuccessfulRunAt: lastSuccessfulRun?.updatedAt,
+          consecutiveFailures,
+          recentFailures,
+        };
+      }),
+    );
   },
 });
 
@@ -2262,6 +2401,63 @@ export const syncAppleHealthDailyData = mutation({
   },
 });
 
+export const syncAppleCalendarDailyData = mutation({
+  args: {
+    dayKey: v.string(),
+    summary: v.optional(v.string()),
+    signals: v.optional(v.array(v.string())),
+    context: v.optional(integrationDailyContextValidator),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    validateDayKey(args.dayKey);
+
+    const integration = await ctx.db
+      .query("integrations")
+      .withIndex("by_user_provider", (q) =>
+        q.eq("userId", user._id).eq("provider", "apple_calendar"),
+      )
+      .unique();
+
+    if (!integration) {
+      throw new Error(
+        "Apple Calendar integration is not connected. Connect provider before syncing data.",
+      );
+    }
+
+    const calendarContext = args.context?.calendar;
+    const defaultSummary = calendarContext?.meetingsCount
+      ? `Apple Calendar: ${calendarContext.meetingsCount} event${calendarContext.meetingsCount === 1 ? "" : "s"}${calendarContext.busyMinutes ? `, ${calendarContext.busyMinutes} busy minutes` : ""}.`
+      : "Apple Calendar: calendar context captured from this device.";
+
+    const upserted = await upsertIntegrationDailyDataDoc(ctx.db, {
+      userId: user._id,
+      provider: "apple_calendar",
+      dayKey: args.dayKey,
+      summary: args.summary ?? defaultSummary,
+      signals: args.signals,
+      context: args.context,
+    });
+
+    await ctx.db.patch(integration._id, {
+      status: "connected",
+      lastError: undefined,
+      lastSyncAt: Date.now(),
+    });
+
+    await recordIntegrationHealthEventInDb(ctx.db, {
+      provider: "apple_calendar",
+      userId: user._id,
+      integrationId: integration._id,
+      dayKey: args.dayKey,
+      outcome: "success",
+      tokenValidityStatus: "unknown",
+    });
+
+    return upserted;
+  },
+});
+
 export const upsertIntegrationDailyDataInternal = internalMutation({
   args: {
     userId: v.id("user"),
@@ -2309,11 +2505,13 @@ export async function syncMyIntegrationForDayImpl(
 ) {
   validateDayKey(args.dayKey);
   const provider = assertIntegrationProvider(args.provider);
+  const plugin = getRequiredIntegrationPlugin(provider);
   const syncTimeZone = resolveTimeZone(args.timeZone, getResolvedTimeZone());
 
   logInfo("integration_sync.started", {
     status: "started",
     provider,
+    syncMode: plugin.syncMode,
     dayKey: args.dayKey,
     timeZone: syncTimeZone,
   });
@@ -2384,79 +2582,88 @@ export async function syncMyIntegrationForDayImpl(
   let latestTokenValidityStatus = deriveTokenValidityStatus(undefined);
 
   try {
-    if (!integration.tokenRef) {
-      throw new Error(
-        `Provider "${provider}" is missing tokenRef. Reconnect integration before syncing.`,
-      );
-    }
-
-    let currentTokenRef = integration.tokenRef;
-    let accessToken = integration.tokenRef;
+    let currentTokenRef = integration.tokenRef ?? "";
+    let accessToken = "";
     let refreshToken: string | undefined;
     let accessTokenExpiresAt: number | undefined;
 
-    if (isOpaqueTokenRef(integration.tokenRef)) {
-      const secret = (await ctx.runQuery(
-        internal.integrations.getIntegrationAccessTokenByRefInternal,
-        {
-          tokenRef: integration.tokenRef,
-          userId: integration.userId,
-          provider,
-        },
-      )) as {
-        accessToken: string;
-        refreshToken?: string;
-        accessTokenExpiresAt?: number;
-        needsKeyRotation?: boolean;
-      } | null;
-
-      if (!secret?.accessToken) {
+    if (plugin.requiresStoredToken) {
+      if (!integration.tokenRef) {
         throw new Error(
-          `Provider "${provider}" secret not found. Reconnect integration before syncing.`,
+          `Provider "${provider}" is missing tokenRef. Reconnect integration before syncing.`,
         );
       }
 
-      accessToken = secret.accessToken;
-      refreshToken = secret.refreshToken;
-      accessTokenExpiresAt = secret.accessTokenExpiresAt;
-      latestTokenValidityStatus =
-        deriveTokenValidityStatus(accessTokenExpiresAt);
+      currentTokenRef = integration.tokenRef;
+      accessToken = integration.tokenRef;
 
-      if (secret.needsKeyRotation) {
-        currentTokenRef = await ctx.runMutation(
+      if (isOpaqueTokenRef(integration.tokenRef)) {
+        const secret = (await ctx.runQuery(
+          internal.integrations.getIntegrationAccessTokenByRefInternal,
+          {
+            tokenRef: integration.tokenRef,
+            userId: integration.userId,
+            provider,
+          },
+        )) as {
+          accessToken: string;
+          refreshToken?: string;
+          accessTokenExpiresAt?: number;
+          needsKeyRotation?: boolean;
+        } | null;
+
+        if (!secret?.accessToken) {
+          throw new Error(
+            `Provider "${provider}" secret not found. Reconnect integration before syncing.`,
+          );
+        }
+
+        accessToken = secret.accessToken;
+        refreshToken = secret.refreshToken;
+        accessTokenExpiresAt = secret.accessTokenExpiresAt;
+        latestTokenValidityStatus =
+          deriveTokenValidityStatus(accessTokenExpiresAt);
+
+        if (secret.needsKeyRotation) {
+          currentTokenRef = await ctx.runMutation(
+            internal.integrations.storeIntegrationSecretInternal,
+            {
+              userId: integration.userId,
+              provider,
+              accessToken,
+              refreshToken,
+              accessTokenExpiresAt,
+              existingTokenRef: currentTokenRef,
+            },
+          );
+        }
+      } else {
+        const migratedTokenRef = await ctx.runMutation(
           internal.integrations.storeIntegrationSecretInternal,
           {
             userId: integration.userId,
             provider,
-            accessToken,
-            refreshToken,
-            accessTokenExpiresAt,
-            existingTokenRef: currentTokenRef,
+            accessToken: integration.tokenRef,
           },
         );
+
+        await ctx.runMutation(
+          internal.integrations.updateIntegrationTokenRefInternal,
+          {
+            integrationId: integration._id,
+            tokenRef: migratedTokenRef,
+          },
+        );
+
+        currentTokenRef = migratedTokenRef;
       }
-    } else {
-      const migratedTokenRef = await ctx.runMutation(
-        internal.integrations.storeIntegrationSecretInternal,
-        {
-          userId: integration.userId,
-          provider,
-          accessToken: integration.tokenRef,
-        },
-      );
-
-      await ctx.runMutation(
-        internal.integrations.updateIntegrationTokenRefInternal,
-        {
-          integrationId: integration._id,
-          tokenRef: migratedTokenRef,
-        },
-      );
-
-      currentTokenRef = migratedTokenRef;
     }
 
-    if (oauthRefreshProvider && isAccessTokenNearExpiry(accessTokenExpiresAt)) {
+    if (
+      plugin.requiresStoredToken &&
+      oauthRefreshProvider &&
+      isAccessTokenNearExpiry(accessTokenExpiresAt)
+    ) {
       if (!refreshToken) {
         throw new Error(
           `Provider "${provider}" access token has expired and no refresh token is available. Reconnect integration.`,
@@ -2492,61 +2699,70 @@ export async function syncMyIntegrationForDayImpl(
 
     let normalized: NormalizedIntegrationDailySync;
 
-    try {
-      normalized = await syncProviderForDay(
-        provider,
-        accessToken,
-        args.dayKey,
-        syncTimeZone,
-        syncStartedAt,
+    if (plugin.syncMode === "derived_contextual_calendar") {
+      normalized = await syncDerivedAppleCalendarForDay(ctx, args.dayKey);
+    } else if (plugin.syncMode === "client_push") {
+      throw new Error(
+        `Provider "${provider}" sync is managed by device-side upload. Use the provider-specific client sync flow.`,
       );
-    } catch (error) {
-      const shouldRetryAfterRefresh =
-        !!oauthRefreshProvider &&
-        !!refreshToken &&
-        error instanceof ProviderRequestError &&
-        error.status === 401;
-
-      if (!shouldRetryAfterRefresh) {
-        throw error;
-      }
-
-      if (!oauthRefreshProvider || !refreshToken) {
-        throw error;
-      }
-
-      const refreshed = await refreshOAuthAccessTokenWithRetry(
-        oauthRefreshProvider,
-        refreshToken,
-      );
-
-      const nextRefreshToken = refreshed.refreshToken ?? refreshToken;
-      await ctx.runMutation(
-        internal.integrations.storeIntegrationSecretInternal,
-        {
-          userId: integration.userId,
+    } else {
+      try {
+        normalized = await syncProviderForDay(
           provider,
-          accessToken: refreshed.accessToken,
-          refreshToken: nextRefreshToken,
-          accessTokenExpiresAt: refreshed.accessTokenExpiresAt,
-          lastRefreshAt: Date.now(),
-          existingTokenRef: currentTokenRef,
-        },
-      );
+          accessToken,
+          args.dayKey,
+          syncTimeZone,
+          syncStartedAt,
+        );
+      } catch (error) {
+        const shouldRetryAfterRefresh =
+          plugin.requiresStoredToken &&
+          !!oauthRefreshProvider &&
+          !!refreshToken &&
+          error instanceof ProviderRequestError &&
+          error.status === 401;
 
-      accessToken = refreshed.accessToken;
-      refreshToken = nextRefreshToken;
-      accessTokenExpiresAt = refreshed.accessTokenExpiresAt;
-      latestTokenValidityStatus =
-        deriveTokenValidityStatus(accessTokenExpiresAt);
+        if (!shouldRetryAfterRefresh) {
+          throw error;
+        }
 
-      normalized = await syncProviderForDay(
-        provider,
-        accessToken,
-        args.dayKey,
-        syncTimeZone,
-        syncStartedAt,
-      );
+        if (!oauthRefreshProvider || !refreshToken) {
+          throw error;
+        }
+
+        const refreshed = await refreshOAuthAccessTokenWithRetry(
+          oauthRefreshProvider,
+          refreshToken,
+        );
+
+        const nextRefreshToken = refreshed.refreshToken ?? refreshToken;
+        await ctx.runMutation(
+          internal.integrations.storeIntegrationSecretInternal,
+          {
+            userId: integration.userId,
+            provider,
+            accessToken: refreshed.accessToken,
+            refreshToken: nextRefreshToken,
+            accessTokenExpiresAt: refreshed.accessTokenExpiresAt,
+            lastRefreshAt: Date.now(),
+            existingTokenRef: currentTokenRef,
+          },
+        );
+
+        accessToken = refreshed.accessToken;
+        refreshToken = nextRefreshToken;
+        accessTokenExpiresAt = refreshed.accessTokenExpiresAt;
+        latestTokenValidityStatus =
+          deriveTokenValidityStatus(accessTokenExpiresAt);
+
+        normalized = await syncProviderForDay(
+          provider,
+          accessToken,
+          args.dayKey,
+          syncTimeZone,
+          syncStartedAt,
+        );
+      }
     }
 
     await ctx.runMutation(
@@ -2939,6 +3155,16 @@ export const syncAllMyIntegrationsForDay = action({
       const provider = asIntegrationProvider(integration.provider);
       if (!provider) continue;
       if (integration.status !== "connected") continue;
+
+      const plugin = getRequiredIntegrationPlugin(provider);
+      if (plugin.syncMode === "client_push") {
+        results.push({
+          provider,
+          success: true,
+          message: "Skipped server sync (client-managed provider).",
+        });
+        continue;
+      }
 
       try {
         await ctx.runAction(api.integrations.syncMyIntegrationForDay, {

@@ -114,17 +114,14 @@ export async function GET(
   authUrl.searchParams.set("response_type", "code");
   authUrl.searchParams.set("client_id", config.clientId);
   authUrl.searchParams.set("redirect_uri", callbackUrl);
-  authUrl.searchParams.set("scope", config.scopes.join(" "));
   authUrl.searchParams.set("state", state);
 
-  if (provider === "spotify") {
-    authUrl.searchParams.set("show_dialog", "true");
+  if (config.scopes.length > 0) {
+    authUrl.searchParams.set("scope", config.scopes.join(" "));
   }
 
-  if (provider === "google_calendar" || provider === "google_fit") {
-    authUrl.searchParams.set("access_type", "offline");
-    authUrl.searchParams.set("include_granted_scopes", "true");
-    authUrl.searchParams.set("prompt", "consent");
+  for (const [key, value] of Object.entries(config.authQueryParams ?? {})) {
+    authUrl.searchParams.set(key, value);
   }
 
   const response = NextResponse.redirect(authUrl.toString());

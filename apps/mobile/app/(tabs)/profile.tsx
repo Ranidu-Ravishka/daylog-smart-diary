@@ -165,7 +165,12 @@ function isOAuthProvider(provider: string): boolean {
   return (
     provider === "google_calendar" ||
     provider === "google_fit" ||
-    provider === "spotify"
+    provider === "gmail_summary" ||
+    provider === "spotify" ||
+    provider === "notion" ||
+    provider === "slack" ||
+    provider === "strava" ||
+    provider === "todoist"
   );
 }
 
@@ -1994,15 +1999,27 @@ const SettingsScreen = () => {
   /* ── Integration data ────────────────── */
   const integrationIcons: Record<string, IoniconName> = {
     apple_health: "heart",
+    apple_calendar: "calendar",
     google_calendar: "calendar",
+    gmail_summary: "mail",
     spotify: "musical-notes",
     google_fit: "fitness",
+    notion: "document-text",
+    slack: "chatbubbles",
+    strava: "bicycle",
+    todoist: "list",
   };
   const integrationNames: Record<string, string> = {
     apple_health: "Apple Health",
+    apple_calendar: "Apple Calendar",
     google_calendar: "Google Calendar",
+    gmail_summary: "Gmail Summary",
     spotify: "Spotify",
     google_fit: "Google Fit",
+    notion: "Notion",
+    slack: "Slack",
+    strava: "Strava",
+    todoist: "Todoist",
   };
 
   const integrationByProvider = new Map(
@@ -2020,10 +2037,12 @@ const SettingsScreen = () => {
   const syncRunByProvider = new Map(
     (syncRuns ?? []).map((syncRun) => [syncRun.provider, syncRun]),
   );
-  const providerList =
-    supportedProviders && supportedProviders.length > 0
-      ? supportedProviders
-      : Object.keys(INTEGRATION_PROVIDER_META);
+  const providerList = [
+    ...new Set([
+      ...(supportedProviders ?? []),
+      ...Object.keys(INTEGRATION_PROVIDER_META),
+    ]),
+  ];
   const backgroundLocationStatusLabel = backgroundLocationTrackingEnabled
     ? backgroundLocationRuntimeStatus?.fullyEnabled
       ? "enabled"
@@ -2259,6 +2278,7 @@ const SettingsScreen = () => {
           <IntegrationsSection
             styles={styles}
             colors={c}
+            supportedProviders={supportedProviders ?? []}
             isPreferencesMissing={preferences === null}
             autoSyncIntegrations={autoSyncIntegrations}
             onToggleAutoSyncIntegrations={() => {

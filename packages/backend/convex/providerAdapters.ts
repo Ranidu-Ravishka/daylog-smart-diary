@@ -170,6 +170,111 @@ function sanitizeSignals(signals: string[] | undefined) {
     .slice(0, 12);
 }
 
+function extractNotionPageTitle(
+  result: Record<string, unknown>,
+): string | null {
+  const titleRoot = result.title;
+  if (Array.isArray(titleRoot)) {
+    const joined = titleRoot
+      .map((segment) => {
+        if (
+          segment &&
+          typeof segment === "object" &&
+          "plain_text" in segment &&
+          typeof (segment as { plain_text?: unknown }).plain_text === "string"
+        ) {
+          return (segment as { plain_text: string }).plain_text;
+        }
+
+        return "";
+      })
+      .join("")
+      .trim();
+
+    if (joined) {
+      return joined;
+    }
+  }
+
+  const properties = result.properties;
+  if (!properties || typeof properties !== "object") {
+    return null;
+  }
+
+  for (const value of Object.values(properties)) {
+    if (!value || typeof value !== "object") continue;
+
+    const candidate = value as {
+      type?: unknown;
+      title?: Array<{ plain_text?: unknown }>;
+    };
+
+    if (candidate.type !== "title" || !Array.isArray(candidate.title)) {
+      continue;
+    }
+
+    const joined = candidate.title
+      .map((segment) =>
+        typeof segment?.plain_text === "string" ? segment.plain_text : "",
+      )
+      .join("")
+      .trim();
+
+    if (joined) {
+      return joined;
+    }
+  }
+
+  return null;
+}
+
+function readGmailHeader(
+  headers: Array<{ name?: string; value?: string }> | undefined,
+  headerName: string,
+): string | null {
+  if (!Array.isArray(headers)) return null;
+
+  const expected = headerName.toLowerCase();
+  for (const header of headers) {
+    if (header.name?.toLowerCase() !== expected) continue;
+    const value = header.value?.trim();
+    if (value) return value;
+  }
+
+  return null;
+}
+
+function normalizeEmailSender(value: string | null): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const emailMatch = trimmed.match(/<([^>]+)>/);
+  if (emailMatch?.[1]) {
+    return emailMatch[1].trim().toLowerCase();
+  }
+
+  return trimmed.toLowerCase();
+}
+
+function normalizeCompactText(
+  value: string | undefined,
+  maxLength = 100,
+): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return null;
+  return normalized.slice(0, maxLength);
+}
+
+function formatDistanceKm(distanceMeters: number): string {
+  return `${(distanceMeters / 1000).toFixed(1)} km`;
+}
+
+function formatDateOnly(timestampMs: number): string {
+  return new Date(timestampMs).toISOString().slice(0, 10);
+}
+
 const googleCalendarAdapter: IntegrationSyncAdapter = {
   id: "google_calendar",
   execute: async ({
@@ -306,6 +411,276 @@ const spotifyAdapter: IntegrationSyncAdapter = {
   },
 };
 
+const slackAdapter: IntegrationSyncAdapter = {
+  id: "slack",
+  execute: async ({
+    accessToken,
+    dayKey,
+    timeZone,
+    syncStartedAt,
+    requestJson,
+  }) => {
+    const { start, end } = getProviderDayRange(dayKey, timeZone);
+    const nextDayStart = end + 1;
+    const query = encodeURIComponent(
+      `after:${formatDateOnly(start)} before:${formatDateOnly(nextDayStart)}`,
+    );
+
+    const payload = await requestJson<{
+      ok?: boolean;
+      error?: string;
+      messages?: {
+        total?: number;
+        matches?: Array<{
+          text?: string;
+          channel?: { name?: string };
+        }>;
+      };
+    }>(
+      `https://slack.com/api/search.messages?count=20&sort=timestamp&sort_dir=desc&query=${query}`,
+      accessToken,
+      syncStartedAt,
+    );
+
+    if (payload.ok === false) {
+      throw new ProviderAdapterError({
+        provider: "slack",
+        operation: "daily_sync",
+        retryable: false,
+        message: `Slack API error: ${payload.error ?? "unknown_error"}`,
+      });
+    }
+
+    const matches = payload.messages?.matches ?? [];
+    const totalMessages =
+      typeof payload.messages?.total === "number" &&
+      Number.isFinite(payload.messages.total)
+        ? payload.messages.total
+        : matches.length;
+
+    const channels = new Set<string>();
+    for (const match of matches) {
+      const channel = normalizeCompactText(match.channel?.name, 64);
+      if (channel) {
+        channels.add(channel);
+      }
+    }
+
+    const snippets = matches
+      .map((match) => normalizeCompactText(match.text))
+      .filter((value): value is string => Boolean(value))
+      .slice(0, 5);
+
+    return {
+      summary:
+        totalMessages > 0
+          ? `Slack: ${totalMessages} matched message${totalMessages === 1 ? "" : "s"} across ${channels.size} channel${channels.size === 1 ? "" : "s"}.`
+          : "Slack: no message activity for this day.",
+      signals: sanitizeSignals([
+        totalMessages > 0
+          ? `${totalMessages} Slack messages`
+          : "No Slack messages",
+        channels.size > 0
+          ? `${channels.size} active Slack channels`
+          : "No channel activity",
+        ...snippets,
+      ]),
+    };
+  },
+};
+
+const stravaAdapter: IntegrationSyncAdapter = {
+  id: "strava",
+  execute: async ({
+    accessToken,
+    dayKey,
+    timeZone,
+    syncStartedAt,
+    requestJson,
+  }) => {
+    const { start, end } = getProviderDayRange(dayKey, timeZone);
+    const afterSeconds = Math.floor(start / 1000);
+    const beforeSeconds = Math.floor(end / 1000);
+
+    const payload = await requestJson<
+      Array<{
+        name?: string;
+        type?: string;
+        distance?: number;
+        moving_time?: number;
+        start_date?: string;
+      }>
+    >(
+      `https://www.strava.com/api/v3/athlete/activities?after=${afterSeconds}&before=${beforeSeconds}&per_page=30&page=1`,
+      accessToken,
+      syncStartedAt,
+    );
+
+    const activities = (payload ?? []).filter((activity) => {
+      const startedAt = activity.start_date
+        ? new Date(activity.start_date).getTime()
+        : NaN;
+      return (
+        Number.isFinite(startedAt) && startedAt >= start && startedAt <= end
+      );
+    });
+
+    const totalDistanceMeters = activities.reduce((sum, activity) => {
+      if (
+        typeof activity.distance === "number" &&
+        Number.isFinite(activity.distance) &&
+        activity.distance > 0
+      ) {
+        return sum + activity.distance;
+      }
+
+      return sum;
+    }, 0);
+
+    const totalMovingMinutes = activities.reduce((sum, activity) => {
+      if (
+        typeof activity.moving_time === "number" &&
+        Number.isFinite(activity.moving_time) &&
+        activity.moving_time > 0
+      ) {
+        return sum + Math.round(activity.moving_time / 60);
+      }
+
+      return sum;
+    }, 0);
+
+    const activityTypes = Array.from(
+      new Set(
+        activities
+          .map((activity) => normalizeCompactText(activity.type, 48))
+          .filter((value): value is string => Boolean(value)),
+      ),
+    ).slice(0, 5);
+
+    const activityNames = activities
+      .map((activity) => normalizeCompactText(activity.name, 80))
+      .filter((value): value is string => Boolean(value))
+      .slice(0, 5);
+
+    return {
+      summary:
+        activities.length > 0
+          ? `Strava: ${activities.length} activit${activities.length === 1 ? "y" : "ies"}, ${formatDistanceKm(totalDistanceMeters)}, ${totalMovingMinutes} active minutes.`
+          : "Strava: no recorded activities for this day.",
+      signals: sanitizeSignals([
+        activities.length > 0
+          ? `${activities.length} Strava activities`
+          : "No Strava activities",
+        totalDistanceMeters > 0
+          ? `${formatDistanceKm(totalDistanceMeters)} total distance`
+          : "No distance data",
+        totalMovingMinutes > 0
+          ? `${totalMovingMinutes} active minutes`
+          : "No moving-time data",
+        ...activityTypes,
+        ...activityNames,
+      ]),
+      context:
+        totalDistanceMeters > 0 || totalMovingMinutes > 0
+          ? {
+              schemaVersion: 1,
+              fitness: {
+                distanceMeters:
+                  totalDistanceMeters > 0 ? totalDistanceMeters : undefined,
+                activeMinutes:
+                  totalMovingMinutes > 0 ? totalMovingMinutes : undefined,
+                source: "strava",
+              },
+            }
+          : undefined,
+    };
+  },
+};
+
+const todoistAdapter: IntegrationSyncAdapter = {
+  id: "todoist",
+  execute: async ({
+    accessToken,
+    dayKey,
+    timeZone,
+    syncStartedAt,
+    requestJson,
+  }) => {
+    const { start, end } = getProviderDayRange(dayKey, timeZone);
+
+    const payload = await requestJson<{
+      items?: Array<{
+        content?: string;
+        completed_date?: string;
+        project_id?: string | number;
+      }>;
+      projects?: Array<{
+        id?: string | number;
+        name?: string;
+      }>;
+    }>(
+      `https://api.todoist.com/sync/v9/completed/get_all?since=${encodeURIComponent(new Date(start).toISOString())}&until=${encodeURIComponent(new Date(end).toISOString())}&limit=30`,
+      accessToken,
+      syncStartedAt,
+    );
+
+    const projectsById = new Map<string, string>();
+    for (const project of payload.projects ?? []) {
+      const id = project.id;
+      const key = id === undefined ? "" : String(id).trim();
+      const name = normalizeCompactText(project.name, 80);
+      if (key && name) {
+        projectsById.set(key, name);
+      }
+    }
+
+    const completedItems = (payload.items ?? []).filter((item) => {
+      const completedAt = item.completed_date
+        ? new Date(item.completed_date).getTime()
+        : NaN;
+      return (
+        Number.isFinite(completedAt) &&
+        completedAt >= start &&
+        completedAt <= end
+      );
+    });
+
+    const completedTaskNames = completedItems
+      .map((item) => normalizeCompactText(item.content))
+      .filter((value): value is string => Boolean(value))
+      .slice(0, 5);
+
+    const activeProjects = new Set<string>();
+    for (const item of completedItems) {
+      const projectKey =
+        item.project_id === undefined ? "" : String(item.project_id).trim();
+      if (!projectKey) continue;
+
+      const projectName = projectsById.get(projectKey);
+      if (projectName) {
+        activeProjects.add(projectName);
+      }
+    }
+
+    return {
+      summary:
+        completedItems.length > 0
+          ? `Todoist: ${completedItems.length} task${completedItems.length === 1 ? "" : "s"} completed across ${activeProjects.size} project${activeProjects.size === 1 ? "" : "s"}.`
+          : "Todoist: no completed tasks for this day.",
+      signals: sanitizeSignals([
+        completedItems.length > 0
+          ? `${completedItems.length} completed Todoist tasks`
+          : "No completed Todoist tasks",
+        activeProjects.size > 0
+          ? `${activeProjects.size} active Todoist projects`
+          : "No project activity",
+        ...Array.from(activeProjects).slice(0, 5),
+        ...completedTaskNames,
+      ]),
+    };
+  },
+};
+
 const googleFitAdapter: IntegrationSyncAdapter = {
   id: "google_fit",
   execute: async ({
@@ -393,13 +768,165 @@ const googleFitAdapter: IntegrationSyncAdapter = {
   },
 };
 
+const notionAdapter: IntegrationSyncAdapter = {
+  id: "notion",
+  execute: async ({
+    accessToken,
+    dayKey,
+    timeZone,
+    syncStartedAt,
+    requestJson,
+  }) => {
+    const { start, end } = getProviderDayRange(dayKey, timeZone);
+
+    const payload = await requestJson<{
+      results?: Array<{
+        object?: string;
+        last_edited_time?: string;
+        title?: Array<{ plain_text?: string }>;
+        properties?: Record<string, unknown>;
+      }>;
+    }>("https://api.notion.com/v1/search", accessToken, syncStartedAt, {
+      method: "POST",
+      headers: {
+        "Notion-Version": "2022-06-28",
+      },
+      body: JSON.stringify({
+        page_size: 25,
+        filter: {
+          property: "object",
+          value: "page",
+        },
+        sort: {
+          direction: "descending",
+          timestamp: "last_edited_time",
+        },
+      }),
+    });
+
+    const pages = (payload.results ?? []).filter((item) => {
+      const editedAt = item.last_edited_time
+        ? new Date(item.last_edited_time).getTime()
+        : NaN;
+      return Number.isFinite(editedAt) && editedAt >= start && editedAt <= end;
+    });
+
+    const topTitles = pages
+      .map((page) => extractNotionPageTitle(page as Record<string, unknown>))
+      .filter((value): value is string => Boolean(value))
+      .slice(0, 5);
+
+    return {
+      summary:
+        pages.length > 0
+          ? `Notion: ${pages.length} recently updated page${pages.length === 1 ? "" : "s"}.`
+          : "Notion: no recently updated pages for this day.",
+      signals: sanitizeSignals([
+        pages.length > 0
+          ? `${pages.length} updated Notion pages`
+          : "No updated Notion pages",
+        ...topTitles,
+      ]),
+    };
+  },
+};
+
+const gmailSummaryAdapter: IntegrationSyncAdapter = {
+  id: "gmail_summary",
+  execute: async ({
+    accessToken,
+    dayKey,
+    timeZone,
+    syncStartedAt,
+    requestJson,
+  }) => {
+    const { start, end } = getProviderDayRange(dayKey, timeZone);
+    const afterSeconds = Math.floor(start / 1000);
+    const beforeSeconds = Math.floor(end / 1000);
+    const query = encodeURIComponent(
+      `after:${afterSeconds} before:${beforeSeconds}`,
+    );
+
+    const messageList = await requestJson<{
+      messages?: Array<{ id?: string }>;
+      resultSizeEstimate?: number;
+    }>(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=25&q=${query}`,
+      accessToken,
+      syncStartedAt,
+    );
+
+    const messageIds = (messageList.messages ?? [])
+      .map((message) => message.id?.trim())
+      .filter((value): value is string => Boolean(value))
+      .slice(0, 10);
+
+    const messageDetails = await Promise.all(
+      messageIds.map(async (messageId) => {
+        return await requestJson<{
+          payload?: {
+            headers?: Array<{ name?: string; value?: string }>;
+          };
+        }>(
+          `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}?format=metadata&metadataHeaders=Subject&metadataHeaders=From`,
+          accessToken,
+          syncStartedAt,
+        );
+      }),
+    );
+
+    const senders = new Set<string>();
+    const subjects: string[] = [];
+
+    for (const detail of messageDetails) {
+      const headers = detail.payload?.headers;
+      const sender = normalizeEmailSender(readGmailHeader(headers, "From"));
+      if (sender) {
+        senders.add(sender);
+      }
+
+      const subject = readGmailHeader(headers, "Subject");
+      if (subject) {
+        subjects.push(subject);
+      }
+    }
+
+    const totalMessages =
+      typeof messageList.resultSizeEstimate === "number" &&
+      Number.isFinite(messageList.resultSizeEstimate)
+        ? messageList.resultSizeEstimate
+        : messageIds.length;
+
+    return {
+      summary:
+        totalMessages > 0
+          ? `Gmail: ${totalMessages} message${totalMessages === 1 ? "" : "s"} from ${senders.size} sender${senders.size === 1 ? "" : "s"}.`
+          : "Gmail: no messages for this day.",
+      signals: sanitizeSignals([
+        totalMessages > 0
+          ? `${totalMessages} Gmail messages`
+          : "No Gmail messages",
+        senders.size > 0
+          ? `${senders.size} unique senders`
+          : "No sender activity",
+        ...subjects.slice(0, 5),
+      ]),
+    };
+  },
+};
+
 const integrationSyncAdapterRegistry: Record<
   IntegrationProvider,
   IntegrationSyncAdapter
 > = {
   google_calendar: googleCalendarAdapter,
   google_fit: googleFitAdapter,
+  gmail_summary: gmailSummaryAdapter,
+  slack: slackAdapter,
+  strava: stravaAdapter,
+  todoist: todoistAdapter,
   spotify: spotifyAdapter,
+  notion: notionAdapter,
   apple_health: {
     id: "apple_health",
     execute: async () => {
@@ -409,6 +936,18 @@ const integrationSyncAdapterRegistry: Record<
         retryable: false,
         message:
           "Apple Health sync requires client-device upload. Use syncAppleHealthDailyData from mobile.",
+      });
+    },
+  },
+  apple_calendar: {
+    id: "apple_calendar",
+    execute: async () => {
+      throw new ProviderAdapterError({
+        provider: "apple_calendar",
+        operation: "daily_sync",
+        retryable: false,
+        message:
+          "Apple Calendar sync requires client-device calendar context upload.",
       });
     },
   },
