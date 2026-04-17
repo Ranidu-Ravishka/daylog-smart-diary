@@ -27,8 +27,14 @@ const providerIcons: Record<
 > = {
   google_calendar: "calendar-outline",
   google_fit: "walk-outline",
+  gmail_summary: "mail-outline",
   spotify: "musical-notes-outline",
   apple_health: "heart-outline",
+  apple_calendar: "calendar-number-outline",
+  notion: "document-text-outline",
+  slack: "chatbubbles-outline",
+  strava: "bicycle-outline",
+  todoist: "list-outline",
 };
 
 export function FinishStep({

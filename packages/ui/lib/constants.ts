@@ -31,8 +31,14 @@ export const SETTINGS_DEFAULTS = USER_SETTINGS_DEFAULTS;
 export const INTEGRATION_PROVIDERS = [
   "google_calendar",
   "google_fit",
+  "gmail_summary",
   "spotify",
   "apple_health",
+  "apple_calendar",
+  "notion",
+  "slack",
+  "strava",
+  "todoist",
 ] as const;
 
 export type IntegrationProvider = (typeof INTEGRATION_PROVIDERS)[number];
@@ -52,6 +58,10 @@ export const INTEGRATION_PROVIDER_META: Record<
     label: "Google Fit",
     description: "Sync steps and sleep metrics",
   },
+  gmail_summary: {
+    label: "Gmail Summary",
+    description: "Summarize inbox activity signals",
+  },
   spotify: {
     label: "Spotify",
     description: "Include listening activity signals",
@@ -59,5 +69,25 @@ export const INTEGRATION_PROVIDER_META: Record<
   apple_health: {
     label: "Apple Health",
     description: "Upload device health metrics",
+  },
+  apple_calendar: {
+    label: "Apple Calendar",
+    description: "Capture calendar context from Apple devices",
+  },
+  notion: {
+    label: "Notion",
+    description: "Bring notes and workspace updates into context",
+  },
+  slack: {
+    label: "Slack",
+    description: "Add team communication signals",
+  },
+  strava: {
+    label: "Strava",
+    description: "Sync workouts and movement trends",
+  },
+  todoist: {
+    label: "Todoist",
+    description: "Include tasks and completion patterns",
   },
 };

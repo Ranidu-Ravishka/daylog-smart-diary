@@ -1,4 +1,21 @@
-type OAuthProvider = "google_calendar" | "google_fit" | "spotify";
+type OAuthCredentialSource =
+  | "google"
+  | "spotify"
+  | "notion"
+  | "slack"
+  | "strava"
+  | "todoist";
+
+export type OAuthTokenExchangeMode = "form_urlencoded" | "basic_json";
+
+type OAuthProviderBaseConfig = {
+  authorizationUrl: string;
+  tokenUrl: string;
+  scopes: readonly string[];
+  credentialSource: OAuthCredentialSource;
+  authQueryParams?: Readonly<Record<string, string>>;
+  tokenExchangeMode: OAuthTokenExchangeMode;
+};
 
 type OAuthProviderConfig = {
   authorizationUrl: string;
@@ -6,14 +23,154 @@ type OAuthProviderConfig = {
   clientId: string;
   clientSecret: string;
   scopes: string[];
-  tokenAudience?: string;
+  credentialSource: OAuthCredentialSource;
+  authQueryParams?: Readonly<Record<string, string>>;
+  tokenExchangeMode: OAuthTokenExchangeMode;
 };
 
-export const OAUTH_PROVIDERS: OAuthProvider[] = [
-  "google_calendar",
-  "google_fit",
-  "spotify",
-];
+const OAUTH_PROVIDER_CONFIGS = {
+  google_calendar: {
+    authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+    tokenUrl: "https://oauth2.googleapis.com/token",
+    scopes: ["https://www.googleapis.com/auth/calendar.readonly"],
+    credentialSource: "google",
+    authQueryParams: {
+      access_type: "offline",
+      include_granted_scopes: "true",
+      prompt: "consent",
+    },
+    tokenExchangeMode: "form_urlencoded",
+  },
+  google_fit: {
+    authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+    tokenUrl: "https://oauth2.googleapis.com/token",
+    scopes: [
+      "https://www.googleapis.com/auth/fitness.activity.read",
+      "https://www.googleapis.com/auth/fitness.sleep.read",
+    ],
+    credentialSource: "google",
+    authQueryParams: {
+      access_type: "offline",
+      include_granted_scopes: "true",
+      prompt: "consent",
+    },
+    tokenExchangeMode: "form_urlencoded",
+  },
+  gmail_summary: {
+    authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+    tokenUrl: "https://oauth2.googleapis.com/token",
+    scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+    credentialSource: "google",
+    authQueryParams: {
+      access_type: "offline",
+      include_granted_scopes: "true",
+      prompt: "consent",
+    },
+    tokenExchangeMode: "form_urlencoded",
+  },
+  spotify: {
+    authorizationUrl: "https://accounts.spotify.com/authorize",
+    tokenUrl: "https://accounts.spotify.com/api/token",
+    scopes: [
+      "user-read-recently-played",
+      "user-top-read",
+      "user-read-playback-state",
+    ],
+    credentialSource: "spotify",
+    authQueryParams: {
+      show_dialog: "true",
+    },
+    tokenExchangeMode: "form_urlencoded",
+  },
+  notion: {
+    authorizationUrl: "https://api.notion.com/v1/oauth/authorize",
+    tokenUrl: "https://api.notion.com/v1/oauth/token",
+    scopes: [],
+    credentialSource: "notion",
+    authQueryParams: {
+      owner: "user",
+    },
+    tokenExchangeMode: "basic_json",
+  },
+  slack: {
+    authorizationUrl: "https://slack.com/oauth/v2/authorize",
+    tokenUrl: "https://slack.com/api/oauth.v2.access",
+    scopes: [],
+    credentialSource: "slack",
+    authQueryParams: {
+      user_scope: "search:read,users:read",
+    },
+    tokenExchangeMode: "form_urlencoded",
+  },
+  strava: {
+    authorizationUrl: "https://www.strava.com/oauth/authorize",
+    tokenUrl: "https://www.strava.com/oauth/token",
+    scopes: ["read,activity:read_all"],
+    credentialSource: "strava",
+    authQueryParams: {
+      approval_prompt: "auto",
+    },
+    tokenExchangeMode: "form_urlencoded",
+  },
+  todoist: {
+    authorizationUrl: "https://todoist.com/oauth/authorize",
+    tokenUrl: "https://todoist.com/oauth/access_token",
+    scopes: [],
+    credentialSource: "todoist",
+    tokenExchangeMode: "form_urlencoded",
+  },
+} as const satisfies Record<string, OAuthProviderBaseConfig>;
+
+export type OAuthProvider = keyof typeof OAUTH_PROVIDER_CONFIGS;
+
+export const OAUTH_PROVIDERS: OAuthProvider[] = Object.keys(
+  OAUTH_PROVIDER_CONFIGS,
+) as OAuthProvider[];
+
+function getOAuthCredentialEnvNames(source: OAuthCredentialSource): {
+  clientIdEnv: string;
+  clientSecretEnv: string;
+} {
+  if (source === "spotify") {
+    return {
+      clientIdEnv: "SPOTIFY_CLIENT_ID",
+      clientSecretEnv: "SPOTIFY_CLIENT_SECRET",
+    };
+  }
+
+  if (source === "notion") {
+    return {
+      clientIdEnv: "NOTION_CLIENT_ID",
+      clientSecretEnv: "NOTION_CLIENT_SECRET",
+    };
+  }
+
+  if (source === "slack") {
+    return {
+      clientIdEnv: "SLACK_CLIENT_ID",
+      clientSecretEnv: "SLACK_CLIENT_SECRET",
+    };
+  }
+
+  if (source === "strava") {
+    return {
+      clientIdEnv: "STRAVA_CLIENT_ID",
+      clientSecretEnv: "STRAVA_CLIENT_SECRET",
+    };
+  }
+
+  if (source === "todoist") {
+    return {
+      clientIdEnv: "TODOIST_CLIENT_ID",
+      clientSecretEnv: "TODOIST_CLIENT_SECRET",
+    };
+  }
+
+  return {
+    clientIdEnv: "GOOGLE_CLIENT_ID",
+    clientSecretEnv: "GOOGLE_CLIENT_SECRET",
+  };
+}
 
 function isPlaceholderCredential(value: string): boolean {
   const normalized = value.trim().toLowerCase();
@@ -51,51 +208,22 @@ export function isOAuthProvider(provider: string): provider is OAuthProvider {
 export function getOAuthProviderConfig(
   provider: OAuthProvider,
 ): OAuthProviderConfig {
-  switch (provider) {
-    case "google_calendar": {
-      const clientId = readOAuthCredential("GOOGLE_CLIENT_ID");
-      const clientSecret = readOAuthCredential("GOOGLE_CLIENT_SECRET");
-      return {
-        authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-        tokenUrl: "https://oauth2.googleapis.com/token",
-        clientId,
-        clientSecret,
-        scopes: ["https://www.googleapis.com/auth/calendar.readonly"],
-      };
-    }
-    case "google_fit": {
-      const clientId = readOAuthCredential("GOOGLE_CLIENT_ID");
-      const clientSecret = readOAuthCredential("GOOGLE_CLIENT_SECRET");
-      return {
-        authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-        tokenUrl: "https://oauth2.googleapis.com/token",
-        clientId,
-        clientSecret,
-        scopes: [
-          "https://www.googleapis.com/auth/fitness.activity.read",
-          "https://www.googleapis.com/auth/fitness.sleep.read",
-        ],
-      };
-    }
-    case "spotify": {
-      const clientId = readOAuthCredential("SPOTIFY_CLIENT_ID");
-      const clientSecret = readOAuthCredential("SPOTIFY_CLIENT_SECRET");
-      return {
-        authorizationUrl: "https://accounts.spotify.com/authorize",
-        tokenUrl: "https://accounts.spotify.com/api/token",
-        clientId,
-        clientSecret,
-        scopes: [
-          "user-read-recently-played",
-          "user-top-read",
-          "user-read-playback-state",
-        ],
-        tokenAudience: "spotify",
-      };
-    }
-    default:
-      throw new Error("Unsupported OAuth provider");
-  }
+  const base = OAUTH_PROVIDER_CONFIGS[provider];
+  const { clientIdEnv, clientSecretEnv } = getOAuthCredentialEnvNames(
+    base.credentialSource,
+  );
+
+  return {
+    authorizationUrl: base.authorizationUrl,
+    tokenUrl: base.tokenUrl,
+    clientId: readOAuthCredential(clientIdEnv),
+    clientSecret: readOAuthCredential(clientSecretEnv),
+    scopes: [...base.scopes],
+    credentialSource: base.credentialSource,
+    authQueryParams:
+      "authQueryParams" in base ? base.authQueryParams : undefined,
+    tokenExchangeMode: base.tokenExchangeMode,
+  };
 }
 
 export function getAppBaseUrl(requestOrigin: string): string {

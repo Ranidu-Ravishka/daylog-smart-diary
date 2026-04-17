@@ -317,8 +317,14 @@ export default function DashboardPage() {
     location: "Location (coarse foreground)",
     google_calendar: "Google Calendar",
     google_fit: "Google Fit",
+    gmail_summary: "Gmail Summary",
     spotify: "Spotify",
     apple_health: "Apple Health",
+    apple_calendar: "Apple Calendar",
+    notion: "Notion",
+    slack: "Slack",
+    strava: "Strava",
+    todoist: "Todoist",
   };
 
   const summaryMetrics = summary?.metrics;

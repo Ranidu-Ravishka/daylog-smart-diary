@@ -86,6 +86,145 @@ describe("provider adapter runtime behavior", () => {
     expect(result.signals).toEqual(["No track playback", "No artist activity"]);
   });
 
+  it("summarizes slack search activity", async () => {
+    const requestJson = vi.fn().mockResolvedValue({
+      ok: true,
+      messages: {
+        total: 3,
+        matches: [
+          {
+            text: "  Deploy update  ",
+            channel: { name: "engineering" },
+          },
+          {
+            text: "On-call triage",
+            channel: { name: "incident-response" },
+          },
+        ],
+      },
+    });
+
+    const adapter = resolveIntegrationSyncAdapter("slack");
+    const result = await adapter.execute({
+      ...(BASE_SYNC_INPUT as any),
+      requestJson,
+    });
+
+    expect(requestJson).toHaveBeenCalledTimes(1);
+    expect(requestJson.mock.calls[0]?.[0]).toContain(
+      "slack.com/api/search.messages",
+    );
+    expect(result.summary).toBe("Slack: 3 matched messages across 2 channels.");
+    expect(result.signals).toEqual([
+      "3 Slack messages",
+      "2 active Slack channels",
+      "Deploy update",
+      "On-call triage",
+    ]);
+  });
+
+  it("summarizes strava activity volume and distance", async () => {
+    const requestJson = vi.fn().mockResolvedValue([
+      {
+        name: "Morning Run",
+        type: "Run",
+        distance: 5000,
+        moving_time: 1800,
+        start_date: "2026-04-06T07:00:00.000Z",
+      },
+      {
+        name: "Lunch Ride",
+        type: "Ride",
+        distance: 25000,
+        moving_time: 3600,
+        start_date: "2026-04-06T12:00:00.000Z",
+      },
+      {
+        name: "Outside window",
+        type: "Run",
+        distance: 1000,
+        moving_time: 600,
+        start_date: "2026-04-07T08:00:00.000Z",
+      },
+    ]);
+
+    const adapter = resolveIntegrationSyncAdapter("strava");
+    const result = await adapter.execute({
+      ...(BASE_SYNC_INPUT as any),
+      requestJson,
+    });
+
+    expect(requestJson).toHaveBeenCalledTimes(1);
+    expect(requestJson.mock.calls[0]?.[0]).toContain(
+      "www.strava.com/api/v3/athlete/activities",
+    );
+    expect(result.summary).toBe(
+      "Strava: 2 activities, 30.0 km, 90 active minutes.",
+    );
+    expect(result.signals).toEqual([
+      "2 Strava activities",
+      "30.0 km total distance",
+      "90 active minutes",
+      "Run",
+      "Ride",
+      "Morning Run",
+      "Lunch Ride",
+    ]);
+    expect(result.context?.fitness).toEqual({
+      distanceMeters: 30000,
+      activeMinutes: 90,
+      source: "strava",
+    });
+  });
+
+  it("summarizes todoist completed task signals", async () => {
+    const requestJson = vi.fn().mockResolvedValue({
+      items: [
+        {
+          content: "Finalize sprint plan",
+          completed_date: "2026-04-06T09:00:00.000Z",
+          project_id: "1001",
+        },
+        {
+          content: "Buy groceries",
+          completed_date: "2026-04-06T18:30:00.000Z",
+          project_id: "1002",
+        },
+        {
+          content: "Outside window",
+          completed_date: "2026-04-07T09:00:00.000Z",
+          project_id: "1003",
+        },
+      ],
+      projects: [
+        { id: "1001", name: "Work" },
+        { id: "1002", name: "Personal" },
+      ],
+    });
+
+    const adapter = resolveIntegrationSyncAdapter("todoist");
+    const result = await adapter.execute({
+      ...(BASE_SYNC_INPUT as any),
+      requestJson,
+    });
+
+    expect(requestJson).toHaveBeenCalledTimes(1);
+    expect(requestJson.mock.calls[0]?.[0]).toContain(
+      "api.todoist.com/sync/v9/completed/get_all",
+    );
+    expect(result.summary).toBe(
+      "Todoist: 2 tasks completed across 2 projects.",
+    );
+    expect(result.signals).toEqual([
+      "2 completed Todoist tasks",
+      "2 active Todoist projects",
+      "Work",
+      "Personal",
+      "Finalize sprint plan",
+      "Buy groceries",
+    ]);
+  });
+
   it("normalizes google fit aggregate payloads with valid metrics", async () => {
     const requestJson = vi.fn().mockResolvedValue({
       bucket: [
@@ -141,6 +280,90 @@ describe("provider adapter runtime behavior", () => {
       steps: 1500,
       source: "google_fit",
     });
+  });
+
+  it("normalizes notion updated pages for the target day", async () => {
+    const requestJson = vi.fn().mockResolvedValue({
+      results: [
+        {
+          object: "page",
+          last_edited_time: "2026-04-06T09:00:00.000Z",
+          properties: {
+            Name: {
+              type: "title",
+              title: [{ plain_text: "Daily Notes" }],
+            },
+          },
+        },
+        {
+          object: "page",
+          last_edited_time: "2026-04-07T09:00:00.000Z",
+          properties: {
+            Name: {
+              type: "title",
+              title: [{ plain_text: "Outside Window" }],
+            },
+          },
+        },
+      ],
+    });
+
+    const adapter = resolveIntegrationSyncAdapter("notion");
+    const result = await adapter.execute({
+      ...(BASE_SYNC_INPUT as any),
+      requestJson,
+    });
+
+    expect(requestJson).toHaveBeenCalledTimes(1);
+    expect(requestJson.mock.calls[0]?.[0]).toBe(
+      "https://api.notion.com/v1/search",
+    );
+    expect(requestJson.mock.calls[0]?.[3]).toMatchObject({ method: "POST" });
+    expect(result.summary).toBe("Notion: 1 recently updated page.");
+    expect(result.signals).toEqual(["1 updated Notion pages", "Daily Notes"]);
+  });
+
+  it("summarizes gmail message volume and sender diversity", async () => {
+    const requestJson = vi
+      .fn()
+      .mockResolvedValueOnce({
+        messages: [{ id: "m1" }, { id: "m2" }],
+        resultSizeEstimate: 2,
+      })
+      .mockResolvedValueOnce({
+        payload: {
+          headers: [
+            { name: "From", value: "Alice <alice@example.com>" },
+            { name: "Subject", value: "Project update" },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        payload: {
+          headers: [
+            { name: "From", value: "Bob <bob@example.com>" },
+            { name: "Subject", value: "Meeting notes" },
+          ],
+        },
+      });
+
+    const adapter = resolveIntegrationSyncAdapter("gmail_summary");
+    const result = await adapter.execute({
+      ...(BASE_SYNC_INPUT as any),
+      requestJson,
+    });
+
+    expect(requestJson).toHaveBeenCalledTimes(3);
+    expect(requestJson.mock.calls[0]?.[0]).toContain(
+      "gmail.googleapis.com/gmail/v1/users/me/messages",
+    );
+    expect(result.summary).toBe("Gmail: 2 messages from 2 senders.");
+    expect(result.signals).toEqual([
+      "2 Gmail messages",
+      "2 unique senders",
+      "Project update",
+      "Meeting notes",
+    ]);
   });
 
   it("throws an explicit adapter error for apple health sync", async () => {

@@ -98,6 +98,7 @@ function sanitizeProviderFailureMessage(args: {
 type IntegrationsSectionProps = {
   styles: ProfileStyles;
   colors: ThemeColors;
+  supportedProviders: string[];
   isPreferencesMissing: boolean;
   autoSyncIntegrations: boolean;
   onToggleAutoSyncIntegrations: () => void;
@@ -121,6 +122,7 @@ type IntegrationsSectionProps = {
 export function IntegrationsSection({
   styles,
   colors,
+  supportedProviders,
   isPreferencesMissing,
   autoSyncIntegrations,
   onToggleAutoSyncIntegrations,
@@ -139,6 +141,11 @@ export function IntegrationsSection({
 }: IntegrationsSectionProps) {
   const [selectedProviderForDetail, setSelectedProviderForDetail] =
     React.useState<string | null>(null);
+
+  const supportedProviderSet = React.useMemo(
+    () => new Set(supportedProviders),
+    [supportedProviders],
+  );
 
   const getProviderLabel = React.useCallback(
     (provider: string) =>
@@ -355,6 +362,7 @@ export function IntegrationsSection({
             const healthSnapshot = integrationHealthByProvider.get(provider);
             const health = healthSnapshot?.health ?? null;
             const syncRun = syncRunByProvider.get(provider);
+            const isSupportedProvider = supportedProviderSet.has(provider);
             const status =
               integration?.status ??
               healthSnapshot?.integrationStatus ??
@@ -384,11 +392,13 @@ export function IntegrationsSection({
                   integration?.lastError ??
                   "Latest sync failed. Retry to recover.")
                 : undefined;
-            const statusLabel = isAppleHealthSetupBlocked
-              ? Platform.OS === "ios"
-                ? "setup required"
-                : "iOS only"
-              : status;
+            const statusLabel = !isSupportedProvider
+              ? "coming soon"
+              : isAppleHealthSetupBlocked
+                ? Platform.OS === "ios"
+                  ? "setup required"
+                  : "iOS only"
+                : status;
             const syncStateLabel =
               syncState === "success"
                 ? "success"
@@ -422,13 +432,15 @@ export function IntegrationsSection({
                         <View
                           style={[
                             styles.integrationStatusBadge,
-                            isAppleHealthSetupBlocked
-                              ? styles.integrationStatusSetupRequired
-                              : status === "connected"
-                                ? styles.integrationStatusConnected
-                                : status === "error"
-                                  ? styles.integrationStatusError
-                                  : styles.integrationStatusDisconnected,
+                            !isSupportedProvider
+                              ? styles.integrationStatusDisconnected
+                              : isAppleHealthSetupBlocked
+                                ? styles.integrationStatusSetupRequired
+                                : status === "connected"
+                                  ? styles.integrationStatusConnected
+                                  : status === "error"
+                                    ? styles.integrationStatusError
+                                    : styles.integrationStatusDisconnected,
                           ]}
                         >
                           <Text style={styles.integrationStatusText}>
@@ -460,60 +472,81 @@ export function IntegrationsSection({
                       </View>
                     ) : null}
 
-                    <Text style={styles.integrationSubMuted}>
-                      Last sync: {formatSyncTimestamp(latestSyncAt)}
-                    </Text>
-
-                    <View style={styles.integrationHealthStateRow}>
-                      <Text style={styles.integrationSubMuted}>Provider:</Text>
-                      <View
-                        style={[
-                          styles.integrationHealthStateBadge,
-                          syncState === "success"
-                            ? styles.integrationHealthStateBadgeSuccess
-                            : syncState === "failure"
-                              ? styles.integrationHealthStateBadgeFailure
-                              : styles.integrationHealthStateBadgeMonitoring,
-                        ]}
-                      >
-                        <Text style={styles.integrationHealthStateText}>
-                          {syncStateLabel}
+                    {isSupportedProvider ? (
+                      <>
+                        <Text style={styles.integrationSubMuted}>
+                          Last sync: {formatSyncTimestamp(latestSyncAt)}
                         </Text>
-                      </View>
-                    </View>
 
-                    {syncRun?.status ? (
+                        <View style={styles.integrationHealthStateRow}>
+                          <Text style={styles.integrationSubMuted}>
+                            Provider:
+                          </Text>
+                          <View
+                            style={[
+                              styles.integrationHealthStateBadge,
+                              syncState === "success"
+                                ? styles.integrationHealthStateBadgeSuccess
+                                : syncState === "failure"
+                                  ? styles.integrationHealthStateBadgeFailure
+                                  : styles.integrationHealthStateBadgeMonitoring,
+                            ]}
+                          >
+                            <Text style={styles.integrationHealthStateText}>
+                              {syncStateLabel}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {syncRun?.status ? (
+                          <Text style={styles.integrationSubMuted}>
+                            Your run today: {syncRun.status}
+                            {syncRun.lastError ? ` — ${syncRun.lastError}` : ""}
+                          </Text>
+                        ) : null}
+
+                        {warningMessage ? (
+                          <View style={styles.integrationSyncWarningRow}>
+                            <Ionicons
+                              name="warning-outline"
+                              size={13}
+                              color={colors.warning}
+                            />
+                            <Text style={styles.integrationErrorText}>
+                              {warningMessage}
+                            </Text>
+                          </View>
+                        ) : null}
+
+                        <TouchableOpacity
+                          style={styles.integrationDetailLinkButton}
+                          onPress={() => setSelectedProviderForDetail(provider)}
+                          activeOpacity={0.75}
+                        >
+                          <Text style={styles.integrationDetailLinkText}>
+                            View health details
+                          </Text>
+                        </TouchableOpacity>
+                      </>
+                    ) : (
                       <Text style={styles.integrationSubMuted}>
-                        Your run today: {syncRun.status}
-                        {syncRun.lastError ? ` — ${syncRun.lastError}` : ""}
+                        This integration is planned and will be available in a
+                        future update.
                       </Text>
-                    ) : null}
-
-                    {warningMessage ? (
-                      <View style={styles.integrationSyncWarningRow}>
-                        <Ionicons
-                          name="warning-outline"
-                          size={13}
-                          color={colors.warning}
-                        />
-                        <Text style={styles.integrationErrorText}>
-                          {warningMessage}
-                        </Text>
-                      </View>
-                    ) : null}
-
-                    <TouchableOpacity
-                      style={styles.integrationDetailLinkButton}
-                      onPress={() => setSelectedProviderForDetail(provider)}
-                      activeOpacity={0.75}
-                    >
-                      <Text style={styles.integrationDetailLinkText}>
-                        View health details
-                      </Text>
-                    </TouchableOpacity>
+                    )}
 
                     <View style={styles.integrationActionsRow}>
-                      {status !== "connected" ? (
+                      {!isSupportedProvider ? (
+                        <TouchableOpacity
+                          style={styles.integrationSecondaryBtn}
+                          disabled
+                          activeOpacity={1}
+                        >
+                          <Text style={styles.integrationSecondaryBtnText}>
+                            Coming soon
+                          </Text>
+                        </TouchableOpacity>
+                      ) : status !== "connected" ? (
                         <TouchableOpacity
                           style={styles.integrationPrimaryBtn}
                           onPress={() => {

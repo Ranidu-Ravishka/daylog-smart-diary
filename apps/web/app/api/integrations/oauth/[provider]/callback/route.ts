@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import { api } from "@repo/backend/convex";
 import {
+  type OAuthProvider,
   getAppBaseUrl,
   getOAuthProviderConfig,
   isOAuthProvider,
@@ -176,7 +177,11 @@ function resolveProviderDeniedMessage(
     return "OAuth authorization was denied.";
   }
 
-  if (provider === "google_calendar" || provider === "google_fit") {
+  if (
+    provider === "google_calendar" ||
+    provider === "google_fit" ||
+    provider === "gmail_summary"
+  ) {
     return "Google OAuth access is blocked. Add this Google account as a Test user in Google Cloud OAuth consent screen, or publish the app.";
   }
 
@@ -184,7 +189,7 @@ function resolveProviderDeniedMessage(
 }
 
 async function exchangeCodeForAccessToken(
-  provider: "google_calendar" | "google_fit" | "spotify",
+  provider: OAuthProvider,
   code: string,
   redirectUri: string,
 ): Promise<{
@@ -195,20 +200,41 @@ async function exchangeCodeForAccessToken(
 }> {
   const config = getOAuthProviderConfig(provider);
 
-  const body = new URLSearchParams();
-  body.set("grant_type", "authorization_code");
-  body.set("code", code);
-  body.set("redirect_uri", redirectUri);
-  body.set("client_id", config.clientId);
-  body.set("client_secret", config.clientSecret);
+  let response: Response;
 
-  const response = await fetch(config.tokenUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: body.toString(),
-  });
+  if (config.tokenExchangeMode === "basic_json") {
+    const basicAuth = Buffer.from(
+      `${config.clientId}:${config.clientSecret}`,
+    ).toString("base64");
+
+    response = await fetch(config.tokenUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${basicAuth}`,
+      },
+      body: JSON.stringify({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: redirectUri,
+      }),
+    });
+  } else {
+    const body = new URLSearchParams();
+    body.set("grant_type", "authorization_code");
+    body.set("code", code);
+    body.set("redirect_uri", redirectUri);
+    body.set("client_id", config.clientId);
+    body.set("client_secret", config.clientSecret);
+
+    response = await fetch(config.tokenUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: body.toString(),
+    });
+  }
 
   if (!response.ok) {
     throw new Error(
@@ -216,16 +242,75 @@ async function exchangeCodeForAccessToken(
     );
   }
 
-  const tokenPayload = (await response.json()) as {
-    access_token?: string;
-    refresh_token?: string;
-    expires_in?: number;
-    scope?: string;
+  const tokenPayload = (await response.json()) as Record<string, unknown>;
+
+  const splitScopes = (raw: string | undefined): string[] => {
+    if (!raw) return [];
+    return raw
+      .split(/[\s,]+/)
+      .map((part) => part.trim())
+      .filter(Boolean);
   };
 
-  if (!tokenPayload.access_token) {
+  if (provider === "slack") {
+    if (tokenPayload.ok === false) {
+      const providerError =
+        typeof tokenPayload.error === "string"
+          ? tokenPayload.error
+          : "unknown_error";
+      throw new Error(
+        `OAuth token exchange returned Slack error: ${providerError}`,
+      );
+    }
+
+    const authedUser =
+      typeof tokenPayload.authed_user === "object" &&
+      tokenPayload.authed_user !== null
+        ? (tokenPayload.authed_user as Record<string, unknown>)
+        : null;
+
+    const userToken =
+      typeof authedUser?.access_token === "string"
+        ? authedUser.access_token.trim()
+        : "";
+    const botToken =
+      typeof tokenPayload.access_token === "string"
+        ? tokenPayload.access_token.trim()
+        : "";
+    const accessToken = userToken || botToken;
+
+    if (!accessToken) {
+      throw new Error("OAuth token exchange returned no access token");
+    }
+
+    const scopeFromUser =
+      typeof authedUser?.scope === "string" ? authedUser.scope : undefined;
+    const scopeFromPayload =
+      typeof tokenPayload.scope === "string" ? tokenPayload.scope : undefined;
+    const grantedScope = splitScopes(scopeFromUser ?? scopeFromPayload);
+
+    return {
+      accessToken,
+      refreshToken: undefined,
+      accessTokenExpiresAt: undefined,
+      grantedScope: grantedScope.length > 0 ? grantedScope : config.scopes,
+    };
+  }
+
+  const accessToken =
+    typeof tokenPayload.access_token === "string"
+      ? tokenPayload.access_token.trim()
+      : "";
+
+  if (!accessToken) {
     throw new Error("OAuth token exchange returned no access token");
   }
+
+  const refreshToken =
+    typeof tokenPayload.refresh_token === "string" &&
+    tokenPayload.refresh_token.trim().length > 0
+      ? tokenPayload.refresh_token.trim()
+      : undefined;
 
   const expiresInSeconds =
     typeof tokenPayload.expires_in === "number" &&
@@ -234,19 +319,30 @@ async function exchangeCodeForAccessToken(
       ? tokenPayload.expires_in
       : undefined;
 
-  return {
-    accessToken: tokenPayload.access_token,
-    refreshToken:
-      typeof tokenPayload.refresh_token === "string" &&
-      tokenPayload.refresh_token.trim().length > 0
-        ? tokenPayload.refresh_token
-        : undefined,
-    accessTokenExpiresAt: expiresInSeconds
+  const expiresAtRaw =
+    typeof tokenPayload.expires_at === "number" &&
+    Number.isFinite(tokenPayload.expires_at) &&
+    tokenPayload.expires_at > 0
+      ? tokenPayload.expires_at
+      : undefined;
+
+  const accessTokenExpiresAt = expiresAtRaw
+    ? expiresAtRaw > 1_000_000_000_000
+      ? Math.floor(expiresAtRaw)
+      : Math.floor(expiresAtRaw * 1000)
+    : expiresInSeconds
       ? Date.now() + expiresInSeconds * 1000
-      : undefined,
-    grantedScope: tokenPayload.scope
-      ? tokenPayload.scope.split(" ").filter(Boolean)
-      : config.scopes,
+      : undefined;
+
+  const grantedScopeRaw =
+    typeof tokenPayload.scope === "string" ? tokenPayload.scope : undefined;
+  const grantedScope = splitScopes(grantedScopeRaw);
+
+  return {
+    accessToken,
+    refreshToken,
+    accessTokenExpiresAt,
+    grantedScope: grantedScope.length > 0 ? grantedScope : config.scopes,
   };
 }
 

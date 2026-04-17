@@ -1,9 +1,11 @@
-const CONNECTABLE_INTEGRATION_PROVIDERS = [
-  "google_calendar",
-  "google_fit",
-  "spotify",
-  "apple_health",
-] as const;
+import {
+  integrationPluginProviders,
+  oauthRefreshPluginProviders,
+  type IntegrationPluginProvider,
+} from "./integrationPlugins";
+
+const CONNECTABLE_INTEGRATION_PROVIDERS: readonly IntegrationPluginProvider[] =
+  integrationPluginProviders;
 
 const CONTEXTUAL_DAILY_DATA_PROVIDERS = [
   "location",
@@ -17,14 +19,10 @@ const DAILY_DATA_PROVIDERS = [
   ...CONTEXTUAL_DAILY_DATA_PROVIDERS,
 ] as const;
 
-const OAUTH_REFRESH_PROVIDERS = [
-  "google_calendar",
-  "google_fit",
-  "spotify",
-] as const;
+const OAUTH_REFRESH_PROVIDERS: readonly IntegrationPluginProvider[] =
+  oauthRefreshPluginProviders;
 
-export type IntegrationProvider =
-  (typeof CONNECTABLE_INTEGRATION_PROVIDERS)[number];
+export type IntegrationProvider = IntegrationPluginProvider;
 
 export type DailyDataProvider = (typeof DAILY_DATA_PROVIDERS)[number];
 
