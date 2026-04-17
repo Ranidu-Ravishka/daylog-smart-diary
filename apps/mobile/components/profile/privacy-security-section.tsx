@@ -11,6 +11,12 @@ import { ProfileToggleRow } from "./profile-toggle-row";
 type PrivacySecuritySectionProps = {
   styles: ProfileStyles;
   colors: ThemeColors;
+  biometricEnabled: boolean;
+  biometricAvailable: boolean;
+  biometricDisplayName: string;
+  promptOnAppOpen: boolean;
+  sessionTimeoutLabel: string;
+  hasAppPassword: boolean;
   isPreferencesMissing: boolean;
   locationPermissionStatus?: string;
   locationLastUpdatedAt?: number;
@@ -34,12 +40,22 @@ type PrivacySecuritySectionProps = {
   onToggleCalendarContext: () => void;
   onToggleCallSummary: () => void;
   onToggleMoodAssistance: () => void;
+  onToggleBiometric: () => void;
+  onTogglePromptOnAppOpen: () => void;
+  onSelectSessionTimeout: () => void;
+  onManageAppPassword: () => void;
   onOpenAboutLink: (path: string) => void;
 };
 
 export function PrivacySecuritySection({
   styles,
   colors,
+  biometricEnabled,
+  biometricAvailable,
+  biometricDisplayName,
+  promptOnAppOpen,
+  sessionTimeoutLabel,
+  hasAppPassword,
   isPreferencesMissing,
   locationPermissionStatus,
   locationLastUpdatedAt,
@@ -63,10 +79,83 @@ export function PrivacySecuritySection({
   onToggleCalendarContext,
   onToggleCallSummary,
   onToggleMoodAssistance,
+  onToggleBiometric,
+  onTogglePromptOnAppOpen,
+  onSelectSessionTimeout,
+  onManageAppPassword,
   onOpenAboutLink,
 }: PrivacySecuritySectionProps) {
   return (
     <>
+      <View style={styles.pad}>
+        <SectionHeader title="App Access" />
+        <AppCard>
+          <ProfileToggleRow
+            styles={styles}
+            colors={colors}
+            label={`Enable ${biometricDisplayName}`}
+            subtitle={
+              biometricAvailable
+                ? "Use biometric unlock when supported on this device."
+                : `${biometricDisplayName} is unavailable or not enrolled on this device.`
+            }
+            value={biometricEnabled}
+            onToggle={onToggleBiometric}
+            disabled={!biometricAvailable}
+          />
+          <View style={styles.divider} />
+          <ProfileToggleRow
+            styles={styles}
+            colors={colors}
+            label="Prompt on app open"
+            subtitle="Require biometric/PIN authentication when DayLog opens."
+            value={promptOnAppOpen}
+            onToggle={onTogglePromptOnAppOpen}
+            disabled={
+              promptOnAppOpen ? false : !biometricEnabled && !hasAppPassword
+            }
+          />
+          <View style={styles.divider} />
+          <TouchableOpacity
+            style={styles.aboutRow}
+            activeOpacity={0.75}
+            onPress={onSelectSessionTimeout}
+          >
+            <Ionicons name="timer-outline" size={18} color={colors.icon} />
+            <Text style={styles.aboutText}>Session Timeout</Text>
+            <Text style={styles.integrationSubMuted}>
+              {sessionTimeoutLabel}
+            </Text>
+          </TouchableOpacity>
+          <View style={styles.divider} />
+          <TouchableOpacity
+            style={styles.aboutRow}
+            activeOpacity={0.75}
+            onPress={onManageAppPassword}
+          >
+            <Ionicons
+              name={hasAppPassword ? "key-outline" : "lock-closed-outline"}
+              size={18}
+              color={colors.icon}
+            />
+            <Text style={styles.aboutText}>
+              {hasAppPassword
+                ? "Update App PIN/Password"
+                : "Set App PIN/Password"}
+            </Text>
+            <Ionicons
+              name="chevron-forward"
+              size={16}
+              color={colors.textTertiary}
+            />
+          </TouchableOpacity>
+          <Text style={styles.integrationSubMuted}>
+            PIN/password is used as a secure fallback when biometric auth fails
+            or is locked out.
+          </Text>
+        </AppCard>
+      </View>
+
       <View style={styles.pad}>
         <SectionHeader title="Privacy & Security" />
         <AppCard>

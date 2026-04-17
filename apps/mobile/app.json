@@ -77,6 +77,12 @@
       "@react-native-community/datetimepicker",
       "expo-font",
       "expo-web-browser",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow DayLog to use Face ID to unlock your app securely."
+        }
+      ],
       "expo-secure-store"
     ],
     "experiments": {

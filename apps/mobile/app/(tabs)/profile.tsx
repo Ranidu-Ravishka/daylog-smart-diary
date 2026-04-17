@@ -10,6 +10,8 @@ import {
   TouchableWithoutFeedback,
   Linking,
   AppState,
+  TextInput,
+  Pressable,
 } from "react-native";
 import * as ExpoLinking from "expo-linking";
 import * as Location from "expo-location";
@@ -77,6 +79,7 @@ import { Spacing } from "@/constants/theme";
 import { useAppTheme } from "@/components/theme-provider";
 import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
 import { createProfileStyles } from "@/components/profile/profile-styles";
+import { useAppLock } from "@/components/security/app-lock-provider";
 import {
   type AboutLink,
   type DeletionState,
@@ -245,6 +248,21 @@ function ProfileSkeleton() {
 /* ── Screen ────────────────────────────────────────────── */
 const SettingsScreen = () => {
   const { colors: c, effectiveTheme, setThemePreference } = useAppTheme();
+  const {
+    isReady: isAppLockReady,
+    biometricEnabled,
+    biometricAvailable,
+    biometricDisplayName,
+    promptOnAppOpen,
+    sessionTimeoutMs,
+    sessionTimeoutOptions,
+    hasPassword: hasAppPassword,
+    updateBiometricEnabled,
+    updatePromptOnAppOpen,
+    updateSessionTimeoutMs,
+    setAppPassword,
+    requestSensitiveReauth,
+  } = useAppLock();
   const styles = React.useMemo(() => createProfileStyles(c), [c]);
   const router = useRouter();
   const searchParams = useLocalSearchParams<{
@@ -386,6 +404,11 @@ const SettingsScreen = () => {
   const [activeSection, setActiveSection] =
     useState<ProfileSectionKey>("overview");
   const [showAdvancedStatus, setShowAdvancedStatus] = useState(false);
+  const [showAppPasswordModal, setShowAppPasswordModal] = useState(false);
+  const [appPasswordValue, setAppPasswordValue] = useState("");
+  const [appPasswordConfirmValue, setAppPasswordConfirmValue] = useState("");
+  const [isSavingAppPassword, setIsSavingAppPassword] = useState(false);
+  const [appPasswordError, setAppPasswordError] = useState<string | null>(null);
   const deletionState = deriveDeletionState(accountDeletionStatus);
   const deletionStateLabel = deletionState
     ? getDeletionStateLabel(deletionState)
@@ -1509,6 +1532,174 @@ const SettingsScreen = () => {
     showLifeContextConsentPrompt,
   ]);
 
+  const closeAppPasswordModal = useCallback(() => {
+    setShowAppPasswordModal(false);
+    setAppPasswordValue("");
+    setAppPasswordConfirmValue("");
+    setAppPasswordError(null);
+    setIsSavingAppPassword(false);
+  }, []);
+
+  const handleBiometricToggle = useCallback(async () => {
+    if (!isAppLockReady) {
+      return;
+    }
+
+    const nextEnabled = !biometricEnabled;
+    const result = await updateBiometricEnabled(nextEnabled);
+
+    if (!result.ok) {
+      Alert.alert(
+        "Biometric unavailable",
+        result.message ??
+          "Biometric authentication is unavailable on this device.",
+      );
+      return;
+    }
+
+    Alert.alert(
+      nextEnabled
+        ? `${biometricDisplayName} enabled`
+        : `${biometricDisplayName} disabled`,
+      nextEnabled
+        ? "You can now unlock DayLog with biometrics and fallback to PIN/password."
+        : "Biometric unlock has been disabled.",
+    );
+  }, [
+    biometricDisplayName,
+    biometricEnabled,
+    isAppLockReady,
+    updateBiometricEnabled,
+  ]);
+
+  const handlePromptOnAppOpenToggle = useCallback(async () => {
+    if (!isAppLockReady) {
+      return;
+    }
+
+    const nextEnabled = !promptOnAppOpen;
+
+    if (nextEnabled && !biometricEnabled && !hasAppPassword) {
+      Alert.alert(
+        "Add an unlock method first",
+        "Enable biometrics or set an app PIN/password before turning on open-app prompts.",
+      );
+      return;
+    }
+
+    try {
+      await updatePromptOnAppOpen(nextEnabled);
+    } catch {
+      Alert.alert("Update failed", "Could not update this security setting.");
+    }
+  }, [
+    biometricEnabled,
+    hasAppPassword,
+    isAppLockReady,
+    promptOnAppOpen,
+    updatePromptOnAppOpen,
+  ]);
+
+  const handleSelectSessionTimeout = useCallback(() => {
+    if (!isAppLockReady) {
+      return;
+    }
+
+    const timeoutButtons = sessionTimeoutOptions.map((option) => ({
+      text:
+        option.valueMs === sessionTimeoutMs
+          ? `${option.label} ✓`
+          : option.label,
+      onPress: () => {
+        void updateSessionTimeoutMs(option.valueMs);
+      },
+    }));
+
+    Alert.alert(
+      "Session Timeout",
+      "Require re-authentication after returning to DayLog from background:",
+      [...timeoutButtons, { text: "Cancel", style: "cancel" }],
+    );
+  }, [
+    isAppLockReady,
+    sessionTimeoutMs,
+    sessionTimeoutOptions,
+    updateSessionTimeoutMs,
+  ]);
+
+  const handleManageAppPassword = useCallback(() => {
+    void (async () => {
+      if (!isAppLockReady) {
+        return;
+      }
+
+      const granted = await requestSensitiveReauth({
+        reason: "Authenticate to manage app PIN/password",
+        force: true,
+      });
+
+      if (!granted) {
+        Alert.alert(
+          "Authentication required",
+          "Could not verify your identity to manage app password settings.",
+        );
+        return;
+      }
+
+      setAppPasswordValue("");
+      setAppPasswordConfirmValue("");
+      setAppPasswordError(null);
+      setShowAppPasswordModal(true);
+    })();
+  }, [isAppLockReady, requestSensitiveReauth]);
+
+  const handleSaveAppPassword = useCallback(() => {
+    void (async () => {
+      if (isSavingAppPassword) {
+        return;
+      }
+
+      if (appPasswordValue.trim().length < 4) {
+        setAppPasswordError("Use at least 4 characters for your PIN/password.");
+        return;
+      }
+
+      if (appPasswordValue !== appPasswordConfirmValue) {
+        setAppPasswordError("PIN/password entries do not match.");
+        return;
+      }
+
+      setIsSavingAppPassword(true);
+      setAppPasswordError(null);
+
+      try {
+        const result = await setAppPassword(appPasswordValue);
+        if (!result.ok) {
+          setAppPasswordError(
+            result.message ??
+              "Could not save app PIN/password. Please try again.",
+          );
+          return;
+        }
+
+        closeAppPasswordModal();
+        Alert.alert(
+          hasAppPassword ? "Password updated" : "Password enabled",
+          "App PIN/password fallback is now active.",
+        );
+      } finally {
+        setIsSavingAppPassword(false);
+      }
+    })();
+  }, [
+    appPasswordConfirmValue,
+    appPasswordValue,
+    closeAppPasswordModal,
+    hasAppPassword,
+    isSavingAppPassword,
+    setAppPassword,
+  ]);
+
   /* ── Callbacks ────────────────────────── */
   const handleSignOut = useCallback(() => {
     if (lockUnsafeDeletionNavigation) {
@@ -1526,25 +1717,40 @@ const SettingsScreen = () => {
   }, [lockUnsafeDeletionNavigation, signOut]);
 
   const handleExportData = useCallback(() => {
-    if (lockUnsafeDeletionNavigation) {
-      Alert.alert(
-        "Deletion in progress",
-        "Navigation is blocked until deletion cleanup is completed or fails.",
-      );
-      return;
-    }
+    void (async () => {
+      if (lockUnsafeDeletionNavigation) {
+        Alert.alert(
+          "Deletion in progress",
+          "Navigation is blocked until deletion cleanup is completed or fails.",
+        );
+        return;
+      }
 
-    const webAppUrl =
-      process.env.EXPO_PUBLIC_WEB_APP_URL ?? "http://localhost:3000";
-    const exportUrl = `${webAppUrl.replace(/\/$/, "")}/dashboard/export`;
+      const granted = await requestSensitiveReauth({
+        reason: "Authenticate to export your DayLog data",
+        force: true,
+      });
 
-    void WebBrowser.openBrowserAsync(exportUrl).catch(() => {
-      Alert.alert(
-        "Export unavailable",
-        "Could not open the export page right now. Please try again.",
-      );
-    });
-  }, [lockUnsafeDeletionNavigation]);
+      if (!granted) {
+        Alert.alert(
+          "Authentication required",
+          "Export was canceled because authentication did not complete.",
+        );
+        return;
+      }
+
+      const webAppUrl =
+        process.env.EXPO_PUBLIC_WEB_APP_URL ?? "http://localhost:3000";
+      const exportUrl = `${webAppUrl.replace(/\/$/, "")}/dashboard/export`;
+
+      void WebBrowser.openBrowserAsync(exportUrl).catch(() => {
+        Alert.alert(
+          "Export unavailable",
+          "Could not open the export page right now. Please try again.",
+        );
+      });
+    })();
+  }, [lockUnsafeDeletionNavigation, requestSensitiveReauth]);
 
   const submitAccountDeletionRequest = useCallback(async () => {
     logInfo("mobile_account_deletion_request_started", {
@@ -1605,37 +1811,53 @@ const SettingsScreen = () => {
   }, [accountDeletionStatus?.job, requestAccountDeletion, user]);
 
   const handleDeleteAccount = useCallback(() => {
-    if (isRequestingAccountDeletion || isFinalizingAccountDeletion) {
-      return;
-    }
+    void (async () => {
+      if (isRequestingAccountDeletion || isFinalizingAccountDeletion) {
+        return;
+      }
 
-    if (isAccountDeletionInProgress && !canRetryAccountDeletion) {
+      if (isAccountDeletionInProgress && !canRetryAccountDeletion) {
+        Alert.alert(
+          "Deletion in progress",
+          "Backend cleanup is still running. We will finish deleting your account automatically once cleanup is complete.",
+        );
+        return;
+      }
+
+      const granted = await requestSensitiveReauth({
+        reason: "Authenticate to continue with account deletion",
+        force: true,
+      });
+
+      if (!granted) {
+        Alert.alert(
+          "Authentication required",
+          "Account deletion was canceled because authentication did not complete.",
+        );
+        return;
+      }
+
       Alert.alert(
-        "Deletion in progress",
-        "Backend cleanup is still running. We will finish deleting your account automatically once cleanup is complete.",
-      );
-      return;
-    }
-
-    Alert.alert(
-      "Delete Account",
-      "This action is permanent and cannot be undone. All your data will be deleted.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            void submitAccountDeletionRequest();
+        "Delete Account",
+        "This action is permanent and cannot be undone. All your data will be deleted.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: () => {
+              void submitAccountDeletionRequest();
+            },
           },
-        },
-      ],
-    );
+        ],
+      );
+    })();
   }, [
     canRetryAccountDeletion,
     isAccountDeletionInProgress,
     isFinalizingAccountDeletion,
     isRequestingAccountDeletion,
+    requestSensitiveReauth,
     submitAccountDeletionRequest,
   ]);
 
@@ -2079,6 +2301,9 @@ const SettingsScreen = () => {
   const activeSectionMeta =
     PROFILE_SECTIONS.find((section) => section.key === activeSection) ??
     PROFILE_SECTIONS[0];
+  const sessionTimeoutLabel =
+    sessionTimeoutOptions.find((option) => option.valueMs === sessionTimeoutMs)
+      ?.label ?? "5 minutes";
   const quietHoursRangeLabel = `${format24hTo12h(quietHoursStart)} — ${format24hTo12h(quietHoursEnd)}`;
   const preferencesSnapshot: PreferencesSnapshot | undefined = preferences
     ? {
@@ -2197,6 +2422,12 @@ const SettingsScreen = () => {
           <PrivacySecuritySection
             styles={styles}
             colors={c}
+            biometricEnabled={biometricEnabled}
+            biometricAvailable={isAppLockReady && biometricAvailable}
+            biometricDisplayName={biometricDisplayName}
+            promptOnAppOpen={promptOnAppOpen}
+            sessionTimeoutLabel={sessionTimeoutLabel}
+            hasAppPassword={hasAppPassword}
             isPreferencesMissing={preferences === null}
             locationPermissionStatus={preferences?.locationPermissionStatus}
             locationLastUpdatedAt={preferences?.locationLastUpdatedAt}
@@ -2240,6 +2471,14 @@ const SettingsScreen = () => {
             onToggleMoodAssistance={() => {
               void handleMoodAssistanceToggle();
             }}
+            onToggleBiometric={() => {
+              void handleBiometricToggle();
+            }}
+            onTogglePromptOnAppOpen={() => {
+              void handlePromptOnAppOpenToggle();
+            }}
+            onSelectSessionTimeout={handleSelectSessionTimeout}
+            onManageAppPassword={handleManageAppPassword}
             onOpenAboutLink={handleOpenAboutLink}
           />
         ) : null}
@@ -2327,6 +2566,114 @@ const SettingsScreen = () => {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      <Modal transparent animationType="slide" visible={showAppPasswordModal}>
+        <TouchableWithoutFeedback onPress={closeAppPasswordModal}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+              <View style={styles.pickerContainer}>
+                <View style={styles.pickerHeader}>
+                  <TouchableOpacity onPress={closeAppPasswordModal}>
+                    <Text style={styles.pickerCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.pickerTitle}>
+                    {hasAppPassword
+                      ? "Update App PIN/Password"
+                      : "Set App PIN/Password"}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={handleSaveAppPassword}
+                    disabled={isSavingAppPassword}
+                  >
+                    <Text
+                      style={[
+                        styles.pickerDoneText,
+                        isSavingAppPassword ? { opacity: 0.65 } : null,
+                      ]}
+                    >
+                      Save
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View
+                  style={{
+                    paddingHorizontal: Spacing.xl,
+                    paddingBottom: Spacing.xl,
+                    gap: Spacing.sm,
+                  }}
+                >
+                  <Text style={styles.toggleSub}>
+                    This PIN/password is stored securely and used when
+                    biometrics are unavailable or locked out.
+                  </Text>
+
+                  <TextInput
+                    value={appPasswordValue}
+                    onChangeText={setAppPasswordValue}
+                    placeholder="Enter PIN or password"
+                    placeholderTextColor={c.textTertiary}
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    editable={!isSavingAppPassword}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: c.divider,
+                      borderRadius: 10,
+                      paddingHorizontal: Spacing.md,
+                      paddingVertical: Spacing.sm,
+                      color: c.text,
+                      backgroundColor: c.background,
+                    }}
+                  />
+
+                  <TextInput
+                    value={appPasswordConfirmValue}
+                    onChangeText={setAppPasswordConfirmValue}
+                    placeholder="Confirm PIN or password"
+                    placeholderTextColor={c.textTertiary}
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    editable={!isSavingAppPassword}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: c.divider,
+                      borderRadius: 10,
+                      paddingHorizontal: Spacing.md,
+                      paddingVertical: Spacing.sm,
+                      color: c.text,
+                      backgroundColor: c.background,
+                    }}
+                  />
+
+                  {appPasswordError ? (
+                    <Text style={{ color: c.error }}>{appPasswordError}</Text>
+                  ) : null}
+
+                  <Pressable
+                    onPress={handleSaveAppPassword}
+                    disabled={isSavingAppPassword}
+                    style={{
+                      marginTop: Spacing.xs,
+                      borderRadius: 10,
+                      backgroundColor: c.tint,
+                      paddingVertical: Spacing.sm,
+                      alignItems: "center",
+                      opacity: isSavingAppPassword ? 0.7 : 1,
+                    }}
+                  >
+                    <Text style={{ color: c.inverseText, fontWeight: "700" }}>
+                      Save PIN/Password
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
 
       {showQuietHoursPicker && Platform.OS === "ios" && (
         <Modal transparent animationType="slide" visible={showQuietHoursPicker}>
