@@ -80,6 +80,53 @@ describe("memories behavior", () => {
     expect(ctx.storage.generateUploadUrl).toHaveBeenCalledTimes(1);
   });
 
+  it("returns capped day memories in happenedAt-desc order for summary generation", async () => {
+    const db = seededDb();
+
+    const createMemory = handler<
+      {
+        title: string;
+        description?: string;
+        mood?: string;
+        happenedAt: number;
+        dayKey: string;
+      },
+      { _id: Id<"memories">; title: string } | null
+    >(memoriesModule.createMemory);
+
+    const listMemoriesByDayForSummaryGeneration = handler<
+      { dayKey: string; limit?: number },
+      Array<{ title: string; happenedAt: number }>
+    >(memoriesModule.listMemoriesByDayForSummaryGeneration);
+
+    const ctx = createMemoryCtx(db, "clerk_member_001");
+
+    await createMemory(ctx, {
+      title: "Oldest",
+      happenedAt: 100,
+      dayKey: "2026-04-02",
+    });
+    await createMemory(ctx, {
+      title: "Newest",
+      happenedAt: 300,
+      dayKey: "2026-04-02",
+    });
+    await createMemory(ctx, {
+      title: "Middle",
+      happenedAt: 200,
+      dayKey: "2026-04-02",
+    });
+
+    const rows = await listMemoriesByDayForSummaryGeneration(ctx, {
+      dayKey: "2026-04-02",
+      limit: 2,
+    });
+
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.title)).toEqual(["Newest", "Middle"]);
+    expect(rows.map((row) => row.happenedAt)).toEqual([300, 200]);
+  });
+
   it("supports memory and media lifecycle with ownership checks", async () => {
     const db = seededDb();
 

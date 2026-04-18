@@ -10,6 +10,71 @@ import { captureException, logInfo, logWarn } from "./observability";
 const getMyResolvedFeatureFlagsRef = makeFunctionReference<"query">(
   "featureFlags:getMyResolvedFeatureFlags",
 );
+const listMemoriesByDayForSummaryGenerationRef = makeFunctionReference<"query">(
+  "memories:listMemoriesByDayForSummaryGeneration",
+);
+const listMyIntegrationDailyDataForSummaryGenerationRef =
+  makeFunctionReference<"query">(
+    "integrations:listMyIntegrationDailyDataForDayForSummaryGeneration",
+  );
+
+const SUMMARY_GENERATION_MEMORY_LIMIT = 50;
+const SUMMARY_GENERATION_INTEGRATION_LIMIT = 32;
+const MAX_SUMMARY_MEMORY_INPUT_BYTES = 64_000;
+
+const textEncoder = new TextEncoder();
+
+type SummaryMemoryInput = {
+  title: string;
+  description?: string;
+  mood?: string;
+  happenedAt: number;
+};
+
+function toSummaryMemoryInput(
+  memories: SummaryMemoryInput[],
+  maxBytes: number,
+): SummaryMemoryInput[] {
+  const next: SummaryMemoryInput[] = [];
+  let bytesUsed = 2; // []
+
+  for (const memory of memories) {
+    const normalizedMemory: SummaryMemoryInput = {
+      title: memory.title,
+      description: memory.description,
+      mood: memory.mood,
+      happenedAt: memory.happenedAt,
+    };
+
+    const serialized = JSON.stringify(normalizedMemory);
+    const serializedBytes = textEncoder.encode(serialized).length;
+    const additionalCommaBytes = next.length > 0 ? 1 : 0;
+
+    if (bytesUsed + additionalCommaBytes + serializedBytes > maxBytes) {
+      if (next.length === 0) {
+        const compactMemory: SummaryMemoryInput = {
+          title: memory.title,
+          mood: memory.mood,
+          happenedAt: memory.happenedAt,
+        };
+        const compactSerializedBytes = textEncoder.encode(
+          JSON.stringify(compactMemory),
+        ).length;
+
+        if (bytesUsed + compactSerializedBytes <= maxBytes) {
+          next.push(compactMemory);
+        }
+      }
+
+      break;
+    }
+
+    next.push(normalizedMemory);
+    bytesUsed += additionalCommaBytes + serializedBytes;
+  }
+
+  return next;
+}
 
 export class OpenAiRequestError extends Error {
   status: number;
@@ -374,16 +439,21 @@ export const generateSummaryForDay = action({
       dayKey: args.dayKey,
     });
 
-    const memories = await ctx.runQuery(api.memories.listMemoriesByDay, {
-      dayKey: args.dayKey,
-    });
+    const memories = (await ctx.runQuery(
+      listMemoriesByDayForSummaryGenerationRef,
+      {
+        dayKey: args.dayKey,
+        limit: SUMMARY_GENERATION_MEMORY_LIMIT,
+      },
+    )) as SummaryMemoryInput[];
     const day = await ctx.runQuery(api.days.getDay, {
       dayKey: args.dayKey,
     });
     const integrationData = (await ctx.runQuery(
-      api.integrations.listMyIntegrationDailyDataForDay,
+      listMyIntegrationDailyDataForSummaryGenerationRef,
       {
         dayKey: args.dayKey,
+        limit: SUMMARY_GENERATION_INTEGRATION_LIMIT,
       },
     )) as IntegrationDailyData[];
 
@@ -427,23 +497,24 @@ export const generateSummaryForDay = action({
       {},
     );
 
+    const summaryMemoryInput = toSummaryMemoryInput(
+      memories ?? [],
+      MAX_SUMMARY_MEMORY_INPUT_BYTES,
+    );
+
+    if ((memories?.length ?? 0) > summaryMemoryInput.length) {
+      logWarn("summary_generation.memory_input_truncated", {
+        status: "degraded",
+        dayKey: args.dayKey,
+        fetchedMemoryCount: memories.length,
+        includedMemoryCount: summaryMemoryInput.length,
+        maxMemoryInputBytes: MAX_SUMMARY_MEMORY_INPUT_BYTES,
+      });
+    }
+
     const modelInput = JSON.stringify({
       dayKey: args.dayKey,
-      memories: (memories ?? [])
-        .slice(0, 50)
-        .map(
-          (memory: {
-            title: string;
-            description?: string;
-            mood?: string;
-            happenedAt: number;
-          }) => ({
-            title: memory.title,
-            description: memory.description,
-            mood: memory.mood,
-            happenedAt: memory.happenedAt,
-          }),
-        ),
+      memories: summaryMemoryInput,
       dayMetadata: {
         rating: day?.rating,
         manualNotes: day?.manualNotes ?? [],

@@ -70,10 +70,32 @@ const LEGACY_SECRETS_AUDIT_DEFAULT_MAX_PAGES = 100;
 const LEGACY_SECRETS_AUDIT_MAX_PAGES = 2_000;
 const LEGACY_TOKEN_REF_AUDIT_DEFAULT_MAX_ROWS = 500;
 const LEGACY_TOKEN_REF_AUDIT_MAX_ROWS = 5_000;
+const DEFAULT_SUMMARY_GENERATION_INTEGRATION_LIMIT = 32;
+const MAX_SUMMARY_GENERATION_INTEGRATION_LIMIT = 128;
 const LEGACY_TOKEN_REF_MIGRATION_AUDIT_ACTION =
   "migrate_legacy_integration_token_ref";
 const OPAQUE_TOKEN_REF_DEFINITION =
   'A tokenRef is opaque when it is a non-empty string prefixed with "tokref_" and does not store raw provider tokens.';
+
+function clampSummaryGenerationIntegrationLimit(
+  value: number | undefined,
+): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_SUMMARY_GENERATION_INTEGRATION_LIMIT;
+  }
+
+  const normalized = Math.floor(value);
+
+  if (normalized < 1) {
+    return 1;
+  }
+
+  if (normalized > MAX_SUMMARY_GENERATION_INTEGRATION_LIMIT) {
+    return MAX_SUMMARY_GENERATION_INTEGRATION_LIMIT;
+  }
+
+  return normalized;
+}
 
 type IntegrationDailyMetrics = {
   steps?: number;
@@ -2024,6 +2046,38 @@ export const listMyIntegrationDailyDataForDay = query({
         q.eq("userId", user._id).eq("dayKey", args.dayKey),
       )
       .collect();
+  },
+});
+
+export const listMyIntegrationDailyDataForDayForSummaryGeneration = query({
+  args: {
+    dayKey: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    validateDayKey(args.dayKey);
+    const limit = clampSummaryGenerationIntegrationLimit(args.limit);
+
+    const paginated = await ctx.db
+      .query("integrationDailyData")
+      .withIndex("by_user_day", (q) =>
+        q.eq("userId", user._id).eq("dayKey", args.dayKey),
+      )
+      .order("desc")
+      .paginate({
+        numItems: limit,
+        cursor: null,
+      });
+
+    return paginated.page
+      .slice()
+      .sort(
+        (left, right) =>
+          right.syncedAt - left.syncedAt ||
+          right._creationTime - left._creationTime ||
+          left.provider.localeCompare(right.provider),
+      );
   },
 });
 

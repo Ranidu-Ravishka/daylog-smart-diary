@@ -29,6 +29,50 @@ function seededDb() {
 }
 
 describe("integration context aggregate behavior", () => {
+  it("returns capped integration rows in deterministic syncedAt order for summary generation", async () => {
+    const db = seededDb();
+    const listForSummaryGeneration = handler<
+      { dayKey: string; limit?: number },
+      Array<{ provider: string; syncedAt: number }>
+    >(integrationsModule.listMyIntegrationDailyDataForDayForSummaryGeneration);
+
+    await db.insert("integrationDailyData", {
+      userId: USER_ID,
+      provider: "google_fit",
+      dayKey: "2026-04-06",
+      syncedAt: 200,
+      summary: "older",
+    });
+
+    await db.insert("integrationDailyData", {
+      userId: USER_ID,
+      provider: "spotify",
+      dayKey: "2026-04-06",
+      syncedAt: 400,
+      summary: "latest",
+    });
+
+    await db.insert("integrationDailyData", {
+      userId: USER_ID,
+      provider: "calendar",
+      dayKey: "2026-04-06",
+      syncedAt: 300,
+      summary: "middle",
+    });
+
+    const rows = await listForSummaryGeneration(
+      createAuthCtx(db, "clerk_member_001"),
+      {
+        dayKey: "2026-04-06",
+        limit: 2,
+      },
+    );
+
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.provider)).toEqual(["spotify", "calendar"]);
+    expect(rows.map((row) => row.syncedAt)).toEqual([400, 300]);
+  });
+
   it("merges mixed providers into a single daily context snapshot", async () => {
     const db = seededDb();
     const getAggregate = handler<
