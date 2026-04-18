@@ -114,8 +114,8 @@ describe("user preferences behavior", () => {
       { clerkUserId: string; focusAreas: number[] } | null
     >(preferencesModule.getUserPreferencesByClerkId);
     const listUserPreferences = handler<
-      Record<string, never>,
-      Array<{ clerkUserId: string }>
+      { limit?: number; cursor?: string },
+      { items: Array<{ clerkUserId: string }>; nextCursor: string | null }
     >(preferencesModule.listUserPreferences);
 
     await expect(
@@ -146,9 +146,10 @@ describe("user preferences behavior", () => {
 
     const listed = await listUserPreferences(
       createAuthCtx(db, "clerk_admin_001"),
-      {},
+      { limit: 10 },
     );
-    expect(listed).toHaveLength(1);
+    expect(listed.items).toHaveLength(1);
+    expect(listed.nextCursor).toBeNull();
   });
 
   it("updates location tracking state when a preference row exists", async () => {

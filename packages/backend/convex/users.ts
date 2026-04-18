@@ -26,6 +26,22 @@ import { applyDashboardMetricsDelta } from "./dashboardMetrics";
 import { captureException, logInfo } from "./observability";
 
 const DEFAULT_USER_DELETION_BATCH_SIZE = 128;
+const DEFAULT_ADMIN_USERS_PAGE_LIMIT = 50;
+const MAX_ADMIN_USERS_PAGE_LIMIT = 200;
+
+function clampAdminUsersPageLimit(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_ADMIN_USERS_PAGE_LIMIT;
+  }
+
+  const normalized = Math.floor(value);
+  if (normalized < 1) return 1;
+  if (normalized > MAX_ADMIN_USERS_PAGE_LIMIT) {
+    return MAX_ADMIN_USERS_PAGE_LIMIT;
+  }
+
+  return normalized;
+}
 
 function buildAdminRoleStatePatch(
   user: Pick<
@@ -859,10 +875,22 @@ export const getUserByClerkId = query({
 
 // ── List all users (admin-only)
 export const listUsers = query({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
     await requireAdmin(ctx);
-    return await ctx.db.query("user").collect();
+
+    const page = await ctx.db.query("user").paginate({
+      numItems: clampAdminUsersPageLimit(args.limit),
+      cursor: args.cursor ?? null,
+    });
+
+    return {
+      items: page.page,
+      nextCursor: page.isDone ? null : page.continueCursor,
+    };
   },
 });
 

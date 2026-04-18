@@ -3,7 +3,7 @@
 import AdminGuard from "@/components/admin-guard";
 import { api } from "@repo/backend/convex";
 import { makeFunctionReference } from "convex/server";
-import { useConvexAuth, useMutation, useQuery } from "convex/react";
+import { useConvex, useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useState } from "react";
 
 type FeatureFlagKey = "aiSummaryEnabled" | "backgroundTrackingEnabled";
@@ -22,6 +22,13 @@ type FeatureFlagRow = {
   source: "default" | "db";
   updatedAt?: number;
 };
+
+type FeatureFlagsPageResponse = {
+  items: FeatureFlagRow[];
+  nextCursor: string | null;
+};
+
+const FEATURE_FLAGS_PAGE_SIZE = 50;
 
 type FlagDraft = {
   description: string;
@@ -77,27 +84,57 @@ function toDraft(flag: FeatureFlagRow): FlagDraft {
   };
 }
 
+function mergeFeatureFlags(
+  primary: FeatureFlagRow[],
+  secondary: FeatureFlagRow[],
+): FeatureFlagRow[] {
+  const seen = new Set<string>();
+  const merged: FeatureFlagRow[] = [];
+
+  for (const flag of [...primary, ...secondary]) {
+    if (seen.has(flag.key)) {
+      continue;
+    }
+
+    seen.add(flag.key);
+    merged.push(flag);
+  }
+
+  return merged;
+}
+
 export default function FeatureFlagsPage() {
+  const convex = useConvex();
   const { isAuthenticated } = useConvexAuth();
+  const [extraFlags, setExtraFlags] = useState<FeatureFlagRow[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, FlagDraft>>({});
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const isAdmin = useQuery(
     api.users.isCurrentUserAdmin,
     isAuthenticated ? {} : "skip",
   );
 
-  const flags = useQuery(listFeatureFlagsRef, isAdmin ? {} : "skip") as
-    | FeatureFlagRow[]
-    | undefined;
+  const flagsPageResponse = useQuery(
+    listFeatureFlagsRef,
+    isAdmin ? { limit: FEATURE_FLAGS_PAGE_SIZE } : "skip",
+  ) as FeatureFlagsPageResponse | undefined;
+  const flags = useMemo(
+    () => mergeFeatureFlags(flagsPageResponse?.items ?? [], extraFlags),
+    [flagsPageResponse?.items, extraFlags],
+  );
+  const effectiveNextCursor =
+    nextCursor ?? flagsPageResponse?.nextCursor ?? null;
 
   const upsertFeatureFlag = useMutation(upsertFeatureFlagRef);
 
-  const [drafts, setDrafts] = useState<Record<string, FlagDraft>>({});
-  const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-
   useEffect(() => {
-    if (!flags) return;
+    if (flags.length === 0) return;
 
     setDrafts((previous) => {
       const next = { ...previous };
@@ -147,6 +184,10 @@ export default function FeatureFlagsPage() {
     setBusyKey(flag.key);
     setActionError(null);
     setStatusMessage(null);
+    setLoadMoreError(null);
+
+    const includeClerkUserIds = parseDelimitedIds(draft.includeClerkUserIds);
+    const excludeClerkUserIds = parseDelimitedIds(draft.excludeClerkUserIds);
 
     try {
       await upsertFeatureFlag({
@@ -158,8 +199,8 @@ export default function FeatureFlagsPage() {
         enabledInDevelopment: draft.enabledInDevelopment,
         enabledInStaging: draft.enabledInStaging,
         enabledInProduction: draft.enabledInProduction,
-        includeClerkUserIds: parseDelimitedIds(draft.includeClerkUserIds),
-        excludeClerkUserIds: parseDelimitedIds(draft.excludeClerkUserIds),
+        includeClerkUserIds,
+        excludeClerkUserIds,
       });
 
       setStatusMessage(`Saved ${flag.key}`);
@@ -171,6 +212,31 @@ export default function FeatureFlagsPage() {
       );
     } finally {
       setBusyKey(null);
+    }
+  };
+
+  const loadMoreFlags = async () => {
+    if (!effectiveNextCursor || isLoadingMore) {
+      return;
+    }
+
+    setLoadMoreError(null);
+    setIsLoadingMore(true);
+
+    try {
+      const page = (await convex.query(listFeatureFlagsRef, {
+        limit: FEATURE_FLAGS_PAGE_SIZE,
+        cursor: effectiveNextCursor,
+      })) as FeatureFlagsPageResponse;
+
+      setExtraFlags((previous) => mergeFeatureFlags(previous, page.items));
+      setNextCursor(page.nextCursor);
+    } catch (error) {
+      setLoadMoreError(
+        error instanceof Error ? error.message : "Failed to load more flags.",
+      );
+    } finally {
+      setIsLoadingMore(false);
     }
   };
 
@@ -201,7 +267,13 @@ export default function FeatureFlagsPage() {
             </div>
           )}
 
-          {!flags ? (
+          {loadMoreError && (
+            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {loadMoreError}
+            </div>
+          )}
+
+          {!flagsPageResponse && flags.length === 0 ? (
             <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-600 shadow-sm">
               Loading feature flags...
             </div>
@@ -387,6 +459,23 @@ export default function FeatureFlagsPage() {
                   </section>
                 );
               })}
+
+              {effectiveNextCursor && (
+                <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                  <span className="text-xs text-gray-500">
+                    Showing {sortedFlags.length} flags
+                  </span>
+                  <button
+                    onClick={() => {
+                      void loadMoreFlags();
+                    }}
+                    disabled={isLoadingMore}
+                    className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isLoadingMore ? "Loading more..." : "Load more flags"}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

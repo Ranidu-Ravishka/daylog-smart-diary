@@ -99,9 +99,10 @@ describe("users behavior", () => {
     const getUserByClerkId = handler<{ clerkUserId: string }, unknown>(
       usersModule.getUserByClerkId,
     );
-    const listUsers = handler<Record<string, never>, unknown[]>(
-      usersModule.listUsers,
-    );
+    const listUsers = handler<
+      { limit?: number; cursor?: string },
+      { items: unknown[]; nextCursor: string | null }
+    >(usersModule.listUsers);
 
     await expect(
       syncUserFromClerk(createAuthCtx(db, "clerk_member_001"), {
@@ -120,11 +121,17 @@ describe("users behavior", () => {
       listUsers(createAuthCtx(db, "clerk_member_001"), {}),
     ).rejects.toThrow("Forbidden");
 
-    const adminUsers = await listUsers(
-      createAuthCtx(db, "clerk_admin_001"),
-      {},
-    );
-    expect(adminUsers).toHaveLength(2);
+    const adminUsers = await listUsers(createAuthCtx(db, "clerk_admin_001"), {
+      limit: 10,
+    });
+    expect(adminUsers.items).toHaveLength(2);
+    expect(adminUsers.nextCursor).toBeNull();
+
+    const firstPage = await listUsers(createAuthCtx(db, "clerk_admin_001"), {
+      limit: 1,
+    });
+    expect(firstPage.items).toHaveLength(1);
+    expect(firstPage.nextCursor).not.toBeNull();
   });
 
   it("supports bootstrap admin and admin status updates", async () => {

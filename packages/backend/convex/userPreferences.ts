@@ -27,6 +27,23 @@ const locationPermissionStatusValidator = v.union(
   v.literal(LOCATION_PERMISSION_STATUS_VALUES[2]),
 );
 
+const DEFAULT_ADMIN_PREFERENCES_PAGE_LIMIT = 50;
+const MAX_ADMIN_PREFERENCES_PAGE_LIMIT = 200;
+
+function clampAdminPreferencesPageLimit(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_ADMIN_PREFERENCES_PAGE_LIMIT;
+  }
+
+  const normalized = Math.floor(value);
+  if (normalized < 1) return 1;
+  if (normalized > MAX_ADMIN_PREFERENCES_PAGE_LIMIT) {
+    return MAX_ADMIN_PREFERENCES_PAGE_LIMIT;
+  }
+
+  return normalized;
+}
+
 function resolveNextUserSettings(
   patchInput: Partial<UserSettingsDto>,
   existingPreferenceDoc?: Record<string, unknown> | null,
@@ -184,13 +201,24 @@ export const getUserPreferencesByClerkId = query({
 
 // ── List all user preferences (admin-only).
 export const listUserPreferences = query({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
     await requireAdmin(ctx);
-    const preferenceDocs = await ctx.db.query("userPreferences").collect();
-    return preferenceDocs.map((preferenceDoc) =>
-      normalizePreferenceDoc(preferenceDoc),
-    );
+
+    const page = await ctx.db.query("userPreferences").paginate({
+      numItems: clampAdminPreferencesPageLimit(args.limit),
+      cursor: args.cursor ?? null,
+    });
+
+    return {
+      items: page.page.map((preferenceDoc) =>
+        normalizePreferenceDoc(preferenceDoc),
+      ),
+      nextCursor: page.isDone ? null : page.continueCursor,
+    };
   },
 });
 

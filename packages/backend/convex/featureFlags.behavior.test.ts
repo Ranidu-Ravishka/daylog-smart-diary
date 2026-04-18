@@ -67,8 +67,11 @@ describe("feature flags behavior", () => {
     const db = seededDb();
 
     const listFeatureFlagsForAdmin = handler<
-      Record<string, never>,
-      Array<{ key: string; source: "default" | "db" }>
+      { limit?: number; cursor?: string },
+      {
+        items: Array<{ key: string; source: "default" | "db" }>;
+        nextCursor: string | null;
+      }
     >(featureFlagsModule.listFeatureFlagsForAdmin);
 
     await expect(
@@ -80,11 +83,20 @@ describe("feature flags behavior", () => {
       {},
     );
 
-    expect(listed.map((flag) => flag.key)).toEqual([
+    expect(listed.items.map((flag) => flag.key)).toEqual([
       "aiSummaryEnabled",
       "backgroundTrackingEnabled",
     ]);
-    expect(listed.every((flag) => flag.source === "default")).toBe(true);
+    expect(listed.items.every((flag) => flag.source === "default")).toBe(true);
+    expect(listed.nextCursor).toBeNull();
+
+    const firstPage = await listFeatureFlagsForAdmin(
+      createAuthCtx(db, "clerk_admin_001"),
+      { limit: 1 },
+    );
+
+    expect(firstPage.items).toHaveLength(1);
+    expect(firstPage.nextCursor).not.toBeNull();
   });
 
   it("supports include and exclude targeting with kill switch precedence", async () => {

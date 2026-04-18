@@ -2,12 +2,98 @@
 
 import AdminGuard from "@/components/admin-guard";
 import { api } from "@repo/backend/convex";
-import { useMutation, useQuery } from "convex/react";
+import { useConvex, useMutation, useQuery } from "convex/react";
 import Link from "next/link";
+import { useMemo, useState } from "react";
+
+const CONTENT_PAGE_SIZE = 50;
+
+type ContentRow = {
+  _id: string;
+  _creationTime: number;
+  slug: string;
+  title: string;
+};
+
+type ContentPageResponse = {
+  items: ContentRow[];
+  nextCursor: string | null;
+};
+
+function mergeContentRows(
+  primary: ContentRow[],
+  secondary: ContentRow[],
+): ContentRow[] {
+  const seen = new Set<string>();
+  const merged: ContentRow[] = [];
+
+  for (const row of [...primary, ...secondary]) {
+    if (seen.has(row._id)) {
+      continue;
+    }
+
+    seen.add(row._id);
+    merged.push(row);
+  }
+
+  return merged;
+}
 
 export default function ContentPage() {
-  const content = useQuery(api.content.getContent, {});
+  const convex = useConvex();
+  const [extraContentRows, setExtraContentRows] = useState<ContentRow[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+
+  const contentResponse = useQuery(api.content.getContent, {
+    limit: CONTENT_PAGE_SIZE,
+  }) as ContentPageResponse | undefined;
+
+  const contentRows = useMemo(
+    () => mergeContentRows(contentResponse?.items ?? [], extraContentRows),
+    [contentResponse?.items, extraContentRows],
+  );
+
+  const effectiveNextCursor = nextCursor ?? contentResponse?.nextCursor ?? null;
+
   const deleteContent = useMutation(api.content.deleteContent);
+
+  const loadMoreContent = async () => {
+    if (!effectiveNextCursor || isLoadingMore) {
+      return;
+    }
+
+    setLoadMoreError(null);
+    setIsLoadingMore(true);
+
+    try {
+      const page = (await convex.query(api.content.getContent, {
+        limit: CONTENT_PAGE_SIZE,
+        cursor: effectiveNextCursor,
+      })) as ContentPageResponse;
+
+      setExtraContentRows((previous) => mergeContentRows(previous, page.items));
+      setNextCursor(page.nextCursor);
+    } catch (error) {
+      setLoadMoreError(
+        error instanceof Error ? error.message : "Failed to load more content.",
+      );
+    } finally {
+      setIsLoadingMore(false);
+    }
+  };
+
+  const handleDeleteContent = async (row: ContentRow) => {
+    if (!window.confirm("Are you sure you want to delete this content?")) {
+      return;
+    }
+
+    await deleteContent({ slug: row.slug });
+    setExtraContentRows((previous) =>
+      previous.filter((existing) => existing._id !== row._id),
+    );
+  };
 
   return (
     <AdminGuard>
@@ -30,12 +116,18 @@ export default function ContentPage() {
           </div>
 
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-            {content === undefined ? (
+            {contentResponse === undefined && contentRows.length === 0 ? (
               <div className="p-6 text-sm text-gray-600">Loading...</div>
-            ) : content.length === 0 ? (
+            ) : contentRows.length === 0 ? (
               <div className="p-6 text-sm text-gray-600">No content yet.</div>
             ) : (
               <div className="overflow-auto">
+                {loadMoreError && (
+                  <div className="border-b border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    {loadMoreError}
+                  </div>
+                )}
+
                 <table className="min-w-full text-sm">
                   <thead className="bg-gray-50 text-gray-600">
                     <tr>
@@ -50,7 +142,7 @@ export default function ContentPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {content.map((row) => (
+                    {contentRows.map((row) => (
                       <tr key={row._id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 font-mono text-xs text-gray-800">
                           {row.slug}
@@ -68,13 +160,7 @@ export default function ContentPage() {
                           </Link>
                           <button
                             onClick={() => {
-                              if (
-                                window.confirm(
-                                  "Are you sure you want to delete this content?",
-                                )
-                              ) {
-                                deleteContent({ slug: row.slug });
-                              }
+                              void handleDeleteContent(row);
                             }}
                             className="inline-flex items-center rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 ml-2"
                           >
@@ -85,6 +171,23 @@ export default function ContentPage() {
                     ))}
                   </tbody>
                 </table>
+
+                {effectiveNextCursor && (
+                  <div className="flex items-center justify-between border-t border-gray-100 p-4">
+                    <span className="text-xs text-gray-500">
+                      Showing {contentRows.length} items
+                    </span>
+                    <button
+                      onClick={() => {
+                        void loadMoreContent();
+                      }}
+                      disabled={isLoadingMore}
+                      className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isLoadingMore ? "Loading more..." : "Load more content"}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
