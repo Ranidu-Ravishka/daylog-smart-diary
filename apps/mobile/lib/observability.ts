@@ -34,6 +34,8 @@ const durableInfoEventSampleRate = toSampleRate(
   process.env.EXPO_PUBLIC_INFO_EVENT_SAMPLE_RATE,
   INFO_EVENT_SAMPLE_RATE_DEFAULT,
 );
+const durableInfoEventIngestToken =
+  process.env.EXPO_PUBLIC_OBSERVABILITY_INGEST_TOKEN?.trim() ?? "";
 const durableInfoEventEndpoint = resolveInfoEventEndpoint(
   process.env.EXPO_PUBLIC_CONVEX_URL,
 );
@@ -97,6 +99,13 @@ function toSerializableError(error: unknown): SerializableError {
   return {
     name: "UnknownError",
     message: String(error),
+  };
+}
+
+function buildInfoEventHeaders(): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    "X-Daylog-Ingest-Token": durableInfoEventIngestToken,
   };
 }
 
@@ -164,6 +173,7 @@ function emitDurableInfoEvent(payload: StructuredLogEnvelope) {
   }
 
   if (
+    !durableInfoEventIngestToken ||
     !durableInfoEventEndpoint ||
     (!isLifecycleEvent(payload.event) &&
       !shouldSample(durableInfoEventSampleRate))
@@ -190,9 +200,7 @@ function emitDurableInfoEvent(payload: StructuredLogEnvelope) {
 
   void fetch(durableInfoEventEndpoint, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: buildInfoEventHeaders(),
     body: requestBody,
   }).catch(() => undefined);
 }

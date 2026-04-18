@@ -4,6 +4,10 @@ import { internal } from "./_generated/api";
 import { httpAction, internalMutation, query } from "./_generated/server";
 import { requireAdmin } from "./authz";
 import { captureException, logWarn } from "./observability";
+import {
+  getObservabilityIngestCorsDecision,
+  verifyObservabilityIngestAuth,
+} from "./observabilityIngestionSecurity";
 
 const MAX_PAYLOAD_BYTES = 24_000;
 const MAX_EVENT_LENGTH = 120;
@@ -14,6 +18,8 @@ const MAX_TRANSPORT_HEALTH_WINDOW_HOURS = 24 * 14;
 const MAX_TRANSPORT_HEALTH_ROWS = 5_000;
 const MAX_TRANSPORT_HEALTH_TOP_EVENTS = 5;
 const MAX_TRANSPORT_HEALTH_FILTER_LENGTH = 80;
+
+const textEncoder = new TextEncoder();
 
 type TransportHealthAccumulator = {
   ingestedCount: number;
@@ -167,25 +173,36 @@ function finalizeTopEventsByVolume(
     .slice(0, MAX_TRANSPORT_HEALTH_TOP_EVENTS);
 }
 
-function corsHeaders(request: Request) {
-  const origin = request.headers.get("origin") ?? "*";
-
-  return {
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-    Vary: "Origin",
-  };
-}
-
-function jsonResponse(request: Request, status: number, body: object) {
+function jsonResponse(
+  status: number,
+  body: object,
+  corsHeaders: Record<string, string>,
+) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
-      ...corsHeaders(request),
+      ...corsHeaders,
       "Content-Type": "application/json",
     },
   });
+}
+
+function parseDeclaredContentLength(request: Request): number | null {
+  const rawValue = request.headers.get("content-length")?.trim() ?? "";
+  if (!rawValue) {
+    return null;
+  }
+
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+
+  return Math.floor(parsed);
+}
+
+function toPayloadByteLength(value: string): number {
+  return textEncoder.encode(value).byteLength;
 }
 
 function toSafeSampleRate(value: unknown): number {
@@ -393,33 +410,106 @@ export const getObservabilityInfoTransportHealth = query({
 
 export const observabilityInfoEventOptions = httpAction(
   async (_ctx, request) => {
+    const corsDecision = getObservabilityIngestCorsDecision(request);
+    if (!corsDecision.allowed) {
+      logWarn("observability_info_event_origin_rejected", {
+        reason: corsDecision.reason,
+      });
+
+      return jsonResponse(
+        403,
+        { error: "Origin not allowed" },
+        corsDecision.responseHeaders,
+      );
+    }
+
     return new Response(null, {
       status: 204,
-      headers: corsHeaders(request),
+      headers: corsDecision.responseHeaders,
     });
   },
 );
 
 export const ingestObservabilityInfoEvent = httpAction(async (ctx, request) => {
+  const corsDecision = getObservabilityIngestCorsDecision(request);
+  if (!corsDecision.allowed) {
+    logWarn("observability_info_event_origin_rejected", {
+      reason: corsDecision.reason,
+      method: request.method,
+    });
+
+    return jsonResponse(
+      403,
+      { error: "Origin not allowed" },
+      corsDecision.responseHeaders,
+    );
+  }
+
   if (request.method !== "POST") {
-    return jsonResponse(request, 405, { error: "Method not allowed" });
+    return jsonResponse(
+      405,
+      { error: "Method not allowed" },
+      corsDecision.responseHeaders,
+    );
+  }
+
+  const authDecision = verifyObservabilityIngestAuth(request);
+  if (!authDecision.ok) {
+    logWarn("observability_info_event_auth_rejected", {
+      reason: authDecision.reason,
+    });
+
+    return jsonResponse(
+      authDecision.status,
+      { error: "Unauthorized" },
+      corsDecision.responseHeaders,
+    );
+  }
+
+  const declaredContentLength = parseDeclaredContentLength(request);
+  if (
+    typeof declaredContentLength === "number" &&
+    declaredContentLength > MAX_PAYLOAD_BYTES
+  ) {
+    logWarn("observability_info_event_payload_too_large", {
+      length: declaredContentLength,
+      maxBytes: MAX_PAYLOAD_BYTES,
+      source: "content-length",
+    });
+
+    return jsonResponse(
+      413,
+      { error: "Payload too large" },
+      corsDecision.responseHeaders,
+    );
   }
 
   const raw = await request.text();
-  if (raw.length > MAX_PAYLOAD_BYTES) {
+  const payloadBytes = toPayloadByteLength(raw);
+
+  if (payloadBytes > MAX_PAYLOAD_BYTES) {
     logWarn("observability_info_event_payload_too_large", {
-      length: raw.length,
+      length: payloadBytes,
       maxBytes: MAX_PAYLOAD_BYTES,
+      source: "body",
     });
 
-    return jsonResponse(request, 413, { error: "Payload too large" });
+    return jsonResponse(
+      413,
+      { error: "Payload too large" },
+      corsDecision.responseHeaders,
+    );
   }
 
   let body: IngestPayload;
   try {
     body = JSON.parse(raw) as IngestPayload;
   } catch {
-    return jsonResponse(request, 400, { error: "Invalid JSON" });
+    return jsonResponse(
+      400,
+      { error: "Invalid JSON" },
+      corsDecision.responseHeaders,
+    );
   }
 
   const surface = body.surface;
@@ -427,21 +517,37 @@ export const ingestObservabilityInfoEvent = httpAction(async (ctx, request) => {
   const event = body.event;
 
   if (body.schemaVersion !== 1 || body.app !== "daylog") {
-    return jsonResponse(request, 400, { error: "Invalid payload envelope" });
+    return jsonResponse(
+      400,
+      { error: "Invalid payload envelope" },
+      corsDecision.responseHeaders,
+    );
   }
 
   if (surface !== "web" && surface !== "mobile") {
-    return jsonResponse(request, 400, { error: "Unsupported surface" });
+    return jsonResponse(
+      400,
+      { error: "Unsupported surface" },
+      corsDecision.responseHeaders,
+    );
   }
 
   if (level !== "info") {
-    return jsonResponse(request, 400, {
-      error: "Only info events are accepted",
-    });
+    return jsonResponse(
+      400,
+      {
+        error: "Only info events are accepted",
+      },
+      corsDecision.responseHeaders,
+    );
   }
 
   if (typeof event !== "string" || event.trim().length === 0) {
-    return jsonResponse(request, 400, { error: "Missing event name" });
+    return jsonResponse(
+      400,
+      { error: "Missing event name" },
+      corsDecision.responseHeaders,
+    );
   }
 
   const now = Date.now();
@@ -471,8 +577,12 @@ export const ingestObservabilityInfoEvent = httpAction(async (ctx, request) => {
       event: row.event,
     });
 
-    return jsonResponse(request, 500, { error: "Failed to ingest event" });
+    return jsonResponse(
+      500,
+      { error: "Failed to ingest event" },
+      corsDecision.responseHeaders,
+    );
   }
 
-  return jsonResponse(request, 202, { accepted: true });
+  return jsonResponse(202, { accepted: true }, corsDecision.responseHeaders);
 });
