@@ -102,11 +102,17 @@ function toSerializableError(error: unknown): SerializableError {
   };
 }
 
-function buildInfoEventHeaders(): Record<string, string> {
-  return {
+function buildInfoEventHeaders(userId: string | null): Record<string, string> {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "X-Daylog-Ingest-Token": durableInfoEventIngestToken,
   };
+
+  if (userId) {
+    headers["X-Daylog-User-Id"] = userId;
+  }
+
+  return headers;
 }
 
 function toStringOrNull(value: unknown): string | null {
@@ -200,7 +206,7 @@ function emitDurableInfoEvent(payload: StructuredLogEnvelope) {
 
   void fetch(durableInfoEventEndpoint, {
     method: "POST",
-    headers: buildInfoEventHeaders(),
+    headers: buildInfoEventHeaders(payload.userId),
     body: requestBody,
   }).catch(() => undefined);
 }

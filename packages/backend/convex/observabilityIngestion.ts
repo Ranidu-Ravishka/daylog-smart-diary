@@ -8,6 +8,11 @@ import {
   getObservabilityIngestCorsDecision,
   verifyObservabilityIngestAuth,
 } from "./observabilityIngestionSecurity";
+import {
+  fingerprintRateLimitKey,
+  resolveObservabilityIngestRateLimitIdentity,
+  type ObservabilityIngestRateLimitDecision,
+} from "./observabilityIngestRateLimiter";
 
 const MAX_PAYLOAD_BYTES = 24_000;
 const MAX_EVENT_LENGTH = 120;
@@ -18,6 +23,9 @@ const MAX_TRANSPORT_HEALTH_WINDOW_HOURS = 24 * 14;
 const MAX_TRANSPORT_HEALTH_ROWS = 5_000;
 const MAX_TRANSPORT_HEALTH_TOP_EVENTS = 5;
 const MAX_TRANSPORT_HEALTH_FILTER_LENGTH = 80;
+const DEFAULT_RATE_LIMIT_METRICS_WINDOW_MINUTES = 60;
+const MAX_RATE_LIMIT_METRICS_WINDOW_MINUTES = 24 * 60;
+const MAX_RATE_LIMIT_METRICS_ROWS = 25_000;
 
 const textEncoder = new TextEncoder();
 
@@ -60,6 +68,24 @@ function toTransportHealthWindowHours(value: number | undefined): number {
 
   if (normalized > MAX_TRANSPORT_HEALTH_WINDOW_HOURS) {
     return MAX_TRANSPORT_HEALTH_WINDOW_HOURS;
+  }
+
+  return normalized;
+}
+
+function toRateLimitMetricsWindowMinutes(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_RATE_LIMIT_METRICS_WINDOW_MINUTES;
+  }
+
+  const normalized = Math.floor(value);
+
+  if (normalized < 1) {
+    return 1;
+  }
+
+  if (normalized > MAX_RATE_LIMIT_METRICS_WINDOW_MINUTES) {
+    return MAX_RATE_LIMIT_METRICS_WINDOW_MINUTES;
   }
 
   return normalized;
@@ -177,11 +203,13 @@ function jsonResponse(
   status: number,
   body: object,
   corsHeaders: Record<string, string>,
+  extraHeaders?: Record<string, string>,
 ) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       ...corsHeaders,
+      ...(extraHeaders ?? {}),
       "Content-Type": "application/json",
     },
   });
@@ -408,6 +436,92 @@ export const getObservabilityInfoTransportHealth = query({
   },
 });
 
+export const getObservabilityIngestRateLimitMetrics = query({
+  args: {
+    windowMinutes: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+
+    const windowMinutes = toRateLimitMetricsWindowMinutes(args.windowMinutes);
+    const nowMinute = Math.floor(Date.now() / 60_000);
+    const windowStartMinute = nowMinute - windowMinutes + 1;
+
+    const rows = await ctx.db
+      .query("observabilityIngestRateLimitMetrics")
+      .withIndex("by_epochMinute", (q) =>
+        q.gte("epochMinute", windowStartMinute),
+      )
+      .order("desc")
+      .take(MAX_RATE_LIMIT_METRICS_ROWS);
+
+    let allowedRequests = 0;
+    let blockedRequests = 0;
+    let burstAttempts = 0;
+
+    const perMinute = new Map<
+      number,
+      {
+        allowedRequests: number;
+        blockedRequests: number;
+        burstAttempts: number;
+      }
+    >();
+
+    for (const row of rows) {
+      if (row.epochMinute > nowMinute) {
+        continue;
+      }
+
+      if (row.epochMinute < windowStartMinute) {
+        continue;
+      }
+
+      allowedRequests += row.allowedRequests;
+      blockedRequests += row.blockedRequests;
+      burstAttempts += row.burstAttempts;
+
+      const minute = perMinute.get(row.epochMinute) ?? {
+        allowedRequests: 0,
+        blockedRequests: 0,
+        burstAttempts: 0,
+      };
+
+      minute.allowedRequests += row.allowedRequests;
+      minute.blockedRequests += row.blockedRequests;
+      minute.burstAttempts += row.burstAttempts;
+      perMinute.set(row.epochMinute, minute);
+    }
+
+    const minuteBuckets = [...perMinute.entries()]
+      .sort(([leftMinute], [rightMinute]) => leftMinute - rightMinute)
+      .map(([epochMinute, metrics]) => ({
+        epochMinute,
+        allowedRequests: metrics.allowedRequests,
+        blockedRequests: metrics.blockedRequests,
+        burstAttempts: metrics.burstAttempts,
+      }));
+
+    const totalRequests = allowedRequests + blockedRequests;
+
+    return {
+      windowMinutes,
+      windowStartMinute,
+      nowMinute,
+      evaluatedRows: rows.length,
+      truncated: rows.length >= MAX_RATE_LIMIT_METRICS_ROWS,
+      totals: {
+        totalRequests,
+        allowedRequests,
+        blockedRequests,
+        burstAttempts,
+        blockedRate: totalRequests > 0 ? blockedRequests / totalRequests : 0,
+      },
+      minuteBuckets,
+    };
+  },
+});
+
 export const observabilityInfoEventOptions = httpAction(
   async (_ctx, request) => {
     const corsDecision = getObservabilityIngestCorsDecision(request);
@@ -464,6 +578,62 @@ export const ingestObservabilityInfoEvent = httpAction(async (ctx, request) => {
       { error: "Unauthorized" },
       corsDecision.responseHeaders,
     );
+  }
+
+  const rateLimitIdentity =
+    resolveObservabilityIngestRateLimitIdentity(request);
+  let rateLimitDecision: ObservabilityIngestRateLimitDecision | null = null;
+
+  try {
+    rateLimitDecision = (await ctx.runMutation(
+      (internal as any).observabilityIngestRateLimiter
+        .evaluateObservabilityIngestRateLimitInternal,
+      {
+        ipKey: rateLimitIdentity.ipKey,
+        userKey: rateLimitIdentity.userKey,
+        receivedAt: Date.now(),
+      },
+    )) as ObservabilityIngestRateLimitDecision;
+  } catch (error) {
+    captureException("observability_info_event_rate_limit_failed", error, {
+      status: "failed_open",
+      ipKeyHash: fingerprintRateLimitKey(rateLimitIdentity.ipKey),
+      userKeyHash: fingerprintRateLimitKey(rateLimitIdentity.userKey),
+    });
+  }
+
+  if (rateLimitDecision && !rateLimitDecision.allowed) {
+    const retryAfterSeconds = Math.max(rateLimitDecision.retryAfterSeconds, 1);
+
+    logWarn("observability_info_event_rate_limited", {
+      status: "blocked",
+      blockedScopes: rateLimitDecision.blockedScopes,
+      retryAfterSeconds,
+      ipKeyHash: fingerprintRateLimitKey(rateLimitDecision.ipKey),
+      userKeyHash: fingerprintRateLimitKey(rateLimitDecision.userKey),
+      burstAttempt: rateLimitDecision.burstAttempt,
+    });
+
+    return jsonResponse(
+      429,
+      {
+        error: "Too many requests",
+        retryAfterSeconds,
+      },
+      corsDecision.responseHeaders,
+      {
+        "Retry-After": String(retryAfterSeconds),
+      },
+    );
+  }
+
+  if (rateLimitDecision?.burstAttempt) {
+    logWarn("observability_info_event_burst_attempt", {
+      status: "warning",
+      blockedScopes: rateLimitDecision.blockedScopes,
+      ipKeyHash: fingerprintRateLimitKey(rateLimitDecision.ipKey),
+      userKeyHash: fingerprintRateLimitKey(rateLimitDecision.userKey),
+    });
   }
 
   const declaredContentLength = parseDeclaredContentLength(request);

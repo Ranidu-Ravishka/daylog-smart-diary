@@ -574,6 +574,37 @@ export default defineSchema(
       .index("by_surface_receivedAt", ["surface", "receivedAt"])
       .index("by_event_receivedAt", ["event", "receivedAt"]),
 
+    // ── Observability ingest abuse controls (rate-limit state + metrics) ──
+    observabilityIngestRateLimits: defineTable({
+      scope: v.union(v.literal("ip"), v.literal("user")),
+      key: v.string(),
+      capacity: v.number(),
+      refillPerSecond: v.number(),
+      tokens: v.number(),
+      lastRefillAt: v.number(),
+      allowedRequests: v.number(),
+      blockedRequests: v.number(),
+      burstAttempts: v.number(),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    })
+      .index("by_scope_key", ["scope", "key"])
+      .index("by_updatedAt", ["updatedAt"]),
+
+    observabilityIngestRateLimitMetrics: defineTable({
+      slotMinute: v.number(),
+      shard: v.number(),
+      epochMinute: v.number(),
+      allowedRequests: v.number(),
+      blockedRequests: v.number(),
+      burstAttempts: v.number(),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    })
+      .index("by_slot_shard", ["slotMinute", "shard"])
+      .index("by_epochMinute", ["epochMinute"])
+      .index("by_updatedAt", ["updatedAt"]),
+
     // ── Data retention governance (policy + execution audit) ──────────────
     dataRetentionPolicies: defineTable({
       key: v.string(),

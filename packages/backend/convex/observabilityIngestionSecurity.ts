@@ -17,7 +17,8 @@ const INGEST_TOKEN_HEADER_NAME = "x-daylog-ingest-token";
 const AUTHORIZATION_HEADER_NAME = "authorization";
 
 const CORS_ALLOW_METHODS = "POST, OPTIONS";
-const CORS_ALLOW_HEADERS = "Content-Type, X-Daylog-Ingest-Token, Authorization";
+const CORS_ALLOW_HEADERS =
+  "Content-Type, X-Daylog-Ingest-Token, X-Daylog-User-Id, Authorization";
 
 type IngestSecurityConfig = {
   ingestToken: string | null;
