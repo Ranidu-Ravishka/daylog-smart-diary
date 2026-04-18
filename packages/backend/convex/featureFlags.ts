@@ -123,11 +123,41 @@ const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, FeatureFlagDefaultConfig> =
     },
   };
 
+const DEFAULT_ADMIN_FEATURE_FLAGS_PAGE_LIMIT = 25;
+const MAX_ADMIN_FEATURE_FLAGS_PAGE_LIMIT = 100;
+
 function asFeatureFlagKey(value: string): FeatureFlagKey | null {
   if ((FEATURE_FLAG_KEYS as readonly string[]).includes(value)) {
     return value as FeatureFlagKey;
   }
   return null;
+}
+
+function clampAdminFeatureFlagsPageLimit(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_ADMIN_FEATURE_FLAGS_PAGE_LIMIT;
+  }
+
+  const normalized = Math.floor(value);
+  if (normalized < 1) return 1;
+  if (normalized > MAX_ADMIN_FEATURE_FLAGS_PAGE_LIMIT) {
+    return MAX_ADMIN_FEATURE_FLAGS_PAGE_LIMIT;
+  }
+
+  return normalized;
+}
+
+function parseAdminFeatureFlagsCursor(cursor: string | undefined): number {
+  if (typeof cursor !== "string" || cursor.trim().length === 0) {
+    return 0;
+  }
+
+  const parsed = Number(cursor);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 0;
+  }
+
+  return Math.floor(parsed);
 }
 
 function clampRolloutPercentage(value: number): number {
@@ -381,6 +411,28 @@ async function getStoredFlagMap(db: QueryCtx["db"] | MutationCtx["db"]) {
   return byKey;
 }
 
+async function getStoredFlagMapForKeys(
+  db: QueryCtx["db"] | MutationCtx["db"],
+  keys: readonly FeatureFlagKey[],
+) {
+  const byKey = new Map<FeatureFlagKey, FeatureFlagStoredDoc>();
+
+  await Promise.all(
+    keys.map(async (key) => {
+      const row = (await db
+        .query("featureFlags")
+        .withIndex("by_key", (q) => q.eq("key", key))
+        .unique()) as FeatureFlagStoredDoc | null;
+
+      if (row) {
+        byKey.set(key, row);
+      }
+    }),
+  );
+
+  return byKey;
+}
+
 export async function evaluateFeatureFlagForIdentity(
   db: QueryCtx["db"] | MutationCtx["db"],
   key: FeatureFlagKey,
@@ -393,13 +445,27 @@ export async function evaluateFeatureFlagForIdentity(
 }
 
 export const listFeatureFlagsForAdmin = query({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
     await requireAdmin(ctx);
 
-    const map = await getStoredFlagMap(ctx.db);
+    const limit = clampAdminFeatureFlagsPageLimit(args.limit);
+    const start = parseAdminFeatureFlagsCursor(args.cursor);
+    const keys = FEATURE_FLAG_KEYS.slice(start, start + limit);
 
-    return FEATURE_FLAG_KEYS.map((key) => mergeFlagConfig(key, map.get(key)));
+    const map = await getStoredFlagMapForKeys(ctx.db, keys);
+    const items = keys.map((key) => mergeFlagConfig(key, map.get(key)));
+    const nextOffset = start + items.length;
+    const nextCursor =
+      nextOffset < FEATURE_FLAG_KEYS.length ? String(nextOffset) : null;
+
+    return {
+      items,
+      nextCursor,
+    };
   },
 });
 

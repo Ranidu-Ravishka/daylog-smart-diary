@@ -1,6 +1,6 @@
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
-import type { MutationCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { requireAdmin } from "./authz";
 import { deleteMemoryMediaByMemoryId } from "./cascadeCleanup";
@@ -29,6 +29,9 @@ const POLICY_KEYS: RetentionPolicyKey[] = [
   "restoreJobs",
   "userDeletionJobs",
 ];
+
+const DEFAULT_ADMIN_RETENTION_POLICIES_PAGE_LIMIT = 25;
+const MAX_ADMIN_RETENTION_POLICIES_PAGE_LIMIT = 100;
 
 type EffectiveRetentionPolicy = {
   key: RetentionPolicyKey;
@@ -69,6 +72,35 @@ function isRetentionPolicyKey(value: string): value is RetentionPolicyKey {
   return (POLICY_KEYS as string[]).includes(value);
 }
 
+function clampAdminRetentionPoliciesPageLimit(
+  value: number | undefined,
+): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_ADMIN_RETENTION_POLICIES_PAGE_LIMIT;
+  }
+
+  const normalized = Math.floor(value);
+  if (normalized < 1) return 1;
+  if (normalized > MAX_ADMIN_RETENTION_POLICIES_PAGE_LIMIT) {
+    return MAX_ADMIN_RETENTION_POLICIES_PAGE_LIMIT;
+  }
+
+  return normalized;
+}
+
+function parseAdminRetentionPoliciesCursor(cursor: string | undefined): number {
+  if (typeof cursor !== "string" || cursor.trim().length === 0) {
+    return 0;
+  }
+
+  const parsed = Number(cursor);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 0;
+  }
+
+  return Math.floor(parsed);
+}
+
 function retentionCutoff(now: number, retentionDays: number): number {
   return now - retentionDays * 24 * 60 * 60 * 1000;
 }
@@ -105,23 +137,9 @@ function safeDetailsJson(payload: Record<string, unknown>): string {
   return JSON.stringify(payload).slice(0, 1500);
 }
 
-type RetentionPolicyReader = {
-  query: (table: "dataRetentionPolicies") => {
-    collect: () => Promise<
-      Array<{
-        key: string;
-        retentionDays: number;
-        sensitive: boolean;
-        enabled: boolean;
-        updatedAt: number;
-      }>
-    >;
-  };
-};
-
-async function resolveEffectiveRetentionPolicies(ctx: {
-  db: RetentionPolicyReader;
-}): Promise<Record<RetentionPolicyKey, EffectiveRetentionPolicy>> {
+async function resolveEffectiveRetentionPolicies(
+  db: QueryCtx["db"] | MutationCtx["db"],
+): Promise<Record<RetentionPolicyKey, EffectiveRetentionPolicy>> {
   const defaults = getRetentionPolicyDefaults();
 
   const resolved = POLICY_KEYS.reduce(
@@ -138,12 +156,18 @@ async function resolveEffectiveRetentionPolicies(ctx: {
     {} as Record<RetentionPolicyKey, EffectiveRetentionPolicy>,
   );
 
-  const persisted = await ctx.db.query("dataRetentionPolicies").collect();
-  for (const policy of persisted) {
-    if (!isRetentionPolicyKey(policy.key)) continue;
+  for (const key of POLICY_KEYS) {
+    const policy = await db
+      .query("dataRetentionPolicies")
+      .withIndex("by_key", (q) => q.eq("key", key))
+      .unique();
 
-    resolved[policy.key] = {
-      key: policy.key,
+    if (!policy) {
+      continue;
+    }
+
+    resolved[key] = {
+      key,
       retentionDays: toRetentionDays(policy.retentionDays),
       sensitive: policy.sensitive,
       enabled: policy.enabled,
@@ -526,7 +550,7 @@ async function runRetentionCleanupInternal(
   args: CleanupExecutionArgs,
 ) {
   const startedAt = Date.now();
-  const effectivePolicies = await resolveEffectiveRetentionPolicies(ctx);
+  const effectivePolicies = await resolveEffectiveRetentionPolicies(ctx.db);
 
   const deletedCounts: RetentionDeleteCounts = {
     memories: 0,
@@ -798,15 +822,29 @@ async function runRetentionCleanupInternal(
 }
 
 export const listEffectiveRetentionPolicies = query({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
     await requireAdmin(ctx);
-    const effective = await resolveEffectiveRetentionPolicies(ctx);
-    return summarizePolicies(effective).map((policy) => ({
+
+    const effective = await resolveEffectiveRetentionPolicies(ctx.db);
+    const allPolicies = summarizePolicies(effective).map((policy) => ({
       ...policy,
       source: effective[policy.key].source,
       updatedAt: effective[policy.key].updatedAt,
     }));
+
+    const limit = clampAdminRetentionPoliciesPageLimit(args.limit);
+    const start = parseAdminRetentionPoliciesCursor(args.cursor);
+    const items = allPolicies.slice(start, start + limit);
+    const nextOffset = start + items.length;
+
+    return {
+      items,
+      nextCursor: nextOffset < allPolicies.length ? String(nextOffset) : null,
+    };
   },
 });
 

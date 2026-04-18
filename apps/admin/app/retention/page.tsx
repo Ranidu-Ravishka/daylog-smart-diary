@@ -10,6 +10,7 @@ import {
 import { api } from "@repo/backend/convex";
 import { makeFunctionReference } from "convex/server";
 import {
+  useConvex,
   useConvexAuth,
   useMutation,
   usePaginatedQuery,
@@ -25,6 +26,13 @@ type RetentionPolicyRow = {
   source: "env" | "db";
   updatedAt?: number;
 };
+
+type RetentionPoliciesPageResponse = {
+  items: RetentionPolicyRow[];
+  nextCursor: string | null;
+};
+
+const RETENTION_POLICIES_PAGE_SIZE = 50;
 
 type RetentionRunRow = {
   _id: string;
@@ -47,12 +55,36 @@ function totalDeletes(run: RetentionRunRow): number {
   return sumRetentionDeletedCounts(run.deletedCounts);
 }
 
+function mergeRetentionPolicies(
+  primary: RetentionPolicyRow[],
+  secondary: RetentionPolicyRow[],
+): RetentionPolicyRow[] {
+  const seen = new Set<string>();
+  const merged: RetentionPolicyRow[] = [];
+
+  for (const policy of [...primary, ...secondary]) {
+    if (seen.has(policy.key)) {
+      continue;
+    }
+
+    seen.add(policy.key);
+    merged.push(policy);
+  }
+
+  return merged;
+}
+
 export default function RetentionPage() {
+  const convex = useConvex();
   const listRetentionRunsRef = makeFunctionReference<"query">(
     "retention:listRetentionRunsPaginated",
   );
 
   const { isAuthenticated } = useConvexAuth();
+  const [extraPolicies, setExtraPolicies] = useState<RetentionPolicyRow[]>([]);
+  const [policyNextCursor, setPolicyNextCursor] = useState<string | null>(null);
+  const [isLoadingMorePolicies, setIsLoadingMorePolicies] = useState(false);
+  const [policyLoadError, setPolicyLoadError] = useState<string | null>(null);
   const [policyDrafts, setPolicyDrafts] = useState<Record<string, PolicyDraft>>(
     {},
   );
@@ -66,10 +98,21 @@ export default function RetentionPage() {
     isAuthenticated ? {} : "skip",
   );
 
-  const policies = useQuery(
+  const policiesPageResponse = useQuery(
     api.retention.listEffectiveRetentionPolicies,
-    isAdmin ? {} : "skip",
-  ) as RetentionPolicyRow[] | undefined;
+    isAdmin
+      ? {
+          limit: RETENTION_POLICIES_PAGE_SIZE,
+        }
+      : "skip",
+  ) as RetentionPoliciesPageResponse | undefined;
+  const policies = useMemo(
+    () =>
+      mergeRetentionPolicies(policiesPageResponse?.items ?? [], extraPolicies),
+    [policiesPageResponse?.items, extraPolicies],
+  );
+  const effectivePolicyNextCursor =
+    policyNextCursor ?? policiesPageResponse?.nextCursor ?? null;
 
   const {
     results: runs,
@@ -83,7 +126,7 @@ export default function RetentionPage() {
   const runCleanup = useMutation(api.retention.runRetentionCleanupNow);
 
   useEffect(() => {
-    if (!policies) return;
+    if (policies.length === 0) return;
 
     setPolicyDrafts((previous) => {
       const next = { ...previous };
@@ -115,6 +158,7 @@ export default function RetentionPage() {
 
     setActionError(null);
     setStatusMessage(null);
+    setPolicyLoadError(null);
     setBusyPolicyKey(policy.key);
 
     try {
@@ -134,6 +178,38 @@ export default function RetentionPage() {
       );
     } finally {
       setBusyPolicyKey(null);
+    }
+  };
+
+  const loadMorePolicies = async () => {
+    if (!effectivePolicyNextCursor || isLoadingMorePolicies) {
+      return;
+    }
+
+    setPolicyLoadError(null);
+    setIsLoadingMorePolicies(true);
+
+    try {
+      const page = (await convex.query(
+        api.retention.listEffectiveRetentionPolicies,
+        {
+          limit: RETENTION_POLICIES_PAGE_SIZE,
+          cursor: effectivePolicyNextCursor,
+        },
+      )) as RetentionPoliciesPageResponse;
+
+      setExtraPolicies((previous) =>
+        mergeRetentionPolicies(previous, page.items),
+      );
+      setPolicyNextCursor(page.nextCursor);
+    } catch (error) {
+      setPolicyLoadError(
+        error instanceof Error
+          ? error.message
+          : "Failed to load more policies.",
+      );
+    } finally {
+      setIsLoadingMorePolicies(false);
     }
   };
 
@@ -208,7 +284,7 @@ export default function RetentionPage() {
               </h2>
             </div>
 
-            {!policies ? (
+            {!policiesPageResponse && policies.length === 0 ? (
               <div className="p-6 text-sm text-gray-600">
                 Loading retention policies…
               </div>
@@ -218,6 +294,12 @@ export default function RetentionPage() {
               </div>
             ) : (
               <div className="overflow-auto">
+                {policyLoadError && (
+                  <div className="border-b border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    {policyLoadError}
+                  </div>
+                )}
+
                 <table className="min-w-full text-sm">
                   <thead className="bg-gray-50 text-gray-600">
                     <tr>
@@ -330,6 +412,25 @@ export default function RetentionPage() {
                     })}
                   </tbody>
                 </table>
+
+                {effectivePolicyNextCursor && (
+                  <div className="flex items-center justify-between border-t border-gray-100 p-4">
+                    <span className="text-xs text-gray-500">
+                      Showing {sortedPolicies.length} policies
+                    </span>
+                    <button
+                      onClick={() => {
+                        void loadMorePolicies();
+                      }}
+                      disabled={isLoadingMorePolicies}
+                      className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isLoadingMorePolicies
+                        ? "Loading more..."
+                        : "Load more policies"}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -408,7 +509,10 @@ export default function RetentionPage() {
                   </table>
                 </div>
                 {runsStatus === "CanLoadMore" && (
-                  <div className="border-t border-gray-100 p-4">
+                  <div className="flex items-center justify-between border-t border-gray-100 p-4">
+                    <span className="text-xs text-gray-500">
+                      Showing {(runs as RetentionRunRow[]).length} runs
+                    </span>
                     <button
                       onClick={() => loadMore(20)}
                       className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"

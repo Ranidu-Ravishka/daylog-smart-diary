@@ -72,8 +72,11 @@ describe("retention behavior", () => {
       { success: boolean; key: string; retentionDays: number; source?: string }
     >(retentionModule.upsertRetentionPolicy);
     const listEffectiveRetentionPolicies = handler<
-      Record<string, never>,
-      Array<{ key: string; source: string; retentionDays: number }>
+      { limit?: number; cursor?: string },
+      {
+        items: Array<{ key: string; source: string; retentionDays: number }>;
+        nextCursor: string | null;
+      }
     >(retentionModule.listEffectiveRetentionPolicies);
 
     await expect(
@@ -108,10 +111,13 @@ describe("retention behavior", () => {
       retentionCtx(db, "clerk_admin_001"),
       {},
     );
-    const memories = effective.find((policy) => policy.key === "memories");
+    const memories = effective.items.find(
+      (policy) => policy.key === "memories",
+    );
 
     expect(memories?.source).toBe("db");
     expect(memories?.retentionDays).toBe(30);
+    expect(effective.nextCursor).toBeNull();
   });
 
   it("executes cleanup across all policy buckets and writes run/audit rows", async () => {

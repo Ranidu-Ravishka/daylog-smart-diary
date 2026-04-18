@@ -2,6 +2,20 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { requireAdmin } from "./authz";
 
+const DEFAULT_CONTENT_PAGE_LIMIT = 50;
+const MAX_CONTENT_PAGE_LIMIT = 200;
+
+function clampContentPageLimit(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_CONTENT_PAGE_LIMIT;
+  }
+
+  const normalized = Math.floor(value);
+  if (normalized < 1) return 1;
+  if (normalized > MAX_CONTENT_PAGE_LIMIT) return MAX_CONTENT_PAGE_LIMIT;
+  return normalized;
+}
+
 export const writeContent = mutation({
   args: {
     slug: v.string(),
@@ -32,11 +46,23 @@ export const writeContent = mutation({
 });
 
 export const getContent = query({
-  args: {},
-  handler: async (ctx) => {
-    const content = await ctx.db.query("content").collect();
-    content.sort((a, b) => b._creationTime - a._creationTime);
-    return content;
+  args: {
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const page = await ctx.db
+      .query("content")
+      .order("desc")
+      .paginate({
+        numItems: clampContentPageLimit(args.limit),
+        cursor: args.cursor ?? null,
+      });
+
+    return {
+      items: page.page,
+      nextCursor: page.isDone ? null : page.continueCursor,
+    };
   },
 });
 

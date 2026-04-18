@@ -130,11 +130,21 @@ describe("content behavior", () => {
       ],
     });
 
-    const getContent = handler<Record<string, never>, Array<{ slug: string }>>(
-      contentModule.getContent,
-    );
+    const getContent = handler<
+      { limit?: number; cursor?: string },
+      { items: Array<{ slug: string }>; nextCursor: string | null }
+    >(contentModule.getContent);
 
-    const list = await getContent(createAuthCtx(db, null), {});
-    expect(list.map((item) => item.slug)).toEqual(["newer", "older"]);
+    const firstPage = await getContent(createAuthCtx(db, null), { limit: 1 });
+    expect(firstPage.items.map((item) => item.slug)).toEqual(["newer"]);
+    expect(firstPage.nextCursor).not.toBeNull();
+
+    const secondPage = await getContent(createAuthCtx(db, null), {
+      limit: 1,
+      cursor: firstPage.nextCursor ?? undefined,
+    });
+
+    expect(secondPage.items.map((item) => item.slug)).toEqual(["older"]);
+    expect(secondPage.nextCursor).toBeNull();
   });
 });
