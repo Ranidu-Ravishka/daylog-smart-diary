@@ -2,7 +2,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 import path from "node:path";
 
-const EXPECTED_REQUIRED_CHECKS = ["backend-validation"];
+const EXPECTED_REQUIRED_CHECKS = [
+  "backend-validation",
+  "app-tests-backend",
+  "app-tests-web",
+  "app-tests-admin",
+  "app-tests-mobile",
+];
 const DEFAULT_BRANCH = "main";
 const DEFAULT_EXPECTED_FILE = ".github/branch-protection.expected.json";
 

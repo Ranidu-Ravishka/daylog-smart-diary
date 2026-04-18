@@ -2,7 +2,11 @@
   "branches": {
     "main": {
       "requiredStatusChecks": [
-        "backend-validation"
+        "backend-validation",
+        "app-tests-backend",
+        "app-tests-web",
+        "app-tests-admin",
+        "app-tests-mobile"
       ]
     }
   }
