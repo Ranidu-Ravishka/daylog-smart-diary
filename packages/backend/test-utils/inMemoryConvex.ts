@@ -31,6 +31,8 @@ type TableName =
   | "integrationProviderHealth"
   | "integrationHealthEvents"
   | "observabilityInfoEvents"
+  | "observabilityIngestRateLimits"
+  | "observabilityIngestRateLimitMetrics"
   | "summaryGenerationEvents"
   | "summaryQualityEvaluations"
   | "dataRetentionPolicies"
@@ -141,6 +143,15 @@ const INDEX_FIELDS: Record<TableName, Record<string, string[]>> = {
     by_receivedAt: ["receivedAt"],
     by_surface_receivedAt: ["surface", "receivedAt"],
     by_event_receivedAt: ["event", "receivedAt"],
+  },
+  observabilityIngestRateLimits: {
+    by_scope_key: ["scope", "key"],
+    by_updatedAt: ["updatedAt"],
+  },
+  observabilityIngestRateLimitMetrics: {
+    by_slot_shard: ["slotMinute", "shard"],
+    by_epochMinute: ["epochMinute"],
+    by_updatedAt: ["updatedAt"],
   },
   summaryGenerationEvents: {
     by_createdAt: ["createdAt"],
@@ -417,6 +428,12 @@ export class InMemoryDb {
       integrationProviderHealth: [...(seed?.integrationProviderHealth ?? [])],
       integrationHealthEvents: [...(seed?.integrationHealthEvents ?? [])],
       observabilityInfoEvents: [...(seed?.observabilityInfoEvents ?? [])],
+      observabilityIngestRateLimits: [
+        ...(seed?.observabilityIngestRateLimits ?? []),
+      ],
+      observabilityIngestRateLimitMetrics: [
+        ...(seed?.observabilityIngestRateLimitMetrics ?? []),
+      ],
       summaryGenerationEvents: [...(seed?.summaryGenerationEvents ?? [])],
       summaryQualityEvaluations: [...(seed?.summaryQualityEvaluations ?? [])],
       dataRetentionPolicies: [...(seed?.dataRetentionPolicies ?? [])],

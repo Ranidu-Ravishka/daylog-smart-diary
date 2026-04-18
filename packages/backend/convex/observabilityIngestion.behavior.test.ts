@@ -60,7 +60,36 @@ type TransportHealthResult = {
   }>;
 };
 
+type RateLimitMetricsResult = {
+  windowMinutes: number;
+  windowStartMinute: number;
+  nowMinute: number;
+  evaluatedRows: number;
+  truncated: boolean;
+  totals: {
+    totalRequests: number;
+    allowedRequests: number;
+    blockedRequests: number;
+    burstAttempts: number;
+    blockedRate: number;
+  };
+  minuteBuckets: Array<{
+    epochMinute: number;
+    allowedRequests: number;
+    blockedRequests: number;
+    burstAttempts: number;
+  }>;
+};
+
+function toSlotMinute(epochMinute: number): number {
+  const minutesPerDay = 24 * 60;
+  const normalized = epochMinute % minutesPerDay;
+  return normalized >= 0 ? normalized : normalized + minutesPerDay;
+}
+
 function seededDb(now: number) {
+  const nowMinute = Math.floor(now / 60_000);
+
   return createInMemoryDb({
     user: [
       {
@@ -131,6 +160,52 @@ function seededDb(now: number) {
         receivedAt: now - 72 * 60 * 60 * 1000,
         sampleRate: 0.2,
         sourceEnvironment: "production",
+      },
+    ],
+    observabilityIngestRateLimitMetrics: [
+      {
+        _id: "metric_001",
+        _creationTime: now - 1_200,
+        slotMinute: toSlotMinute(nowMinute - 2),
+        epochMinute: nowMinute - 2,
+        shard: 0,
+        allowedRequests: 8,
+        blockedRequests: 2,
+        burstAttempts: 1,
+        updatedAt: now - 1_200,
+      },
+      {
+        _id: "metric_002",
+        _creationTime: now - 1_100,
+        slotMinute: toSlotMinute(nowMinute - 2),
+        epochMinute: nowMinute - 2,
+        shard: 1,
+        allowedRequests: 4,
+        blockedRequests: 1,
+        burstAttempts: 0,
+        updatedAt: now - 1_100,
+      },
+      {
+        _id: "metric_003",
+        _creationTime: now - 500,
+        slotMinute: toSlotMinute(nowMinute - 1),
+        epochMinute: nowMinute - 1,
+        shard: 0,
+        allowedRequests: 5,
+        blockedRequests: 3,
+        burstAttempts: 2,
+        updatedAt: now - 500,
+      },
+      {
+        _id: "metric_004",
+        _creationTime: now - 91 * 60 * 1_000,
+        slotMinute: toSlotMinute(nowMinute - 90),
+        epochMinute: nowMinute - 90,
+        shard: 0,
+        allowedRequests: 20,
+        blockedRequests: 4,
+        burstAttempts: 1,
+        updatedAt: now - 91 * 60 * 1_000,
       },
     ],
   });
@@ -312,6 +387,55 @@ describe("observability ingestion admin queries", () => {
     ]);
   });
 
+  it("aggregates ingest rate-limit metrics over the selected window", async () => {
+    const now = Date.parse("2026-04-12T12:00:00.000Z");
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const db = seededDb(now);
+
+    const getObservabilityIngestRateLimitMetrics = handler<
+      { windowMinutes?: number },
+      RateLimitMetricsResult
+    >(observabilityIngestionModule.getObservabilityIngestRateLimitMetrics);
+
+    const summary = await getObservabilityIngestRateLimitMetrics(
+      createAuthCtx(db, "clerk_admin_001"),
+      {
+        windowMinutes: 60,
+      },
+    );
+
+    const nowMinute = Math.floor(now / 60_000);
+
+    expect(summary.windowMinutes).toBe(60);
+    expect(summary.windowStartMinute).toBe(nowMinute - 59);
+    expect(summary.nowMinute).toBe(nowMinute);
+    expect(summary.evaluatedRows).toBe(3);
+    expect(summary.truncated).toBe(false);
+
+    expect(summary.totals).toEqual({
+      totalRequests: 23,
+      allowedRequests: 17,
+      blockedRequests: 6,
+      burstAttempts: 3,
+      blockedRate: 6 / 23,
+    });
+
+    expect(summary.minuteBuckets).toEqual([
+      {
+        epochMinute: nowMinute - 2,
+        allowedRequests: 12,
+        blockedRequests: 3,
+        burstAttempts: 1,
+      },
+      {
+        epochMinute: nowMinute - 1,
+        allowedRequests: 5,
+        blockedRequests: 3,
+        burstAttempts: 2,
+      },
+    ]);
+  });
+
   it("rejects non-admin access to observability inspection queries", async () => {
     const now = Date.parse("2026-04-12T12:00:00.000Z");
     const db = seededDb(now);
@@ -328,6 +452,11 @@ describe("observability ingestion admin queries", () => {
       { windowHours?: number },
       TransportHealthResult
     >(observabilityIngestionModule.getObservabilityInfoTransportHealth);
+
+    const getObservabilityIngestRateLimitMetrics = handler<
+      { windowMinutes?: number },
+      RateLimitMetricsResult
+    >(observabilityIngestionModule.getObservabilityIngestRateLimitMetrics);
 
     await expect(
       listObservabilityInfoEventsPaginated(
@@ -346,6 +475,15 @@ describe("observability ingestion admin queries", () => {
         createAuthCtx(db, "clerk_member_001"),
         {
           windowHours: 24,
+        },
+      ),
+    ).rejects.toThrow("Forbidden: admin access required");
+
+    await expect(
+      getObservabilityIngestRateLimitMetrics(
+        createAuthCtx(db, "clerk_member_001"),
+        {
+          windowMinutes: 60,
         },
       ),
     ).rejects.toThrow("Forbidden: admin access required");

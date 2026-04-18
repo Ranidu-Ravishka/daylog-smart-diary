@@ -42,6 +42,38 @@ type TransportHealthSummary = {
   }>;
 };
 
+type RateLimitMinuteBucket = {
+  epochMinute: number;
+  allowedRequests: number;
+  blockedRequests: number;
+  burstAttempts: number;
+};
+
+type RateLimitMetricsSummary = {
+  windowMinutes: number;
+  windowStartMinute: number;
+  nowMinute: number;
+  evaluatedRows: number;
+  truncated: boolean;
+  totals: {
+    totalRequests: number;
+    allowedRequests: number;
+    blockedRequests: number;
+    burstAttempts: number;
+    blockedRate: number;
+  };
+  minuteBuckets: RateLimitMinuteBucket[];
+};
+
+type RateLimitChartBucket = {
+  startEpochMinute: number;
+  endEpochMinute: number;
+  allowedRequests: number;
+  blockedRequests: number;
+  burstAttempts: number;
+  totalRequests: number;
+};
+
 type InfoEventRow = {
   _id: string;
   surface: "web" | "mobile";
@@ -54,6 +86,30 @@ type InfoEventRow = {
 };
 
 const WINDOW_OPTIONS = [1, 6, 24, 72, 168] as const;
+const RATE_LIMIT_WINDOW_OPTIONS_MINUTES = [
+  15, 60, 180, 360, 720, 1440,
+] as const;
+const RATE_LIMIT_MAX_CHART_BARS = 48;
+const RATE_LIMIT_MINUTE_CSV_COLUMNS = [
+  "epochMinute",
+  "minuteStartIso",
+  "allowedRequests",
+  "blockedRequests",
+  "burstAttempts",
+  "totalRequests",
+  "blockedRate",
+] as const;
+const RATE_LIMIT_CHART_CSV_COLUMNS = [
+  "startEpochMinute",
+  "startMinuteIso",
+  "endEpochMinute",
+  "endMinuteIso",
+  "allowedRequests",
+  "blockedRequests",
+  "burstAttempts",
+  "totalRequests",
+  "blockedRate",
+] as const;
 
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -64,6 +120,86 @@ function clamp01(value: number): number {
 
 function formatPercent(value: number): string {
   return `${(clamp01(value) * 100).toFixed(1)}%`;
+}
+
+function formatWindowMinutes(value: number): string {
+  if (value % 60 === 0) {
+    return `${value / 60}h`;
+  }
+
+  return `${value}m`;
+}
+
+function formatEpochMinuteIso(value: number): string {
+  return new Date(value * 60_000).toISOString();
+}
+
+function csvColumnsTooltip(columns: readonly string[]): string {
+  return `Columns: ${columns.join(", ")}`;
+}
+
+function toRateLimitMetricsCsv(rows: RateLimitMinuteBucket[]): string {
+  const header = RATE_LIMIT_MINUTE_CSV_COLUMNS.join(",");
+
+  const lines = rows.map((row) => {
+    const totalRequests = row.allowedRequests + row.blockedRequests;
+    const blockedRate =
+      totalRequests > 0 ? row.blockedRequests / totalRequests : 0;
+
+    return [
+      String(row.epochMinute),
+      formatEpochMinuteIso(row.epochMinute),
+      String(row.allowedRequests),
+      String(row.blockedRequests),
+      String(row.burstAttempts),
+      String(totalRequests),
+      blockedRate.toFixed(6),
+    ].join(",");
+  });
+
+  return [header, ...lines].join("\n");
+}
+
+function toRateLimitChartCsv(rows: RateLimitChartBucket[]): string {
+  const header = RATE_LIMIT_CHART_CSV_COLUMNS.join(",");
+
+  const lines = rows.map((row) => {
+    const blockedRate =
+      row.totalRequests > 0 ? row.blockedRequests / row.totalRequests : 0;
+
+    return [
+      String(row.startEpochMinute),
+      formatEpochMinuteIso(row.startEpochMinute),
+      String(row.endEpochMinute),
+      formatEpochMinuteIso(row.endEpochMinute),
+      String(row.allowedRequests),
+      String(row.blockedRequests),
+      String(row.burstAttempts),
+      String(row.totalRequests),
+      blockedRate.toFixed(6),
+    ].join(",");
+  });
+
+  return [header, ...lines].join("\n");
+}
+
+function downloadCsvFile(fileNamePrefix: string, csv: string): void {
+  const blob = new Blob([csv], {
+    type: "text/csv;charset=utf-8;",
+  });
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const fileStamp = new Date().toISOString().replace(/[.:]/g, "-");
+
+  link.href = url;
+  link.download = `${fileNamePrefix}-${fileStamp}.csv`;
+
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  URL.revokeObjectURL(url);
 }
 
 function formatSampleRate(value: number | null): string {
@@ -99,6 +235,56 @@ function contextPreview(contextJson: string | undefined): string {
   return `${contextJson.slice(0, 117)}...`;
 }
 
+function compactRateLimitBuckets(
+  minuteBuckets: RateLimitMinuteBucket[],
+): RateLimitChartBucket[] {
+  if (minuteBuckets.length === 0) {
+    return [];
+  }
+
+  const chunkSize = Math.max(
+    1,
+    Math.ceil(minuteBuckets.length / RATE_LIMIT_MAX_CHART_BARS),
+  );
+
+  const compacted: RateLimitChartBucket[] = [];
+
+  for (let index = 0; index < minuteBuckets.length; index += chunkSize) {
+    const chunk = minuteBuckets.slice(index, index + chunkSize);
+    if (chunk.length === 0) {
+      continue;
+    }
+
+    let allowedRequests = 0;
+    let blockedRequests = 0;
+    let burstAttempts = 0;
+
+    for (const row of chunk) {
+      allowedRequests += row.allowedRequests;
+      blockedRequests += row.blockedRequests;
+      burstAttempts += row.burstAttempts;
+    }
+
+    const first = chunk[0];
+    const last = chunk[chunk.length - 1];
+
+    if (!first || !last) {
+      continue;
+    }
+
+    compacted.push({
+      startEpochMinute: first.epochMinute,
+      endEpochMinute: last.epochMinute,
+      allowedRequests,
+      blockedRequests,
+      burstAttempts,
+      totalRequests: allowedRequests + blockedRequests,
+    });
+  }
+
+  return compacted;
+}
+
 export default function ObservabilityInfoEventsPage() {
   const listInfoEventsPaginatedRef = makeFunctionReference<"query">(
     "observabilityIngestion:listObservabilityInfoEventsPaginated",
@@ -106,10 +292,15 @@ export default function ObservabilityInfoEventsPage() {
   const transportHealthRef = makeFunctionReference<"query">(
     "observabilityIngestion:getObservabilityInfoTransportHealth",
   );
+  const rateLimitMetricsRef = makeFunctionReference<"query">(
+    "observabilityIngestion:getObservabilityIngestRateLimitMetrics",
+  );
 
   const { isAuthenticated } = useConvexAuth();
   const [surfaceFilter, setSurfaceFilter] = useState<SurfaceFilter>("all");
   const [windowHours, setWindowHours] = useState<number>(24);
+  const [rateLimitWindowMinutes, setRateLimitWindowMinutes] =
+    useState<number>(60);
   const [eventNameFilter, setEventNameFilter] = useState("");
   const [environmentFilter, setEnvironmentFilter] = useState("all");
 
@@ -134,6 +325,15 @@ export default function ObservabilityInfoEventsPage() {
         }
       : "skip",
   ) as TransportHealthSummary | undefined;
+
+  const rateLimitMetrics = useQuery(
+    rateLimitMetricsRef,
+    isAdmin
+      ? {
+          windowMinutes: rateLimitWindowMinutes,
+        }
+      : "skip",
+  ) as RateLimitMetricsSummary | undefined;
 
   const {
     results: infoEvents,
@@ -206,6 +406,53 @@ export default function ObservabilityInfoEventsPage() {
       return true;
     });
   }, [infoEvents, normalizedEventNameFilter, environmentFilter]);
+
+  const rateLimitChartBuckets = useMemo(
+    () => compactRateLimitBuckets(rateLimitMetrics?.minuteBuckets ?? []),
+    [rateLimitMetrics],
+  );
+
+  const rateLimitChartMaxTotal = useMemo(() => {
+    return rateLimitChartBuckets.reduce((max, row) => {
+      return row.totalRequests > max ? row.totalRequests : max;
+    }, 0);
+  }, [rateLimitChartBuckets]);
+
+  const rateLimitCsv = useMemo(() => {
+    return toRateLimitMetricsCsv(rateLimitMetrics?.minuteBuckets ?? []);
+  }, [rateLimitMetrics]);
+
+  const rateLimitChartCsv = useMemo(() => {
+    return toRateLimitChartCsv(rateLimitChartBuckets);
+  }, [rateLimitChartBuckets]);
+
+  const firstRateLimitChartBucket =
+    rateLimitChartBuckets.length > 0 ? rateLimitChartBuckets[0] : null;
+  const lastRateLimitChartBucket =
+    rateLimitChartBuckets.length > 0
+      ? rateLimitChartBuckets[rateLimitChartBuckets.length - 1]
+      : null;
+
+  const rateLimitLastUpdatedAt =
+    rateLimitMetrics && Number.isFinite(rateLimitMetrics.nowMinute)
+      ? rateLimitMetrics.nowMinute * 60_000
+      : null;
+
+  const onDownloadRateLimitCsv = () => {
+    if (!rateLimitMetrics || rateLimitMetrics.minuteBuckets.length === 0) {
+      return;
+    }
+
+    downloadCsvFile("observability-rate-limit-minute", rateLimitCsv);
+  };
+
+  const onDownloadRateLimitChartCsv = () => {
+    if (rateLimitChartBuckets.length === 0) {
+      return;
+    }
+
+    downloadCsvFile("observability-rate-limit-chart", rateLimitChartCsv);
+  };
 
   const overall = transportHealth?.overall;
 
@@ -310,6 +557,209 @@ export default function ObservabilityInfoEventsPage() {
                   : "—"
               }
             />
+          </div>
+
+          <div className="mb-6 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-gray-100 px-4 py-3">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-900">
+                  Ingest Rate Limit Activity
+                </h2>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Allowed versus blocked requests over the selected time window.
+                </p>
+              </div>
+
+              <label className="text-xs text-gray-600">
+                Rate Limit Window
+                <select
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
+                  value={rateLimitWindowMinutes}
+                  onChange={(event) =>
+                    setRateLimitWindowMinutes(Number(event.target.value))
+                  }
+                >
+                  {RATE_LIMIT_WINDOW_OPTIONS_MINUTES.map((minutes) => (
+                    <option key={minutes} value={minutes}>
+                      Last {formatWindowMinutes(minutes)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            {!rateLimitMetrics ? (
+              <div className="p-6 text-sm text-gray-600">
+                Loading rate-limit metrics…
+              </div>
+            ) : (
+              <div className="p-4">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-gray-500">
+                    Last updated: {formatTimestamp(rateLimitLastUpdatedAt)}
+                  </p>
+
+                  <div className="inline-flex flex-wrap items-center gap-2">
+                    <div className="inline-flex items-center gap-1">
+                      <button
+                        onClick={onDownloadRateLimitCsv}
+                        disabled={rateLimitMetrics.minuteBuckets.length === 0}
+                        className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Download Minute CSV
+                      </button>
+                      <span
+                        title={csvColumnsTooltip(RATE_LIMIT_MINUTE_CSV_COLUMNS)}
+                        aria-label={csvColumnsTooltip(
+                          RATE_LIMIT_MINUTE_CSV_COLUMNS,
+                        )}
+                        className="inline-flex size-4 items-center justify-center rounded-full border border-gray-300 bg-white text-[10px] font-semibold text-gray-600 cursor-help"
+                      >
+                        i
+                      </span>
+                    </div>
+
+                    <div className="inline-flex items-center gap-1">
+                      <button
+                        onClick={onDownloadRateLimitChartCsv}
+                        disabled={rateLimitChartBuckets.length === 0}
+                        className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Download Chart CSV
+                      </button>
+                      <span
+                        title={csvColumnsTooltip(RATE_LIMIT_CHART_CSV_COLUMNS)}
+                        aria-label={csvColumnsTooltip(
+                          RATE_LIMIT_CHART_CSV_COLUMNS,
+                        )}
+                        className="inline-flex size-4 items-center justify-center rounded-full border border-gray-300 bg-white text-[10px] font-semibold text-gray-600 cursor-help"
+                      >
+                        i
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                  <MetricCard
+                    label={`Total (${formatWindowMinutes(rateLimitMetrics.windowMinutes)})`}
+                    value={rateLimitMetrics.totals.totalRequests.toLocaleString()}
+                  />
+                  <MetricCard
+                    label="Allowed"
+                    value={rateLimitMetrics.totals.allowedRequests.toLocaleString()}
+                  />
+                  <MetricCard
+                    label="Blocked"
+                    value={rateLimitMetrics.totals.blockedRequests.toLocaleString()}
+                  />
+                  <MetricCard
+                    label="Burst Attempts"
+                    value={rateLimitMetrics.totals.burstAttempts.toLocaleString()}
+                  />
+                  <MetricCard
+                    label="Blocked Rate"
+                    value={formatPercent(rateLimitMetrics.totals.blockedRate)}
+                  />
+                </div>
+
+                {rateLimitMetrics.truncated && (
+                  <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    Rate-limit summary is capped to the newest{" "}
+                    {rateLimitMetrics.evaluatedRows.toLocaleString()} metric
+                    rows in the selected window.
+                  </div>
+                )}
+
+                {rateLimitChartBuckets.length === 0 ? (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+                    No rate-limit activity in the selected window.
+                  </div>
+                ) : (
+                  <>
+                    <div className="h-44 rounded-lg border border-gray-200 bg-gray-50 p-2">
+                      <div className="flex h-full items-end gap-1">
+                        {rateLimitChartBuckets.map((bucket, index) => {
+                          const heightRatio =
+                            rateLimitChartMaxTotal > 0
+                              ? bucket.totalRequests / rateLimitChartMaxTotal
+                              : 0;
+
+                          const blockedShare =
+                            bucket.totalRequests > 0
+                              ? bucket.blockedRequests / bucket.totalRequests
+                              : 0;
+
+                          const barHeight = Math.max(heightRatio * 100, 2);
+                          const barKey = `${bucket.startEpochMinute}-${bucket.endEpochMinute}-${String(index)}`;
+
+                          return (
+                            <div
+                              key={barKey}
+                              className="group relative h-full flex-1"
+                            >
+                              <div className="absolute bottom-0 left-0 right-0">
+                                <div
+                                  className="overflow-hidden rounded-sm"
+                                  style={{ height: `${barHeight}%` }}
+                                >
+                                  <div
+                                    className="bg-rose-500"
+                                    style={{ height: `${blockedShare * 100}%` }}
+                                  />
+                                  <div
+                                    className="bg-emerald-500"
+                                    style={{
+                                      height: `${(1 - blockedShare) * 100}%`,
+                                    }}
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-[10px] text-white shadow group-hover:block">
+                                {bucket.allowedRequests} allowed •{" "}
+                                {bucket.blockedRequests} blocked •{" "}
+                                {bucket.burstAttempts} burst
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="mt-2 flex items-center justify-between text-[11px] text-gray-500">
+                      <span>
+                        {firstRateLimitChartBucket
+                          ? new Date(
+                              firstRateLimitChartBucket.startEpochMinute *
+                                60_000,
+                            ).toLocaleTimeString()
+                          : "—"}
+                      </span>
+                      <span>{rateLimitChartBuckets.length} bars</span>
+                      <span>
+                        {lastRateLimitChartBucket
+                          ? new Date(
+                              lastRateLimitChartBucket.endEpochMinute * 60_000,
+                            ).toLocaleTimeString()
+                          : "—"}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-gray-600">
+                      <span className="inline-flex items-center gap-1">
+                        <span className="size-2 rounded-full bg-emerald-500" />
+                        Allowed
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="size-2 rounded-full bg-rose-500" />
+                        Blocked
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
 
           {transportHealth?.truncated && (

@@ -82,11 +82,17 @@ function toContextJson(context: StructuredContext): string | undefined {
   }
 }
 
-function buildInfoEventHeaders(): Record<string, string> {
-  return {
+function buildInfoEventHeaders(userId: string | null): Record<string, string> {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "X-Daylog-Ingest-Token": durableInfoEventIngestToken,
   };
+
+  if (userId) {
+    headers["X-Daylog-User-Id"] = userId;
+  }
+
+  return headers;
 }
 
 function emitDurableInfoEvent(payload: StructuredLogEnvelope) {
@@ -127,7 +133,7 @@ function emitDurableInfoEvent(payload: StructuredLogEnvelope) {
   if (typeof window !== "undefined") {
     void fetch(durableInfoEventEndpoint, {
       method: "POST",
-      headers: buildInfoEventHeaders(),
+      headers: buildInfoEventHeaders(payload.userId),
       body: requestBody,
       keepalive: true,
     }).catch(() => undefined);
@@ -136,7 +142,7 @@ function emitDurableInfoEvent(payload: StructuredLogEnvelope) {
 
   void fetch(durableInfoEventEndpoint, {
     method: "POST",
-    headers: buildInfoEventHeaders(),
+    headers: buildInfoEventHeaders(payload.userId),
     body: requestBody,
   }).catch(() => undefined);
 }

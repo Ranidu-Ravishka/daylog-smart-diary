@@ -9,6 +9,7 @@ import {
   ingestObservabilityInfoEvent,
   observabilityInfoEventOptions,
 } from "./observabilityIngestion";
+import type { ObservabilityIngestRateLimitDecision } from "./observabilityIngestRateLimiter";
 
 const VALID_INGEST_TOKEN = "test_ingest_token_1234567890abcdef";
 const ALLOWED_ORIGIN = "https://app.daylog.test";
@@ -25,6 +26,56 @@ const ORIGINAL_ENV = {
 };
 
 type HttpActionHandler = (ctx: unknown, request: Request) => Promise<Response>;
+
+function buildRateLimitDecision(
+  overrides?: Partial<ObservabilityIngestRateLimitDecision>,
+): ObservabilityIngestRateLimitDecision {
+  return {
+    allowed: true,
+    blockedScopes: [],
+    retryAfterSeconds: 0,
+    burstAttempt: false,
+    ipKey: "127.0.0.1",
+    userKey: "anonymous",
+    ...overrides,
+  };
+}
+
+function isRateLimitMutationArgs(value: unknown): boolean {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  return "ipKey" in value && "userKey" in value && "receivedAt" in value;
+}
+
+function isInsertEventMutationArgs(value: unknown): boolean {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  return "app" in value && "surface" in value && "event" in value;
+}
+
+function countInsertMutationCalls(
+  runMutation: ReturnType<typeof vi.fn>,
+): number {
+  return runMutation.mock.calls.filter((call) =>
+    isInsertEventMutationArgs(call[1]),
+  ).length;
+}
+
+function createRunMutationMock(
+  rateLimitDecision?: ObservabilityIngestRateLimitDecision,
+) {
+  return vi.fn(async (_ref: unknown, args: unknown) => {
+    if (isRateLimitMutationArgs(args)) {
+      return rateLimitDecision ?? buildRateLimitDecision();
+    }
+
+    return undefined;
+  });
+}
 
 function setSecurityEnv(overrides?: {
   appEnv?: string;
@@ -170,7 +221,7 @@ describe.sequential("observability ingest security", () => {
   });
 
   it("rejects invalid origin before attempting mutation", async () => {
-    const runMutation = vi.fn(async () => undefined);
+    const runMutation = createRunMutationMock();
     const handler = (
       ingestObservabilityInfoEvent as unknown as {
         _handler: HttpActionHandler;
@@ -195,7 +246,7 @@ describe.sequential("observability ingest security", () => {
   });
 
   it("rejects unsigned requests before attempting mutation", async () => {
-    const runMutation = vi.fn(async () => undefined);
+    const runMutation = createRunMutationMock();
     const handler = (
       ingestObservabilityInfoEvent as unknown as {
         _handler: HttpActionHandler;
@@ -218,8 +269,41 @@ describe.sequential("observability ingest security", () => {
     expect(runMutation).not.toHaveBeenCalled();
   });
 
+  it("returns 429 and skips event insert when rate limit is exceeded", async () => {
+    const runMutation = createRunMutationMock(
+      buildRateLimitDecision({
+        allowed: false,
+        blockedScopes: ["ip"],
+        retryAfterSeconds: 2,
+        burstAttempt: true,
+      }),
+    );
+    const handler = (
+      ingestObservabilityInfoEvent as unknown as {
+        _handler: HttpActionHandler;
+      }
+    )._handler;
+
+    const response = await handler(
+      { runMutation },
+      new Request("https://convex.site/observability/info-event", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: ALLOWED_ORIGIN,
+          "x-daylog-ingest-token": VALID_INGEST_TOKEN,
+        },
+        body: createValidPayload(),
+      }),
+    );
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("2");
+    expect(countInsertMutationCalls(runMutation)).toBe(0);
+  });
+
   it("rejects oversized payloads before attempting mutation", async () => {
-    const runMutation = vi.fn(async () => undefined);
+    const runMutation = createRunMutationMock();
     const handler = (
       ingestObservabilityInfoEvent as unknown as {
         _handler: HttpActionHandler;
@@ -252,11 +336,11 @@ describe.sequential("observability ingest security", () => {
     );
 
     expect(response.status).toBe(413);
-    expect(runMutation).not.toHaveBeenCalled();
+    expect(countInsertMutationCalls(runMutation)).toBe(0);
   });
 
   it("accepts signed requests from allowlisted origins", async () => {
-    const runMutation = vi.fn(async () => undefined);
+    const runMutation = createRunMutationMock();
     const handler = (
       ingestObservabilityInfoEvent as unknown as {
         _handler: HttpActionHandler;
@@ -280,7 +364,10 @@ describe.sequential("observability ingest security", () => {
     expect(response.headers.get("Access-Control-Allow-Origin")).toBe(
       ALLOWED_ORIGIN,
     );
-    expect(runMutation).toHaveBeenCalledTimes(1);
+    expect(countInsertMutationCalls(runMutation)).toBe(1);
+    expect(
+      runMutation.mock.calls.some((call) => isRateLimitMutationArgs(call[1])),
+    ).toBe(true);
   });
 
   it("applies CORS policy to preflight OPTIONS", async () => {
