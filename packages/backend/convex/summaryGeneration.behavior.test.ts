@@ -184,6 +184,15 @@ describe("summary generation behavior", () => {
       generatedAt: 123,
     });
 
+    expect(runQuery.mock.calls[1]?.[1]).toEqual({
+      dayKey: "2026-04-02",
+      limit: 50,
+    });
+    expect(runQuery.mock.calls[3]?.[1]).toEqual({
+      dayKey: "2026-04-02",
+      limit: 32,
+    });
+
     expect(runMutation).toHaveBeenCalledTimes(3);
 
     const upsertCallArgs = runMutation.mock.calls[1]?.[1] as {
@@ -289,6 +298,98 @@ describe("summary generation behavior", () => {
     });
     expect(upsertCallArgs.sourcesUsed).toEqual(
       expect.arrayContaining(["Model", "Integrations", "Google Fit"]),
+    );
+  });
+
+  it("caps summary memory payload size before model generation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  story: "Trimmed memory input",
+                  highlights: ["kept latest context"],
+                  sourcesUsed: ["Memories"],
+                }),
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const largeDescription = "x".repeat(30_000);
+    const oversizedMemories = Array.from({ length: 10 }, (_, index) => ({
+      title: `Memory ${String(index + 1)}`,
+      description: largeDescription,
+      mood: "focused",
+      happenedAt: 1_000 - index,
+    }));
+
+    const runQuery = vi
+      .fn()
+      .mockResolvedValueOnce({
+        flags: {
+          aiSummaryEnabled: true,
+        },
+      })
+      .mockResolvedValueOnce(oversizedMemories)
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ userId: "user_001" });
+
+    const runMutation = vi
+      .fn()
+      .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce({ _id: "summary_003", generatedAt: 789 })
+      .mockResolvedValueOnce({ success: true });
+
+    const generateSummaryForDay = handler<
+      { dayKey: string },
+      { success: boolean; summaryId?: string; generatedAt?: number }
+    >(summaryGenerationModule.generateSummaryForDay);
+
+    const result = await generateSummaryForDay(
+      {
+        runQuery,
+        runMutation,
+      },
+      { dayKey: "2026-04-04" },
+    );
+
+    expect(result).toEqual({
+      success: true,
+      summaryId: "summary_003",
+      generatedAt: 789,
+    });
+
+    expect(runQuery.mock.calls[1]?.[1]).toEqual({
+      dayKey: "2026-04-04",
+      limit: 50,
+    });
+    expect(runQuery.mock.calls[3]?.[1]).toEqual({
+      dayKey: "2026-04-04",
+      limit: 32,
+    });
+
+    const qualityArgs = runMutation.mock.calls[2]?.[1] as {
+      modelInput: string;
+    };
+    const modelInputBytes = new TextEncoder().encode(
+      qualityArgs.modelInput,
+    ).length;
+    const parsedModelInput = JSON.parse(qualityArgs.modelInput) as {
+      memories: Array<{ title: string }>;
+    };
+
+    expect(modelInputBytes).toBeLessThanOrEqual(100_000);
+    expect(parsedModelInput.memories.length).toBeGreaterThan(0);
+    expect(parsedModelInput.memories.length).toBeLessThan(
+      oversizedMemories.length,
     );
   });
 

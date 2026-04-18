@@ -36,10 +36,14 @@ function runExpo(args, inspectOutput) {
         output.includes("CommandError: No development build") ||
         (output.includes("No development build") &&
           output.includes("for this project is installed"));
+      const sawIosOpenTimeout =
+        output.includes("xcrun simctl openurl") &&
+        (output.includes("Operation timed out") || output.includes("code=60"));
 
       resolve({
         code: code ?? 1,
         sawMissingDevBuild,
+        sawIosOpenTimeout,
       });
     });
   });
@@ -59,6 +63,19 @@ async function main() {
 
     const fallbackAttempt = await runExpo(
       ["--port", "3002", "--go", "--ios"],
+      false,
+    );
+    process.exit(fallbackAttempt.code);
+    return;
+  }
+
+  if (iosAttempt.sawIosOpenTimeout) {
+    console.warn(
+      "[mobile:dev] iOS simulator open timed out; continuing with Metro on port 3002 without auto-open.",
+    );
+
+    const fallbackAttempt = await runExpo(
+      ["--port", "3002", "--dev-client"],
       false,
     );
     process.exit(fallbackAttempt.code);

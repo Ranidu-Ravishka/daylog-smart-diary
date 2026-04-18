@@ -154,6 +154,25 @@ function toSentryLevel(level: LogLevel): SentryLevel {
   return level;
 }
 
+function isKnownUnsupportedBackendSentryRuntimeError(
+  serializedError: SerializableError,
+): boolean {
+  const normalizedMessage = [
+    serializedError.name,
+    serializedError.message,
+    serializedError.stack ?? "",
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return (
+    normalizedMessage.includes("dynamic module import unsupported") ||
+    normalizedMessage.includes("dynamic module import is unsupported") ||
+    normalizedMessage.includes("dynamic import unsupported") ||
+    normalizedMessage.includes("dynamic import callback was not specified")
+  );
+}
+
 async function ensureBackendSentryInitialized(): Promise<void> {
   if (backendSentryInitStarted) {
     return backendSentryInitPromise ?? Promise.resolve();
@@ -185,6 +204,11 @@ async function ensureBackendSentryInitialized(): Promise<void> {
       backendSentry = null;
 
       const serializedError = toSerializableError(error);
+      // Convex runtime currently rejects dynamic import for user modules.
+      if (isKnownUnsupportedBackendSentryRuntimeError(serializedError)) {
+        return;
+      }
+
       const fallbackContext: StructuredContext = {
         status: "failed",
         dsnConfigured: Boolean(backendSentryDsn),

@@ -11,6 +11,26 @@ import { captureException, logInfo } from "./observability";
 const IMAGE_CONTENT_TYPE_PREFIX = "image/";
 const VIDEO_CONTENT_TYPE_PREFIX = "video/";
 const MAX_MEMORY_THUMBNAIL_BATCH_SIZE = 100;
+const DEFAULT_SUMMARY_GENERATION_MEMORY_LIMIT = 50;
+const MAX_SUMMARY_GENERATION_MEMORY_LIMIT = 200;
+
+function clampSummaryGenerationMemoryLimit(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_SUMMARY_GENERATION_MEMORY_LIMIT;
+  }
+
+  const normalized = Math.floor(value);
+
+  if (normalized < 1) {
+    return 1;
+  }
+
+  if (normalized > MAX_SUMMARY_GENERATION_MEMORY_LIMIT) {
+    return MAX_SUMMARY_GENERATION_MEMORY_LIMIT;
+  }
+
+  return normalized;
+}
 
 function bytesToMbLabel(bytes: number): string {
   return `${Math.round((bytes / (1024 * 1024)) * 10) / 10}MB`;
@@ -356,6 +376,37 @@ export const listMemoriesByDay = query({
         q.eq("userId", user._id).eq("dayKey", args.dayKey),
       )
       .collect();
+  },
+});
+
+// ── List day memories for summary generation (capped, ordered) ────────────
+export const listMemoriesByDayForSummaryGeneration = query({
+  args: {
+    dayKey: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    const limit = clampSummaryGenerationMemoryLimit(args.limit);
+
+    const paginated = await ctx.db
+      .query("memories")
+      .withIndex("by_user_day_happenedAt", (q) =>
+        q.eq("userId", user._id).eq("dayKey", args.dayKey),
+      )
+      .order("desc")
+      .paginate({
+        numItems: limit,
+        cursor: null,
+      });
+
+    return paginated.page
+      .slice()
+      .sort(
+        (left, right) =>
+          right.happenedAt - left.happenedAt ||
+          right._creationTime - left._creationTime,
+      );
   },
 });
 
