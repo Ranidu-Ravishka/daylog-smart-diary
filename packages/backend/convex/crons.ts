@@ -6,7 +6,7 @@ const crons = cronJobs();
 crons.interval(
   "retention-cleanup-every-6h",
   { hours: 6 },
-  (internal as any).retention.runScheduledRetentionCleanupInternal,
+  internal.retention.runScheduledRetentionCleanupInternal,
   {
     dryRun: false,
   },

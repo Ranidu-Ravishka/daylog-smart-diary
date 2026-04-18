@@ -43,7 +43,9 @@ type TopEventAccumulator = {
   lastReceivedAt: number | null;
 };
 
-type IngestPayload = {
+type ObservabilitySurface = "web" | "mobile";
+
+type ObservabilityInfoEventPayloadInput = {
   schemaVersion?: unknown;
   app?: unknown;
   surface?: unknown;
@@ -54,6 +56,41 @@ type IngestPayload = {
   sampleRate?: unknown;
   sourceEnvironment?: unknown;
 };
+
+type ObservabilityInfoEventPayload = {
+  schemaVersion: 1;
+  app: "daylog";
+  surface: ObservabilitySurface;
+  level: "info";
+  event: string;
+  timestamp?: string;
+  contextJson?: unknown;
+  sampleRate?: unknown;
+  sourceEnvironment?: unknown;
+};
+
+type ObservabilityInfoEventInsert = {
+  app: "daylog";
+  surface: ObservabilitySurface;
+  level: "info";
+  event: string;
+  timestamp: string;
+  emittedAt: number;
+  receivedAt: number;
+  sampleRate: number;
+  sourceEnvironment?: string;
+  contextJson?: string;
+};
+
+function isObservabilityInfoEventPayloadInput(
+  value: unknown,
+): value is ObservabilityInfoEventPayloadInput {
+  return typeof value === "object" && value !== null;
+}
+
+function isObservabilitySurface(value: unknown): value is ObservabilitySurface {
+  return value === "web" || value === "mobile";
+}
 
 function toTransportHealthWindowHours(value: number | undefined): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -311,7 +348,20 @@ export const insertObservabilityInfoEventInternal = internalMutation({
     contextJson: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    return await (ctx.db as any).insert("observabilityInfoEvents", args);
+    const row: ObservabilityInfoEventInsert = {
+      app: args.app,
+      surface: args.surface,
+      level: args.level,
+      event: args.event,
+      timestamp: args.timestamp,
+      emittedAt: args.emittedAt,
+      receivedAt: args.receivedAt,
+      sampleRate: args.sampleRate,
+      sourceEnvironment: args.sourceEnvironment,
+      contextJson: args.contextJson,
+    };
+
+    return await ctx.db.insert("observabilityInfoEvents", row);
   },
 });
 
@@ -323,12 +373,11 @@ export const listObservabilityInfoEventsPaginated = query({
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
 
-    if (args.surface) {
+    const surface = args.surface;
+    if (isObservabilitySurface(surface)) {
       return await ctx.db
         .query("observabilityInfoEvents")
-        .withIndex("by_surface_receivedAt", (q) =>
-          q.eq("surface", args.surface as "web" | "mobile"),
-        )
+        .withIndex("by_surface_receivedAt", (q) => q.eq("surface", surface))
         .order("desc")
         .paginate(args.paginationOpts);
     }
@@ -585,15 +634,15 @@ export const ingestObservabilityInfoEvent = httpAction(async (ctx, request) => {
   let rateLimitDecision: ObservabilityIngestRateLimitDecision | null = null;
 
   try {
-    rateLimitDecision = (await ctx.runMutation(
-      (internal as any).observabilityIngestRateLimiter
+    rateLimitDecision = await ctx.runMutation(
+      internal.observabilityIngestRateLimiter
         .evaluateObservabilityIngestRateLimitInternal,
       {
         ipKey: rateLimitIdentity.ipKey,
         userKey: rateLimitIdentity.userKey,
         receivedAt: Date.now(),
       },
-    )) as ObservabilityIngestRateLimitDecision;
+    );
   } catch (error) {
     captureException("observability_info_event_rate_limit_failed", error, {
       status: "failed_open",
@@ -671,9 +720,9 @@ export const ingestObservabilityInfoEvent = httpAction(async (ctx, request) => {
     );
   }
 
-  let body: IngestPayload;
+  let parsedBody: unknown;
   try {
-    body = JSON.parse(raw) as IngestPayload;
+    parsedBody = JSON.parse(raw);
   } catch {
     return jsonResponse(
       400,
@@ -682,9 +731,15 @@ export const ingestObservabilityInfoEvent = httpAction(async (ctx, request) => {
     );
   }
 
-  const surface = body.surface;
-  const level = body.level;
-  const event = body.event;
+  if (!isObservabilityInfoEventPayloadInput(parsedBody)) {
+    return jsonResponse(
+      400,
+      { error: "Invalid payload" },
+      corsDecision.responseHeaders,
+    );
+  }
+
+  const body = parsedBody;
 
   if (body.schemaVersion !== 1 || body.app !== "daylog") {
     return jsonResponse(
@@ -694,7 +749,7 @@ export const ingestObservabilityInfoEvent = httpAction(async (ctx, request) => {
     );
   }
 
-  if (surface !== "web" && surface !== "mobile") {
+  if (body.surface !== "web" && body.surface !== "mobile") {
     return jsonResponse(
       400,
       { error: "Unsupported surface" },
@@ -702,7 +757,7 @@ export const ingestObservabilityInfoEvent = httpAction(async (ctx, request) => {
     );
   }
 
-  if (level !== "info") {
+  if (body.level !== "info") {
     return jsonResponse(
       400,
       {
@@ -712,7 +767,7 @@ export const ingestObservabilityInfoEvent = httpAction(async (ctx, request) => {
     );
   }
 
-  if (typeof event !== "string" || event.trim().length === 0) {
+  if (typeof body.event !== "string" || body.event.trim().length === 0) {
     return jsonResponse(
       400,
       { error: "Missing event name" },
@@ -720,25 +775,36 @@ export const ingestObservabilityInfoEvent = httpAction(async (ctx, request) => {
     );
   }
 
+  const payload: ObservabilityInfoEventPayload = {
+    schemaVersion: 1,
+    app: "daylog",
+    surface: body.surface,
+    level: "info",
+    event: body.event.trim().slice(0, MAX_EVENT_LENGTH),
+    timestamp: typeof body.timestamp === "string" ? body.timestamp : undefined,
+    contextJson: body.contextJson,
+    sampleRate: body.sampleRate,
+    sourceEnvironment: body.sourceEnvironment,
+  };
+
   const now = Date.now();
-  const { emittedAt, timestamp } = toEmittedAt(body.timestamp, now);
-  const row = {
-    app: "daylog" as const,
-    surface,
-    level: "info" as const,
-    event: event.trim().slice(0, MAX_EVENT_LENGTH),
+  const { emittedAt, timestamp } = toEmittedAt(payload.timestamp, now);
+  const row: ObservabilityInfoEventInsert = {
+    app: payload.app,
+    surface: payload.surface,
+    level: payload.level,
+    event: payload.event,
     timestamp,
     emittedAt,
     receivedAt: now,
-    sampleRate: toSafeSampleRate(body.sampleRate),
-    sourceEnvironment: toSafeEnvironment(body.sourceEnvironment),
-    contextJson: toSafeContextJson(body.contextJson),
+    sampleRate: toSafeSampleRate(payload.sampleRate),
+    sourceEnvironment: toSafeEnvironment(payload.sourceEnvironment),
+    contextJson: toSafeContextJson(payload.contextJson),
   };
 
   try {
     await ctx.runMutation(
-      (internal as any).observabilityIngestion
-        .insertObservabilityInfoEventInternal,
+      internal.observabilityIngestion.insertObservabilityInfoEventInternal,
       row,
     );
   } catch (error) {
