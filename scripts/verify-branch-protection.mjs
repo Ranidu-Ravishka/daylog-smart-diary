@@ -26,6 +26,7 @@ function parseArgs(argv) {
   let branch = DEFAULT_BRANCH;
   let repoArg = null;
   let expectedFile = null;
+  let allowUnsupportedPlan = false;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -62,13 +63,38 @@ function parseArgs(argv) {
       expectedFile = arg.slice("--expected-file=".length);
       continue;
     }
+
+    if (arg === "--allow-unsupported-plan") {
+      allowUnsupportedPlan = true;
+      continue;
+    }
   }
 
   return {
     branch: branch.trim() || DEFAULT_BRANCH,
     repoArg: repoArg?.trim() || null,
     expectedFile: expectedFile?.trim() || null,
+    allowUnsupportedPlan,
   };
+}
+
+function parseBooleanFlag(value) {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
+function isBranchProtectionPlanLimitation(status, details) {
+  if (status !== 403) {
+    return false;
+  }
+
+  return /upgrade to github pro or make this repository public to enable this feature/i.test(
+    details,
+  );
 }
 
 function resolveOwnerRepo(repoArg) {
@@ -360,7 +386,9 @@ function evaluateBranchProtectionPolicy(payload, expected) {
 }
 
 async function main() {
-  const { branch, repoArg, expectedFile } = parseArgs(process.argv.slice(2));
+  const { branch, repoArg, expectedFile, allowUnsupportedPlan } = parseArgs(
+    process.argv.slice(2),
+  );
   const { owner, repo } = resolveOwnerRepo(repoArg);
   const token = resolveToken();
   const expected = resolveExpectedPolicy({
@@ -382,6 +410,29 @@ async function main() {
 
   if (!response.ok) {
     const details = await response.text();
+
+    const allowUnsupportedPlanFromEnv = parseBooleanFlag(
+      process.env.ALLOW_UNSUPPORTED_BRANCH_PROTECTION,
+    );
+    const allowUnsupportedPlanBypass =
+      allowUnsupportedPlan || allowUnsupportedPlanFromEnv;
+
+    if (
+      allowUnsupportedPlanBypass &&
+      isBranchProtectionPlanLimitation(response.status, details)
+    ) {
+      console.warn(
+        `WARN: Branch protection API is unavailable for ${owner}/${repo}@${branch} on the current GitHub plan.`,
+      );
+      console.warn(
+        "WARN: Continuing only because ALLOW_UNSUPPORTED_BRANCH_PROTECTION is enabled.",
+      );
+      console.warn(
+        "WARN: Live branch protection rules could not be verified. Upgrade GitHub plan or make repository public to re-enable strict verification.",
+      );
+      process.exit(0);
+    }
+
     console.error(
       `FAIL: Unable to fetch branch protection for ${owner}/${repo}@${branch}.`,
     );
