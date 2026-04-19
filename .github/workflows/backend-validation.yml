@@ -24,9 +24,6 @@ env:
 jobs:
   branch-protection-verification:
     name: branch-protection-verification
-    if: >-
-      (github.event_name == 'pull_request' || github.ref == 'refs/heads/main') &&
-      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -48,15 +45,19 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify branch protection policy
+      - name: Verify branch protection policy (fail-closed)
+        # This step validates live GitHub branch protection via API.
+        # Any verification error must fail this workflow.
         env:
           GITHUB_TOKEN: ${{ secrets.BRANCH_PROTECTION_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          ALLOW_BRANCH_PROTECTION_PLAN_LIMITATION_SKIP: "true"
         run: pnpm verify:branch-protection -- --branch main
 
   backend-validation:
     name: backend-validation
+    # Block build/lint/typecheck until branch protection verification passes.
+    needs:
+      - branch-protection-verification
     runs-on: ubuntu-latest
     env:
       # Dummy Convex URL so ConvexReactClient doesn't fail during Next.js build in CI
@@ -170,6 +171,9 @@ jobs:
 
   app-test-matrix:
     name: app-tests-${{ matrix.app }}
+    # Block test matrix until branch protection verification passes.
+    needs:
+      - branch-protection-verification
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
