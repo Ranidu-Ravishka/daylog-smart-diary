@@ -9,19 +9,24 @@ const EXPECTED_REQUIRED_CHECKS = [
   "app-tests-admin",
   "app-tests-mobile",
 ];
+
 const DEFAULT_BRANCH = "main";
 const DEFAULT_EXPECTED_FILE = ".github/branch-protection.expected.json";
-const PLAN_LIMITATION_SNIPPET =
-  "Upgrade to GitHub Pro or make this repository public to enable this feature.";
+
+// Fail-closed defaults. If no config file exists, these policy checks are still enforced.
+const DEFAULT_POLICY = {
+  requireStatusChecksStrict: true,
+  requirePullRequestReviews: true,
+  requiredApprovingReviewCount: 1,
+  allowForcePushes: false,
+  allowDeletions: false,
+};
 
 function parseArgs(argv) {
   let branch = DEFAULT_BRANCH;
   let repoArg = null;
   let expectedFile = null;
-  let allowPlanLimitedSkip =
-    (process.env.ALLOW_BRANCH_PROTECTION_PLAN_LIMITATION_SKIP ?? "")
-      .trim()
-      .toLowerCase() === "true";
+  let allowUnsupportedPlan = false;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -59,13 +64,8 @@ function parseArgs(argv) {
       continue;
     }
 
-    if (arg === "--allow-plan-limited-skip") {
-      allowPlanLimitedSkip = true;
-      continue;
-    }
-
-    if (arg === "--disallow-plan-limited-skip") {
-      allowPlanLimitedSkip = false;
+    if (arg === "--allow-unsupported-plan") {
+      allowUnsupportedPlan = true;
       continue;
     }
   }
@@ -74,14 +74,27 @@ function parseArgs(argv) {
     branch: branch.trim() || DEFAULT_BRANCH,
     repoArg: repoArg?.trim() || null,
     expectedFile: expectedFile?.trim() || null,
-    allowPlanLimitedSkip,
+    allowUnsupportedPlan,
   };
 }
 
-function isPlanLimitedApiResponse(status, details) {
-  if (status !== 403) return false;
+function parseBooleanFlag(value) {
+  if (typeof value !== "string") {
+    return false;
+  }
 
-  return details.includes(PLAN_LIMITATION_SNIPPET);
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
+function isBranchProtectionPlanLimitation(status, details) {
+  if (status !== 403) {
+    return false;
+  }
+
+  return /upgrade to github pro or make this repository public to enable this feature/i.test(
+    details,
+  );
 }
 
 function resolveOwnerRepo(repoArg) {
@@ -131,7 +144,7 @@ function resolveToken() {
 
   if (!token) {
     throw new Error(
-      "Missing GitHub token. Set GITHUB_TOKEN (or GH_TOKEN) with permission to read branch protection.",
+      "Missing GitHub token. Set GITHUB_TOKEN (or GH_TOKEN) with permission to read branch protection. This check is fail-closed and cannot be skipped.",
     );
   }
 
@@ -192,7 +205,31 @@ function normalizeChecks(value) {
   return [...new Set(normalized)];
 }
 
-function resolveExpectedChecks(args) {
+function parseBooleanOrDefault(value, fallback, fieldName) {
+  if (typeof value === "undefined") {
+    return fallback;
+  }
+
+  if (typeof value !== "boolean") {
+    throw new Error(`${fieldName} must be a boolean.`);
+  }
+
+  return value;
+}
+
+function parseIntegerOrDefault(value, fallback, fieldName, minValue) {
+  if (typeof value === "undefined") {
+    return fallback;
+  }
+
+  if (!Number.isInteger(value) || value < minValue) {
+    throw new Error(`${fieldName} must be an integer >= ${minValue}.`);
+  }
+
+  return value;
+}
+
+function resolveExpectedPolicy(args) {
   const expectedFile = path.resolve(
     process.cwd(),
     args.expectedFileArg ?? DEFAULT_EXPECTED_FILE,
@@ -200,7 +237,8 @@ function resolveExpectedChecks(args) {
 
   if (!existsSync(expectedFile)) {
     return {
-      checks: [...EXPECTED_REQUIRED_CHECKS].sort(),
+      requiredChecks: [...EXPECTED_REQUIRED_CHECKS].sort(),
+      ...DEFAULT_POLICY,
       source: "built-in defaults",
     };
   }
@@ -215,25 +253,145 @@ function resolveExpectedChecks(args) {
   }
 
   const branchConfig = parsed?.branches?.[args.branch];
-  if (!branchConfig) {
+  if (!branchConfig || typeof branchConfig !== "object") {
     throw new Error(
       `Expected config file does not define branch \"${args.branch}\": ${expectedFile}`,
     );
   }
 
   return {
-    checks: normalizeChecks(branchConfig.requiredStatusChecks),
+    requiredChecks: normalizeChecks(branchConfig.requiredStatusChecks),
+    requireStatusChecksStrict: parseBooleanOrDefault(
+      branchConfig.requireStatusChecksStrict,
+      DEFAULT_POLICY.requireStatusChecksStrict,
+      "requireStatusChecksStrict",
+    ),
+    requirePullRequestReviews: parseBooleanOrDefault(
+      branchConfig.requirePullRequestReviews,
+      DEFAULT_POLICY.requirePullRequestReviews,
+      "requirePullRequestReviews",
+    ),
+    requiredApprovingReviewCount: parseIntegerOrDefault(
+      branchConfig.requiredApprovingReviewCount,
+      DEFAULT_POLICY.requiredApprovingReviewCount,
+      "requiredApprovingReviewCount",
+      0,
+    ),
+    allowForcePushes: parseBooleanOrDefault(
+      branchConfig.allowForcePushes,
+      DEFAULT_POLICY.allowForcePushes,
+      "allowForcePushes",
+    ),
+    allowDeletions: parseBooleanOrDefault(
+      branchConfig.allowDeletions,
+      DEFAULT_POLICY.allowDeletions,
+      "allowDeletions",
+    ),
     source: path.relative(process.cwd(), expectedFile) || expectedFile,
   };
 }
 
+function readStatusChecksStrict(payload) {
+  const required = payload?.required_status_checks;
+  if (!required || typeof required !== "object") {
+    return false;
+  }
+
+  return required.strict === true;
+}
+
+function readToggleEnabled(value) {
+  return Boolean(value && typeof value === "object" && value.enabled === true);
+}
+
+function readRequiredApprovingReviewCount(value) {
+  if (!value || typeof value !== "object") {
+    return 0;
+  }
+
+  const count = value.required_approving_review_count;
+  if (!Number.isInteger(count) || count < 0) {
+    return 0;
+  }
+
+  return count;
+}
+
+function evaluateBranchProtectionPolicy(payload, expected) {
+  const actualChecks = extractRequiredChecks(payload);
+  const actualStrict = readStatusChecksStrict(payload);
+
+  const reviewRules = payload?.required_pull_request_reviews;
+  const hasReviewRules = Boolean(reviewRules && typeof reviewRules === "object");
+  const actualApprovingReviewCount = readRequiredApprovingReviewCount(reviewRules);
+
+  const actualAllowForcePushes = readToggleEnabled(payload?.allow_force_pushes);
+  const actualAllowDeletions = readToggleEnabled(payload?.allow_deletions);
+
+  const failures = [];
+
+  // Rule: required status checks must match the expected policy exactly.
+  if (!sameChecks(actualChecks, expected.requiredChecks)) {
+    failures.push(
+      `required_status_checks mismatch. Expected [${expected.requiredChecks.join(", ") || "(none)"}], got [${actualChecks.join(", ") || "(none)"}].`,
+    );
+  }
+
+  // Rule: required status checks must be strict (branch must be up to date before merge).
+  if (expected.requireStatusChecksStrict && !actualStrict) {
+    failures.push(
+      "required_status_checks.strict is disabled. Enable strict status checks.",
+    );
+  }
+
+  // Rule: pull request review protection must be enabled.
+  if (expected.requirePullRequestReviews && !hasReviewRules) {
+    failures.push(
+      "required_pull_request_reviews is disabled. Enable required PR reviews.",
+    );
+  }
+
+  // Rule: minimum number of approving reviews must be met.
+  if (actualApprovingReviewCount < expected.requiredApprovingReviewCount) {
+    failures.push(
+      `required_pull_request_reviews.required_approving_review_count is ${actualApprovingReviewCount}. Expected at least ${expected.requiredApprovingReviewCount}.`,
+    );
+  }
+
+  // Rule: force pushes must remain disabled.
+  if (actualAllowForcePushes !== expected.allowForcePushes) {
+    failures.push(
+      `allow_force_pushes.enabled is ${actualAllowForcePushes}. Expected ${expected.allowForcePushes}.`,
+    );
+  }
+
+  // Rule: branch deletion must remain disabled.
+  if (actualAllowDeletions !== expected.allowDeletions) {
+    failures.push(
+      `allow_deletions.enabled is ${actualAllowDeletions}. Expected ${expected.allowDeletions}.`,
+    );
+  }
+
+  return {
+    failures,
+    actual: {
+      requiredChecks: actualChecks,
+      requireStatusChecksStrict: actualStrict,
+      requirePullRequestReviews: hasReviewRules,
+      requiredApprovingReviewCount: actualApprovingReviewCount,
+      allowForcePushes: actualAllowForcePushes,
+      allowDeletions: actualAllowDeletions,
+    },
+  };
+}
+
 async function main() {
-  const { branch, repoArg, expectedFile, allowPlanLimitedSkip } = parseArgs(
+  const { branch, repoArg, expectedFile, allowUnsupportedPlan } = parseArgs(
     process.argv.slice(2),
   );
   const { owner, repo } = resolveOwnerRepo(repoArg);
   const token = resolveToken();
-  const expected = resolveExpectedChecks({
+  const expected = resolveExpectedPolicy({
     branch,
     expectedFileArg: expectedFile,
   });
@@ -253,12 +411,24 @@ async function main() {
   if (!response.ok) {
     const details = await response.text();
 
-    if (allowPlanLimitedSkip && isPlanLimitedApiResponse(response.status, details)) {
+    const allowUnsupportedPlanFromEnv = parseBooleanFlag(
+      process.env.ALLOW_UNSUPPORTED_BRANCH_PROTECTION,
+    );
+    const allowUnsupportedPlanBypass =
+      allowUnsupportedPlan || allowUnsupportedPlanFromEnv;
+
+    if (
+      allowUnsupportedPlanBypass &&
+      isBranchProtectionPlanLimitation(response.status, details)
+    ) {
       console.warn(
-        "SKIP: Branch protection API is unavailable for the current GitHub plan on this private repository.",
+        `WARN: Branch protection API is unavailable for ${owner}/${repo}@${branch} on the current GitHub plan.`,
       );
       console.warn(
-        "SKIP: Continuing because ALLOW_BRANCH_PROTECTION_PLAN_LIMITATION_SKIP is enabled.",
+        "WARN: Continuing only because ALLOW_UNSUPPORTED_BRANCH_PROTECTION is enabled.",
+      );
+      console.warn(
+        "WARN: Live branch protection rules could not be verified. Upgrade GitHub plan or make repository public to re-enable strict verification.",
       );
       process.exit(0);
     }
@@ -266,6 +436,7 @@ async function main() {
     console.error(
       `FAIL: Unable to fetch branch protection for ${owner}/${repo}@${branch}.`,
     );
+    console.error("Reason: live branch protection verification failed (fail-closed).");
     console.error(`HTTP ${response.status} ${response.statusText}`);
     if (details) {
       console.error(details);
@@ -274,32 +445,47 @@ async function main() {
   }
 
   const payload = await response.json();
-  const actualChecks = extractRequiredChecks(payload);
-  const expectedChecks = expected.checks;
+  const evaluation = evaluateBranchProtectionPolicy(payload, expected);
 
   console.log(`Repository: ${owner}/${repo}`);
   console.log(`Branch: ${branch}`);
-  console.log(`Expected checks source: ${expected.source}`);
-  console.log("Required status checks:");
+  console.log(`Policy source: ${expected.source}`);
 
-  if (actualChecks.length === 0) {
-    console.log("- (none)");
-  } else {
-    for (const check of actualChecks) {
-      console.log(`- ${check}`);
-    }
-  }
+  console.log("Expected branch protection policy:");
+  console.log(`- requiredStatusChecks: ${expected.requiredChecks.join(", ") || "(none)"}`);
+  console.log(`- requireStatusChecksStrict: ${expected.requireStatusChecksStrict}`);
+  console.log(`- requirePullRequestReviews: ${expected.requirePullRequestReviews}`);
+  console.log(
+    `- requiredApprovingReviewCount: ${expected.requiredApprovingReviewCount}`,
+  );
+  console.log(`- allowForcePushes: ${expected.allowForcePushes}`);
+  console.log(`- allowDeletions: ${expected.allowDeletions}`);
 
-  console.log(`Expected required checks: ${expectedChecks.join(", ") || "(none)"}`);
+  console.log("Observed branch protection policy:");
+  console.log(
+    `- requiredStatusChecks: ${evaluation.actual.requiredChecks.join(", ") || "(none)"}`,
+  );
+  console.log(
+    `- requireStatusChecksStrict: ${evaluation.actual.requireStatusChecksStrict}`,
+  );
+  console.log(
+    `- requirePullRequestReviews: ${evaluation.actual.requirePullRequestReviews}`,
+  );
+  console.log(
+    `- requiredApprovingReviewCount: ${evaluation.actual.requiredApprovingReviewCount}`,
+  );
+  console.log(`- allowForcePushes: ${evaluation.actual.allowForcePushes}`);
+  console.log(`- allowDeletions: ${evaluation.actual.allowDeletions}`);
 
-  if (sameChecks(actualChecks, expectedChecks)) {
-    console.log("PASS: required checks match expected policy.");
+  if (evaluation.failures.length === 0) {
+    console.log("PASS: Branch protection policy matches fail-closed requirements.");
     process.exit(0);
   }
 
-  console.error("FAIL: required checks do not match expected policy.");
-  console.error(`Expected: ${expectedChecks.join(", ") || "(none)"}`);
-  console.error(`Actual: ${actualChecks.join(", ") || "(none)"}`);
+  console.error("FAIL: Branch protection policy validation failed.");
+  for (const failure of evaluation.failures) {
+    console.error(`- ${failure}`);
+  }
   process.exit(1);
 }
 
