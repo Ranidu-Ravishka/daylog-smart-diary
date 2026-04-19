@@ -27,7 +27,7 @@ import {
   getActiveIntegrationSecretKeyId,
 } from "./integrationSecretsCrypto";
 import { recordIntegrationHealthEventInDb } from "./integrationHealth";
-import { captureException, logInfo } from "./observability";
+import { captureException, logInfo, logWarn } from "./observability";
 import {
   getBackgroundLocationBatchFlushIntervalMinutes,
   getBackgroundLocationBatchMaxPoints,
@@ -59,6 +59,11 @@ import {
   type IntegrationSecretRecord,
 } from "./integrations.auth";
 import { syncMyIntegrationForDayImpl } from "./integrations.sync";
+import {
+  UNSUPPORTED_PROVIDERS,
+  isUnsupportedProvider,
+  type UnsupportedProvider,
+} from "./unsupportedProviders";
 
 const SYNC_RUN_IN_PROGRESS_TTL_MS = 60_000;
 const DELETE_BATCH_SIZE = 256;
@@ -70,10 +75,25 @@ const LEGACY_TOKEN_REF_AUDIT_DEFAULT_MAX_ROWS = 500;
 const LEGACY_TOKEN_REF_AUDIT_MAX_ROWS = 5_000;
 const DEFAULT_SUMMARY_GENERATION_INTEGRATION_LIMIT = 32;
 const MAX_SUMMARY_GENERATION_INTEGRATION_LIMIT = 128;
+const LEGACY_UNSUPPORTED_CLEANUP_DEFAULT_BATCH_SIZE_PER_PROVIDER = 25;
+const LEGACY_UNSUPPORTED_CLEANUP_MAX_BATCH_SIZE_PER_PROVIDER = 250;
+const LEGACY_UNSUPPORTED_CLEANUP_DEFAULT_MAX_PASSES = 2;
+const LEGACY_UNSUPPORTED_CLEANUP_MAX_PASSES = 20;
+const LEGACY_UNSUPPORTED_COUNT_DEFAULT_MAX_PASSES = 40;
+const LEGACY_UNSUPPORTED_COUNT_MAX_PASSES = 1_000;
+const LEGACY_UNSUPPORTED_CLEANUP_AUDIT_ACTION =
+  "cleanup_legacy_unsupported_integrations";
+const LEGACY_UNSUPPORTED_CLEANUP_CURSOR_STATE_ACTION =
+  "cleanup_legacy_unsupported_integrations_cursor_state";
+const LEGACY_UNSUPPORTED_CLEANUP_CURSOR_STATE_TARGET =
+  "legacy_unsupported_integrations";
+const LEGACY_UNSUPPORTED_CLEANUP_CURSOR_STATE_SCAN_LIMIT = 500;
 const LEGACY_TOKEN_REF_MIGRATION_AUDIT_ACTION =
   "migrate_legacy_integration_token_ref";
 const OPAQUE_TOKEN_REF_DEFINITION =
   'A tokenRef is opaque when it is a non-empty string prefixed with "tokref_" and does not store raw provider tokens.';
+const LEGACY_UNSUPPORTED_REASON =
+  "This integration provider is no longer supported and has been automatically disconnected.";
 
 function clampSummaryGenerationIntegrationLimit(
   value: number | undefined,
@@ -171,7 +191,13 @@ type IntegrationRecord = {
   userId: Id<"user">;
   provider: string;
   status: "connected" | "disconnected" | "error";
+  lastSyncAt?: number;
+  lastError?: string;
+  scopes?: string[];
   tokenRef?: string;
+  legacyUnsupported?: boolean;
+  legacyUnsupportedAt?: number;
+  legacyUnsupportedReason?: string;
 };
 
 type LegacyIntegrationTokenRefAuditRow = {
@@ -207,6 +233,63 @@ type LegacyIntegrationTokenRefMigrationCounts = {
   missingTokenRefRows: number;
 };
 
+type LegacyUnsupportedCleanupCounts = {
+  trigger: "manual" | "cron";
+  force: boolean;
+  attemptId: string;
+  batchSizePerProvider: number;
+  maxPasses: number;
+  maxRowsPerProvider: number;
+  isDone: boolean;
+  scannedRows: number;
+  matchedRows: number;
+  softDeletedRows: number;
+  hardDeletedRows: number;
+  deletedSecretRows: number;
+  deletedSyncRunRows: number;
+  failedRows: number;
+  affectedUsers: number;
+  rowsByProvider: Record<UnsupportedProvider, number>;
+  failedRowsByProvider: Record<UnsupportedProvider, number>;
+  pagesProcessedByProvider: Record<UnsupportedProvider, number>;
+  nextCursorByProvider: Record<UnsupportedProvider, string | null>;
+};
+
+type LegacyUnsupportedCountSummary = {
+  totalRows: number;
+  pendingCleanupRows: number;
+  softDeletedRows: number;
+  affectedUsers: number;
+  rowsByProvider: Record<UnsupportedProvider, number>;
+  pagesScannedByProvider: Record<UnsupportedProvider, number>;
+  nextCursorByProvider: Record<UnsupportedProvider, string | null>;
+  isDone: boolean;
+};
+
+type LegacyUnsupportedProviderCursorMap = Partial<
+  Record<UnsupportedProvider, string>
+>;
+
+type PlatformAuditEventRecord = {
+  category: "retention" | "summary_quality" | "integration_health" | "deletion";
+  action: string;
+  actorType: "system" | "admin" | "user";
+  actorUserId?: Id<"user">;
+  target?: string;
+  details?: string;
+  at: number;
+};
+
+type LegacyUnsupportedCleanupCursorStatePayload = {
+  version: 1;
+  attemptId: string;
+  trigger: "manual" | "cron";
+  force: boolean;
+  failedRows: number;
+  isDone: boolean;
+  nextCursorByProvider: Record<UnsupportedProvider, string | null>;
+};
+
 function normalizeAuditPageSize(value: number | undefined): number {
   return clampLimit(
     value ?? LEGACY_SECRETS_AUDIT_DEFAULT_PAGE_SIZE,
@@ -225,6 +308,195 @@ function normalizeAuditMaxRows(value: number | undefined): number {
   return clampLimit(
     value ?? LEGACY_TOKEN_REF_AUDIT_DEFAULT_MAX_ROWS,
     LEGACY_TOKEN_REF_AUDIT_MAX_ROWS,
+  );
+}
+
+function normalizeCleanupBatchSizePerProvider(
+  value: number | undefined,
+): number {
+  const normalized =
+    typeof value === "number" && Number.isFinite(value)
+      ? Math.floor(value)
+      : LEGACY_UNSUPPORTED_CLEANUP_DEFAULT_BATCH_SIZE_PER_PROVIDER;
+
+  return clampLimit(
+    normalized,
+    LEGACY_UNSUPPORTED_CLEANUP_MAX_BATCH_SIZE_PER_PROVIDER,
+  );
+}
+
+function normalizeCleanupMaxPasses(value: number | undefined): number {
+  const normalized =
+    typeof value === "number" && Number.isFinite(value)
+      ? Math.floor(value)
+      : LEGACY_UNSUPPORTED_CLEANUP_DEFAULT_MAX_PASSES;
+
+  return clampLimit(normalized, LEGACY_UNSUPPORTED_CLEANUP_MAX_PASSES);
+}
+
+function normalizeLegacyUnsupportedCountMaxPasses(
+  value: number | undefined,
+): number {
+  const normalized =
+    typeof value === "number" && Number.isFinite(value)
+      ? Math.floor(value)
+      : LEGACY_UNSUPPORTED_COUNT_DEFAULT_MAX_PASSES;
+
+  return clampLimit(normalized, LEGACY_UNSUPPORTED_COUNT_MAX_PASSES);
+}
+
+function createUnsupportedProviderCountMap(): Record<
+  UnsupportedProvider,
+  number
+> {
+  return {
+    slack: 0,
+    strava: 0,
+    todoist: 0,
+  };
+}
+
+function createUnsupportedProviderCursorMap(
+  initial?: LegacyUnsupportedProviderCursorMap,
+): Record<UnsupportedProvider, string | null> {
+  return {
+    slack: initial?.slack ?? null,
+    strava: initial?.strava ?? null,
+    todoist: initial?.todoist ?? null,
+  };
+}
+
+function toLegacyUnsupportedProviderCursorArgs(
+  cursorByProvider: Record<UnsupportedProvider, string | null>,
+): LegacyUnsupportedProviderCursorMap | undefined {
+  const next: LegacyUnsupportedProviderCursorMap = {};
+
+  if (cursorByProvider.slack) {
+    next.slack = cursorByProvider.slack;
+  }
+
+  if (cursorByProvider.strava) {
+    next.strava = cursorByProvider.strava;
+  }
+
+  if (cursorByProvider.todoist) {
+    next.todoist = cursorByProvider.todoist;
+  }
+
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
+function parseLegacyUnsupportedProviderCursorMap(
+  raw: unknown,
+): Record<UnsupportedProvider, string | null> | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const value = raw as Record<string, unknown>;
+  const toCursor = (provider: UnsupportedProvider): string | null => {
+    const candidate = value[provider];
+    if (typeof candidate !== "string") {
+      return null;
+    }
+
+    const trimmed = candidate.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  };
+
+  return {
+    slack: toCursor("slack"),
+    strava: toCursor("strava"),
+    todoist: toCursor("todoist"),
+  };
+}
+
+async function readPersistedLegacyUnsupportedCleanupCursorByProvider(
+  db: QueryCtx["db"] | MutationCtx["db"],
+): Promise<Record<UnsupportedProvider, string | null> | null> {
+  const recentEvents = (await db
+    .query("platformAuditEvents")
+    .withIndex("by_category_at", (q) => q.eq("category", "integration_health"))
+    .order("desc")
+    .take(
+      LEGACY_UNSUPPORTED_CLEANUP_CURSOR_STATE_SCAN_LIMIT,
+    )) as PlatformAuditEventRecord[];
+
+  for (const event of recentEvents) {
+    if (event.action !== LEGACY_UNSUPPORTED_CLEANUP_CURSOR_STATE_ACTION) {
+      continue;
+    }
+
+    if (!event.details) {
+      return null;
+    }
+
+    try {
+      const payload = JSON.parse(event.details) as {
+        nextCursorByProvider?: unknown;
+      };
+
+      const parsed = parseLegacyUnsupportedProviderCursorMap(
+        payload.nextCursorByProvider,
+      );
+      return parsed;
+    } catch (error) {
+      logWarn("legacy_unsupported_integrations_cleanup.cursor_state_invalid", {
+        status: "warning",
+        at: event.at,
+        target: event.target,
+        message: error instanceof Error ? error.message : "invalid_json",
+      });
+
+      return null;
+    }
+  }
+
+  return null;
+}
+
+async function persistLegacyUnsupportedCleanupCursorState(
+  db: MutationCtx["db"],
+  summary: Pick<
+    LegacyUnsupportedCleanupCounts,
+    | "attemptId"
+    | "trigger"
+    | "force"
+    | "failedRows"
+    | "isDone"
+    | "nextCursorByProvider"
+  >,
+): Promise<void> {
+  const payload: LegacyUnsupportedCleanupCursorStatePayload = {
+    version: 1,
+    attemptId: summary.attemptId,
+    trigger: summary.trigger,
+    force: summary.force,
+    failedRows: summary.failedRows,
+    isDone: summary.isDone,
+    nextCursorByProvider: summary.nextCursorByProvider,
+  };
+
+  await db.insert("platformAuditEvents", {
+    category: "integration_health",
+    action: LEGACY_UNSUPPORTED_CLEANUP_CURSOR_STATE_ACTION,
+    actorType: "system",
+    target: LEGACY_UNSUPPORTED_CLEANUP_CURSOR_STATE_TARGET,
+    details: JSON.stringify(payload),
+    at: Date.now(),
+  });
+}
+
+function needsLegacyUnsupportedSoftCleanup(integration: IntegrationRecord) {
+  return (
+    integration.legacyUnsupported !== true ||
+    integration.status !== "disconnected" ||
+    integration.tokenRef !== undefined ||
+    integration.scopes !== undefined ||
+    integration.lastSyncAt !== undefined ||
+    integration.lastError !== LEGACY_UNSUPPORTED_REASON ||
+    integration.legacyUnsupportedAt === undefined ||
+    integration.legacyUnsupportedReason !== LEGACY_UNSUPPORTED_REASON
   );
 }
 
@@ -324,6 +596,355 @@ async function scanLegacyIntegrationTokenRefs(
   };
 }
 
+async function deleteIntegrationSecretsByUserProvider(
+  db: MutationCtx["db"],
+  userId: Id<"user">,
+  provider: string,
+): Promise<number> {
+  let deleted = 0;
+
+  while (true) {
+    const secrets = (await db
+      .query("integrationSecrets")
+      .withIndex("by_user_provider", (q) =>
+        q.eq("userId", userId).eq("provider", provider),
+      )
+      .take(DELETE_BATCH_SIZE)) as Array<{ _id: Id<"integrationSecrets"> }>;
+
+    if (secrets.length === 0) {
+      break;
+    }
+
+    for (const secret of secrets) {
+      await db.delete(secret._id);
+      deleted += 1;
+    }
+  }
+
+  return deleted;
+}
+
+async function deleteIntegrationSyncRunsByUserProvider(
+  db: MutationCtx["db"],
+  userId: Id<"user">,
+  provider: string,
+): Promise<number> {
+  let deleted = 0;
+
+  while (true) {
+    const syncRuns = (await db
+      .query("integrationSyncRuns")
+      .withIndex("by_user_provider", (q) =>
+        q.eq("userId", userId).eq("provider", provider),
+      )
+      .take(DELETE_BATCH_SIZE)) as Array<{ _id: Id<"integrationSyncRuns"> }>;
+
+    if (syncRuns.length === 0) {
+      break;
+    }
+
+    for (const run of syncRuns) {
+      await db.delete(run._id);
+      deleted += 1;
+    }
+  }
+
+  return deleted;
+}
+
+async function countLegacyUnsupportedIntegrations(
+  db: QueryCtx["db"] | MutationCtx["db"],
+  args: {
+    batchSizePerProvider: number;
+    maxPasses: number;
+    cursorByProvider?: LegacyUnsupportedProviderCursorMap;
+  },
+): Promise<LegacyUnsupportedCountSummary> {
+  const rowsByProvider = createUnsupportedProviderCountMap();
+  const pagesScannedByProvider = createUnsupportedProviderCountMap();
+  const nextCursorByProvider = createUnsupportedProviderCursorMap(
+    args.cursorByProvider,
+  );
+  const affectedUsers = new Set<string>();
+
+  let totalRows = 0;
+  let pendingCleanupRows = 0;
+  let softDeletedRows = 0;
+  let isDone = true;
+
+  for (const provider of UNSUPPORTED_PROVIDERS) {
+    let cursor = nextCursorByProvider[provider];
+    let passes = 0;
+
+    while (passes < args.maxPasses) {
+      const page = await db
+        .query("integrations")
+        .withIndex("by_provider", (q) => q.eq("provider", provider))
+        .paginate({
+          numItems: args.batchSizePerProvider,
+          cursor,
+        });
+
+      passes += 1;
+      pagesScannedByProvider[provider] += 1;
+
+      const integrations = page.page as IntegrationRecord[];
+      rowsByProvider[provider] += integrations.length;
+      totalRows += integrations.length;
+
+      for (const integration of integrations) {
+        affectedUsers.add(String(integration.userId));
+
+        if (integration.legacyUnsupported === true) {
+          softDeletedRows += 1;
+        }
+
+        if (needsLegacyUnsupportedSoftCleanup(integration)) {
+          pendingCleanupRows += 1;
+        }
+      }
+
+      if (page.isDone) {
+        cursor = null;
+        break;
+      }
+
+      cursor = page.continueCursor;
+      if (!cursor) {
+        break;
+      }
+    }
+
+    nextCursorByProvider[provider] = cursor;
+    if (cursor !== null) {
+      isDone = false;
+    }
+  }
+
+  return {
+    totalRows,
+    pendingCleanupRows,
+    softDeletedRows,
+    affectedUsers: affectedUsers.size,
+    rowsByProvider,
+    pagesScannedByProvider,
+    nextCursorByProvider,
+    isDone,
+  };
+}
+
+async function runLegacyUnsupportedCleanup(
+  ctx: MutationCtx,
+  args: {
+    trigger: "manual" | "cron";
+    actorUserId?: Id<"user">;
+    force: boolean;
+    batchSizePerProvider: number;
+    maxPasses: number;
+    cursorByProvider?: LegacyUnsupportedProviderCursorMap;
+  },
+): Promise<LegacyUnsupportedCleanupCounts> {
+  const rowsByProvider = createUnsupportedProviderCountMap();
+  const failedRowsByProvider = createUnsupportedProviderCountMap();
+  const pagesProcessedByProvider = createUnsupportedProviderCountMap();
+  const nextCursorByProvider = createUnsupportedProviderCursorMap(
+    args.cursorByProvider,
+  );
+  const affectedUsers = new Set<string>();
+  const attemptId = `${args.trigger}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const maxRowsPerProvider = args.batchSizePerProvider * args.maxPasses;
+  const now = Date.now();
+
+  let scannedRows = 0;
+  let matchedRows = 0;
+  let softDeletedRows = 0;
+  let hardDeletedRows = 0;
+  let deletedSecretRows = 0;
+  let deletedSyncRunRows = 0;
+  let failedRows = 0;
+  let isDone = true;
+
+  logInfo("legacy_unsupported_integrations_cleanup.started", {
+    status: "started",
+    attemptId,
+    trigger: args.trigger,
+    force: args.force,
+    batchSizePerProvider: args.batchSizePerProvider,
+    maxPasses: args.maxPasses,
+    hasCursorSlack: Boolean(args.cursorByProvider?.slack),
+    hasCursorStrava: Boolean(args.cursorByProvider?.strava),
+    hasCursorTodoist: Boolean(args.cursorByProvider?.todoist),
+  });
+
+  for (const provider of UNSUPPORTED_PROVIDERS) {
+    let cursor = nextCursorByProvider[provider];
+    let passes = 0;
+
+    while (passes < args.maxPasses) {
+      const pageStartCursor = cursor;
+      const page = await ctx.db
+        .query("integrations")
+        .withIndex("by_provider", (q) => q.eq("provider", provider))
+        .paginate({
+          numItems: args.batchSizePerProvider,
+          cursor,
+        });
+
+      passes += 1;
+      pagesProcessedByProvider[provider] += 1;
+      const integrations = page.page as IntegrationRecord[];
+
+      let pageHadFailure = false;
+
+      for (const integration of integrations) {
+        scannedRows += 1;
+
+        const shouldProcess =
+          args.force || needsLegacyUnsupportedSoftCleanup(integration);
+        if (!shouldProcess) {
+          continue;
+        }
+
+        try {
+          matchedRows += 1;
+          rowsByProvider[provider] += 1;
+          affectedUsers.add(String(integration.userId));
+
+          deletedSecretRows += await deleteIntegrationSecretsByUserProvider(
+            ctx.db,
+            integration.userId,
+            provider,
+          );
+
+          deletedSyncRunRows += await deleteIntegrationSyncRunsByUserProvider(
+            ctx.db,
+            integration.userId,
+            provider,
+          );
+
+          if (args.force) {
+            await ctx.db.delete(integration._id);
+            hardDeletedRows += 1;
+            continue;
+          }
+
+          await ctx.db.patch(integration._id, {
+            status: "disconnected",
+            tokenRef: undefined,
+            scopes: undefined,
+            lastSyncAt: undefined,
+            lastError: LEGACY_UNSUPPORTED_REASON,
+            legacyUnsupported: true,
+            legacyUnsupportedAt: integration.legacyUnsupportedAt ?? now,
+            legacyUnsupportedReason: LEGACY_UNSUPPORTED_REASON,
+          });
+          softDeletedRows += 1;
+        } catch (error) {
+          failedRows += 1;
+          failedRowsByProvider[provider] += 1;
+          pageHadFailure = true;
+
+          logWarn("legacy_unsupported_integrations_cleanup.row_failed", {
+            status: "warning",
+            attemptId,
+            provider,
+            integrationId: integration._id,
+            userId: integration.userId,
+            force: args.force,
+            message: error instanceof Error ? error.message : "unknown_error",
+          });
+
+          captureException(
+            "legacy_unsupported_integrations_cleanup.row_failed",
+            error,
+            {
+              status: "failed",
+              attemptId,
+              provider,
+              integrationId: integration._id,
+              userId: integration.userId,
+              force: args.force,
+            },
+          );
+        }
+      }
+
+      if (pageHadFailure) {
+        // Retry safety: replay this page on the next invocation instead of advancing the cursor.
+        cursor = pageStartCursor;
+        isDone = false;
+      } else if (page.isDone) {
+        cursor = null;
+      } else {
+        cursor = page.continueCursor;
+      }
+
+      logInfo("legacy_unsupported_integrations_cleanup.provider_page", {
+        status: "info",
+        attemptId,
+        provider,
+        pageSize: integrations.length,
+        pagePass: passes,
+        pageHadFailure,
+        cursorAdvanced: !pageHadFailure,
+        hasNextCursor: Boolean(cursor),
+      });
+
+      if (pageHadFailure || page.isDone || !cursor) {
+        break;
+      }
+    }
+
+    nextCursorByProvider[provider] = cursor;
+    if (cursor !== null) {
+      isDone = false;
+    }
+  }
+
+  const summary = {
+    trigger: args.trigger,
+    force: args.force,
+    attemptId,
+    batchSizePerProvider: args.batchSizePerProvider,
+    maxPasses: args.maxPasses,
+    maxRowsPerProvider,
+    isDone,
+    scannedRows,
+    matchedRows,
+    softDeletedRows,
+    hardDeletedRows,
+    deletedSecretRows,
+    deletedSyncRunRows,
+    failedRows,
+    affectedUsers: affectedUsers.size,
+    rowsByProvider,
+    failedRowsByProvider,
+    pagesProcessedByProvider,
+    nextCursorByProvider,
+  };
+
+  logInfo("legacy_unsupported_integrations_cleanup.completed", {
+    status: "succeeded",
+    ...summary,
+    affectedUserIds: Array.from(affectedUsers).slice(0, 200),
+  });
+
+  if (args.actorUserId) {
+    await ctx.db.insert("auditLogs", {
+      actorUserId: args.actorUserId,
+      action: LEGACY_UNSUPPORTED_CLEANUP_AUDIT_ACTION,
+      target: `attempt=${attemptId};force=${args.force};matched=${matchedRows};failed=${failedRows};users=${affectedUsers.size}`,
+      at: Date.now(),
+    });
+
+    await applyDashboardMetricsDelta(ctx.db, {
+      totalAuditLogs: 1,
+    });
+  }
+
+  return summary;
+}
+
 async function findExistingOpaqueTokenRef(
   db: MutationCtx["db"],
   integration: IntegrationRecord,
@@ -366,7 +987,11 @@ async function migrateLegacyIntegrationTokenRef(
     return "skipped";
   }
 
-  const provider = assertIntegrationProvider(integration.provider);
+  const provider = asIntegrationProvider(integration.provider);
+  if (!provider) {
+    return "skipped";
+  }
+
   const existingTokenRef = await findExistingOpaqueTokenRef(
     ctx.db,
     integration,
@@ -911,16 +1536,24 @@ export const getIntegrationByProvider = query({
 });
 
 // ── List all integrations for the current user ──────────────
+export async function listMyIntegrationsImpl(ctx: QueryCtx) {
+  const user = await requireUser(ctx);
+
+  const integrations = await ctx.db
+    .query("integrations")
+    .withIndex("by_user_provider", (q) => q.eq("userId", user._id))
+    .collect();
+
+  return integrations.filter(
+    (integration) =>
+      !isUnsupportedProvider(integration.provider) &&
+      integration.legacyUnsupported !== true,
+  );
+}
+
 export const listMyIntegrations = query({
   args: {},
-  handler: async (ctx) => {
-    const user = await requireUser(ctx);
-
-    return await ctx.db
-      .query("integrations")
-      .withIndex("by_user_provider", (q) => q.eq("userId", user._id))
-      .collect();
-  },
+  handler: (ctx) => listMyIntegrationsImpl(ctx),
 });
 
 export const listMyIntegrationSyncRunsForDay = query({
@@ -944,10 +1577,16 @@ export const listMyIntegrationStatusSnapshots = query({
   handler: async (ctx) => {
     const user = await requireUser(ctx);
 
-    const integrations = await ctx.db
-      .query("integrations")
-      .withIndex("by_user_provider", (q) => q.eq("userId", user._id))
-      .collect();
+    const integrations = (
+      await ctx.db
+        .query("integrations")
+        .withIndex("by_user_provider", (q) => q.eq("userId", user._id))
+        .collect()
+    ).filter(
+      (integration) =>
+        !isUnsupportedProvider(integration.provider) &&
+        integration.legacyUnsupported !== true,
+    );
 
     return await Promise.all(
       integrations.map(async (integration) => {
@@ -1417,6 +2056,19 @@ type LegacyTokenRefCountArgs = {
   maxPages?: number;
 };
 
+type LegacyUnsupportedCleanupArgs = {
+  batchSizePerProvider?: number;
+  maxPasses?: number;
+  force?: boolean;
+  cursorByProvider?: LegacyUnsupportedProviderCursorMap;
+};
+
+type LegacyUnsupportedCountArgs = {
+  batchSizePerProvider?: number;
+  maxPasses?: number;
+  cursorByProvider?: LegacyUnsupportedProviderCursorMap;
+};
+
 export async function adminAuditLegacyIntegrationTokenRefsImpl(
   ctx: QueryCtx,
   args: LegacyTokenRefAuditArgs,
@@ -1468,6 +2120,38 @@ export async function adminCountLegacyNonOpaqueIntegrationTokenRefsImpl(
     continueCursor: counts.continueCursor,
     opaqueTokenRefDefinition: OPAQUE_TOKEN_REF_DEFINITION,
   };
+}
+
+export async function adminCountLegacyUnsupportedIntegrationsImpl(
+  ctx: QueryCtx,
+  args: LegacyUnsupportedCountArgs = {},
+) {
+  await requireAdmin(ctx as never);
+  return await countLegacyUnsupportedIntegrations(ctx.db, {
+    batchSizePerProvider: normalizeCleanupBatchSizePerProvider(
+      args.batchSizePerProvider,
+    ),
+    maxPasses: normalizeLegacyUnsupportedCountMaxPasses(args.maxPasses),
+    cursorByProvider: args.cursorByProvider,
+  });
+}
+
+export async function adminCleanupLegacyUnsupportedIntegrationsImpl(
+  ctx: MutationCtx,
+  args: LegacyUnsupportedCleanupArgs = {},
+) {
+  const admin = await requireAdmin(ctx as never);
+
+  return await runLegacyUnsupportedCleanup(ctx, {
+    trigger: "manual",
+    actorUserId: admin._id,
+    force: args.force === true,
+    batchSizePerProvider: normalizeCleanupBatchSizePerProvider(
+      args.batchSizePerProvider,
+    ),
+    maxPasses: normalizeCleanupMaxPasses(args.maxPasses),
+    cursorByProvider: args.cursorByProvider,
+  });
 }
 
 export async function adminMigrateLegacyIntegrationTokenRefsAllImpl(
@@ -1586,6 +2270,118 @@ export const adminCountLegacyNonOpaqueIntegrationTokenRefs = query({
       pageSize: args.pageSize,
       maxPages: args.maxPages,
     }),
+});
+
+export const adminCountLegacyUnsupportedIntegrations = query({
+  args: {
+    batchSizePerProvider: v.optional(v.number()),
+    maxPasses: v.optional(v.number()),
+    cursorByProvider: v.optional(
+      v.object({
+        slack: v.optional(v.string()),
+        strava: v.optional(v.string()),
+        todoist: v.optional(v.string()),
+      }),
+    ),
+  },
+  handler: (ctx, args) =>
+    adminCountLegacyUnsupportedIntegrationsImpl(ctx, {
+      batchSizePerProvider: args.batchSizePerProvider,
+      maxPasses: args.maxPasses,
+      cursorByProvider: args.cursorByProvider,
+    }),
+});
+
+export const adminCleanupLegacyUnsupportedIntegrations = mutation({
+  args: {
+    batchSizePerProvider: v.optional(v.number()),
+    maxPasses: v.optional(v.number()),
+    force: v.optional(v.boolean()),
+    cursorByProvider: v.optional(
+      v.object({
+        slack: v.optional(v.string()),
+        strava: v.optional(v.string()),
+        todoist: v.optional(v.string()),
+      }),
+    ),
+  },
+  handler: (ctx, args) =>
+    adminCleanupLegacyUnsupportedIntegrationsImpl(ctx, {
+      batchSizePerProvider: args.batchSizePerProvider,
+      maxPasses: args.maxPasses,
+      force: args.force,
+      cursorByProvider: args.cursorByProvider,
+    }),
+});
+
+export const cleanupLegacyUnsupportedIntegrationsInternal = internalMutation({
+  args: {
+    batchSizePerProvider: v.optional(v.number()),
+    maxPasses: v.optional(v.number()),
+    force: v.optional(v.boolean()),
+    cursorByProvider: v.optional(
+      v.object({
+        slack: v.optional(v.string()),
+        strava: v.optional(v.string()),
+        todoist: v.optional(v.string()),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const persistedCursorByProvider =
+      args.cursorByProvider === undefined
+        ? await readPersistedLegacyUnsupportedCleanupCursorByProvider(ctx.db)
+        : null;
+
+    const resumedCursorByProvider = persistedCursorByProvider
+      ? toLegacyUnsupportedProviderCursorArgs(persistedCursorByProvider)
+      : undefined;
+
+    const result = await runLegacyUnsupportedCleanup(ctx, {
+      trigger: "cron",
+      force: args.force === true,
+      batchSizePerProvider: normalizeCleanupBatchSizePerProvider(
+        args.batchSizePerProvider,
+      ),
+      maxPasses: normalizeCleanupMaxPasses(args.maxPasses),
+      cursorByProvider: args.cursorByProvider ?? resumedCursorByProvider,
+    });
+
+    try {
+      await persistLegacyUnsupportedCleanupCursorState(ctx.db, result);
+    } catch (error) {
+      logWarn(
+        "legacy_unsupported_integrations_cleanup.cursor_state_persist_failed",
+        {
+          status: "warning",
+          attemptId: result.attemptId,
+          message: error instanceof Error ? error.message : "unknown_error",
+        },
+      );
+
+      captureException(
+        "legacy_unsupported_integrations_cleanup.cursor_state_persist_failed",
+        error,
+        {
+          status: "failed",
+          attemptId: result.attemptId,
+        },
+      );
+    }
+
+    logInfo("legacy_unsupported_integrations_cleanup.cursor_state_applied", {
+      status: "info",
+      attemptId: result.attemptId,
+      resumedFromStoredCursor: Boolean(resumedCursorByProvider),
+      usedExplicitCursor: args.cursorByProvider !== undefined,
+      hasNextCursorSlack: Boolean(result.nextCursorByProvider.slack),
+      hasNextCursorStrava: Boolean(result.nextCursorByProvider.strava),
+      hasNextCursorTodoist: Boolean(result.nextCursorByProvider.todoist),
+      isDone: result.isDone,
+    });
+
+    return result;
+  },
 });
 
 export const adminMigrateLegacyIntegrationTokenRefsAll = mutation({

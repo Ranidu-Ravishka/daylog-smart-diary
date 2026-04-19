@@ -24,7 +24,7 @@ import {
 } from "convex/react";
 import { api } from "@repo/backend/convex";
 import type { GenericId } from "convex/values";
-import { MOOD_EMOJI } from "@repo/ui/lib/constants";
+import { INTEGRATION_PROVIDER_META, MOOD_EMOJI } from "@repo/ui/lib/constants";
 import {
   Spacing,
   Typography,
@@ -93,24 +93,16 @@ function isIntegrationDailyDataDoc(
 }
 
 function toProviderLabel(provider: string): string {
-  const labels: Record<string, string> = {
-    google_calendar: "Google Calendar",
-    google_fit: "Google Fit",
-    gmail_summary: "Gmail Summary",
-    spotify: "Spotify",
-    apple_health: "Apple Health",
-    apple_calendar: "Apple Calendar",
-    notion: "Notion",
-    slack: "Slack",
-    strava: "Strava",
-    todoist: "Todoist",
-    location: "Location (foreground)",
-    fitness: "Fitness",
-    calendar: "Calendar",
-    activity_summary: "Activity Summary",
-  };
+  if (provider === "location") return "Location (foreground)";
+  if (provider === "fitness") return "Fitness";
+  if (provider === "calendar") return "Calendar";
+  if (provider === "activity_summary") return "Activity Summary";
 
-  return labels[provider] ?? provider;
+  return (
+    INTEGRATION_PROVIDER_META[
+      provider as keyof typeof INTEGRATION_PROVIDER_META
+    ]?.label ?? provider
+  );
 }
 
 function getTodayDayKey(): string {

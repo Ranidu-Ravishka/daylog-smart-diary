@@ -8,6 +8,10 @@ import {
   safeReturnPath,
 } from "@/lib/integrations-oauth";
 import { logInfo, logWarn } from "@/lib/observability";
+import {
+  getIntegrationProviderDefinition,
+  isIntegrationProviderComingSoon,
+} from "@repo/user-settings/lib/integration-provider-catalog";
 
 const OAUTH_COOKIE_PREFIX = "daylog_oauth_state_";
 
@@ -53,6 +57,27 @@ export async function GET(
       returnPath,
     });
     return NextResponse.redirect(new URL("/sign-in", request.url));
+  }
+
+  if (isIntegrationProviderComingSoon(provider)) {
+    const definition = getIntegrationProviderDefinition(provider);
+    const redirectUrl = buildResultRedirect(
+      request,
+      provider,
+      "error",
+      definition?.helperText ?? "This integration is coming soon.",
+      returnPath,
+    );
+
+    logInfo("oauth_start_coming_soon_provider", {
+      area: "oauth_start",
+      provider,
+      returnPath,
+      userId,
+      redirectTo: `${redirectUrl.pathname}${redirectUrl.search}`,
+    });
+
+    return NextResponse.redirect(redirectUrl);
   }
 
   if (!isOAuthProvider(provider)) {

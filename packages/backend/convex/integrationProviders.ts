@@ -3,6 +3,10 @@ import {
   oauthRefreshPluginProviders,
   type IntegrationPluginProvider,
 } from "./integrationPlugins";
+import {
+  getIntegrationProviderDefinition,
+  isIntegrationProviderComingSoon,
+} from "@repo/user-settings/lib/integration-provider-catalog";
 
 const CONNECTABLE_INTEGRATION_PROVIDERS: readonly IntegrationPluginProvider[] =
   integrationPluginProviders;
@@ -48,6 +52,14 @@ export function assertIntegrationProvider(
   provider: string,
 ): IntegrationProvider {
   const normalized = sanitizeProviderInput(provider);
+
+  if (isIntegrationProviderComingSoon(normalized)) {
+    const definition = getIntegrationProviderDefinition(normalized);
+    throw new Error(
+      `Integration provider "${provider}" is coming soon and cannot be connected yet.${definition?.helperText ? ` ${definition.helperText}` : ""}`,
+    );
+  }
+
   if (!integrationProviderSet.has(normalized)) {
     throw new Error(
       `Unsupported integration provider "${provider}". Allowed values: ${formatAllowedProviders(integrationProviderList)}.`,

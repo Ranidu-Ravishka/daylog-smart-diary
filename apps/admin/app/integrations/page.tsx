@@ -76,12 +76,20 @@ export default function IntegrationsPage() {
               </p>
             </div>
 
-            <Link
-              href="/integrations/create"
-              className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-            >
-              Create Integration
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/admin/dashboard#legacy-unsupported-cleanup"
+                className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
+              >
+                Legacy Cleanup Panel
+              </Link>
+              <Link
+                href="/integrations/create"
+                className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+              >
+                Create Integration
+              </Link>
+            </div>
           </div>
 
           {deleteError && (

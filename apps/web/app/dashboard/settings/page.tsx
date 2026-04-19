@@ -9,7 +9,10 @@ import {
 } from "@repo/user-settings/lib/user-settings";
 import {
   FOCUS_AREAS,
+  INTEGRATION_COMING_SOON_BADGE_LABEL,
+  INTEGRATION_COMING_SOON_HELPER_TEXT,
   INTEGRATION_PROVIDER_META,
+  INTEGRATION_PROVIDER_STATUS,
   MEMORY_MOOD_OPTIONS,
   SETTINGS_DEFAULTS,
 } from "@repo/ui/lib/constants";
@@ -127,11 +130,7 @@ function isOAuthProvider(provider: string): boolean {
     provider === "google_calendar" ||
     provider === "google_fit" ||
     provider === "gmail_summary" ||
-    provider === "spotify" ||
-    provider === "notion" ||
-    provider === "slack" ||
-    provider === "strava" ||
-    provider === "todoist"
+    provider === "spotify"
   );
 }
 
@@ -339,6 +338,7 @@ export default function SettingsPage() {
   const providerList = [
     ...new Set([
       ...(supportedProviders ?? []),
+      ...(integrations ?? []).map((integration) => integration.provider),
       ...Object.keys(INTEGRATION_PROVIDER_META),
     ]),
   ];
@@ -352,8 +352,22 @@ export default function SettingsPage() {
   };
 
   const handleConnect = async (provider: string) => {
+    const providerStatus =
+      INTEGRATION_PROVIDER_STATUS[
+        provider as keyof typeof INTEGRATION_PROVIDER_STATUS
+      ];
+
+    if (providerStatus === "coming_soon") {
+      const helperText =
+        INTEGRATION_PROVIDER_META[
+          provider as keyof typeof INTEGRATION_PROVIDER_META
+        ]?.helperText ?? INTEGRATION_COMING_SOON_HELPER_TEXT;
+      toastInfo(helperText);
+      return;
+    }
+
     if (!supportedProviderSet.has(provider)) {
-      toastInfo("This integration is coming soon.");
+      toastError("This integration is currently unavailable.");
       return;
     }
 
@@ -768,12 +782,23 @@ export default function SettingsPage() {
           {providerList.map((provider) => {
             const integration = integrationByProvider.get(provider);
             const syncRun = syncRunByProvider.get(provider);
+            const catalogStatus =
+              INTEGRATION_PROVIDER_STATUS[
+                provider as keyof typeof INTEGRATION_PROVIDER_STATUS
+              ];
+            const isComingSoonProvider = catalogStatus === "coming_soon";
             const isSupportedProvider = supportedProviderSet.has(provider);
+            const isConnectableProvider =
+              isSupportedProvider && !isComingSoonProvider;
             const status = integration?.status ?? "disconnected";
             const pending = providerPendingAction[provider];
             const syncing =
               pending === "sync" || syncRun?.status === "in_progress";
-            const statusLabel = isSupportedProvider ? status : "coming soon";
+            const statusLabel = isComingSoonProvider
+              ? INTEGRATION_COMING_SOON_BADGE_LABEL
+              : isSupportedProvider
+                ? status
+                : "unavailable";
 
             const label =
               INTEGRATION_PROVIDER_META[
@@ -783,6 +808,10 @@ export default function SettingsPage() {
               INTEGRATION_PROVIDER_META[
                 provider as keyof typeof INTEGRATION_PROVIDER_META
               ]?.description ?? "";
+            const helperText =
+              INTEGRATION_PROVIDER_META[
+                provider as keyof typeof INTEGRATION_PROVIDER_META
+              ]?.helperText ?? INTEGRATION_COMING_SOON_HELPER_TEXT;
 
             return (
               <div
@@ -799,20 +828,22 @@ export default function SettingsPage() {
                   <span
                     className={cn(
                       "inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium",
-                      !isSupportedProvider
+                      isComingSoonProvider
                         ? "bg-muted text-muted-foreground"
-                        : status === "connected"
-                          ? "bg-success/15 text-success"
-                          : status === "error"
-                            ? "bg-destructive/15 text-destructive"
-                            : "bg-muted text-muted-foreground",
+                        : !isSupportedProvider
+                          ? "bg-muted text-muted-foreground"
+                          : status === "connected"
+                            ? "bg-success/15 text-success"
+                            : status === "error"
+                              ? "bg-destructive/15 text-destructive"
+                              : "bg-muted text-muted-foreground",
                     )}
                   >
                     {statusLabel}
                   </span>
                 </div>
 
-                {isSupportedProvider ? (
+                {isConnectableProvider ? (
                   <div className="text-[11px] text-muted-foreground space-y-0.5">
                     <p>Last sync: {formatDateTime(integration?.lastSyncAt)}</p>
                     {syncRun?.status ? (
@@ -827,18 +858,40 @@ export default function SettingsPage() {
                       </p>
                     ) : null}
                   </div>
+                ) : isComingSoonProvider ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    {helperText}
+                  </p>
                 ) : (
                   <p className="text-[11px] text-muted-foreground">
-                    Planned integration. Availability will roll out in a future
-                    release.
+                    {integration?.status === "connected"
+                      ? "Legacy integration is no longer supported. Disconnect it to clean up your account."
+                      : "This integration is not available in this deployment."}
                   </p>
                 )}
 
                 <div className="flex flex-wrap gap-2">
-                  {!isSupportedProvider ? (
+                  {isComingSoonProvider ? (
                     <Button size="sm" variant="outline" disabled>
-                      Coming soon
+                      {INTEGRATION_COMING_SOON_BADGE_LABEL}
                     </Button>
+                  ) : !isSupportedProvider ? (
+                    integration?.status === "connected" ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleDisconnect(provider)}
+                        disabled={pending !== undefined}
+                      >
+                        {pending === "disconnect"
+                          ? "Disconnecting…"
+                          : "Disconnect"}
+                      </Button>
+                    ) : (
+                      <Button size="sm" variant="outline" disabled>
+                        Unavailable
+                      </Button>
+                    )
                   ) : status !== "connected" ? (
                     <Button
                       size="sm"

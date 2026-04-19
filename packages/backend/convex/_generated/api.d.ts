@@ -35,6 +35,7 @@ import type * as runtimeConfig from "../runtimeConfig.js";
 import type * as summaries from "../summaries.js";
 import type * as summaryGeneration from "../summaryGeneration.js";
 import type * as summaryQuality from "../summaryQuality.js";
+import type * as unsupportedProviders from "../unsupportedProviders.js";
 import type * as userPreferences from "../userPreferences.js";
 import type * as users from "../users.js";
 import type * as validators from "../validators.js";
@@ -74,6 +75,7 @@ declare const fullApi: ApiFromModules<{
   summaries: typeof summaries;
   summaryGeneration: typeof summaryGeneration;
   summaryQuality: typeof summaryQuality;
+  unsupportedProviders: typeof unsupportedProviders;
   userPreferences: typeof userPreferences;
   users: typeof users;
   validators: typeof validators;

@@ -10,12 +10,22 @@ describe("assertIntegrationProvider", () => {
   it("normalizes supported integration providers", () => {
     expect(assertIntegrationProvider("  GOOGLE_FIT  ")).toBe("google_fit");
     expect(assertIntegrationProvider("spotify")).toBe("spotify");
-    expect(assertIntegrationProvider("notion")).toBe("notion");
-    expect(assertIntegrationProvider("slack")).toBe("slack");
-    expect(assertIntegrationProvider("strava")).toBe("strava");
-    expect(assertIntegrationProvider("todoist")).toBe("todoist");
+    expect(assertIntegrationProvider("google_calendar")).toBe(
+      "google_calendar",
+    );
+    expect(assertIntegrationProvider("apple_health")).toBe("apple_health");
     expect(assertIntegrationProvider("apple_calendar")).toBe("apple_calendar");
     expect(assertIntegrationProvider("gmail_summary")).toBe("gmail_summary");
+  });
+
+  it("rejects coming-soon providers with a clear error", () => {
+    expect(() => assertIntegrationProvider("notion")).toThrow(/coming soon/i);
+    expect(() => assertIntegrationProvider("microsoft_teams")).toThrow(
+      /coming soon/i,
+    );
+    expect(() => assertIntegrationProvider("microsoft_outlook")).toThrow(
+      /coming soon/i,
+    );
   });
 
   it("rejects unsupported providers with a clear error", () => {
@@ -45,18 +55,18 @@ describe("assertDailyDataProvider", () => {
 describe("provider parsing helpers", () => {
   it("parses integration providers and rejects contextual-only ones", () => {
     expect(asIntegrationProvider("google_calendar")).toBe("google_calendar");
-    expect(asIntegrationProvider("notion")).toBe("notion");
-    expect(asIntegrationProvider("strava")).toBe("strava");
+    expect(asIntegrationProvider("spotify")).toBe("spotify");
+    expect(asIntegrationProvider("notion")).toBeNull();
     expect(asIntegrationProvider("location")).toBeNull();
   });
 
   it("parses oauth-refresh providers", () => {
+    expect(asOAuthRefreshProvider("google_calendar")).toBe("google_calendar");
+    expect(asOAuthRefreshProvider("google_fit")).toBe("google_fit");
     expect(asOAuthRefreshProvider("spotify")).toBe("spotify");
     expect(asOAuthRefreshProvider("gmail_summary")).toBe("gmail_summary");
-    expect(asOAuthRefreshProvider("strava")).toBe("strava");
     expect(asOAuthRefreshProvider("notion")).toBeNull();
-    expect(asOAuthRefreshProvider("slack")).toBeNull();
-    expect(asOAuthRefreshProvider("todoist")).toBeNull();
+    expect(asOAuthRefreshProvider("microsoft_teams")).toBeNull();
     expect(asOAuthRefreshProvider("apple_health")).toBeNull();
   });
 });

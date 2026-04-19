@@ -5,13 +5,7 @@ type IntegrationSyncMode =
   | "derived_contextual_calendar"
   | "client_push";
 
-export type OAuthCredentialSource =
-  | "google"
-  | "spotify"
-  | "notion"
-  | "slack"
-  | "strava"
-  | "todoist";
+export type OAuthCredentialSource = "google" | "spotify";
 
 export type OAuthTokenExchangeMode = "form_urlencoded" | "basic_json";
 
@@ -115,71 +109,6 @@ const INTEGRATION_PLUGIN_REGISTRY = {
       allowTokenRefresh: true,
     },
   },
-  notion: {
-    provider: "notion",
-    connectionMode: "oauth",
-    syncMode: "provider_api",
-    requiresStoredToken: true,
-    oauth: {
-      authorizationUrl: "https://api.notion.com/v1/oauth/authorize",
-      tokenUrl: "https://api.notion.com/v1/oauth/token",
-      scopes: [],
-      credentialSource: "notion",
-      authQueryParams: {
-        owner: "user",
-      },
-      tokenExchangeMode: "basic_json",
-      allowTokenRefresh: false,
-    },
-  },
-  slack: {
-    provider: "slack",
-    connectionMode: "oauth",
-    syncMode: "provider_api",
-    requiresStoredToken: true,
-    oauth: {
-      authorizationUrl: "https://slack.com/oauth/v2/authorize",
-      tokenUrl: "https://slack.com/api/oauth.v2.access",
-      scopes: [],
-      credentialSource: "slack",
-      authQueryParams: {
-        user_scope: "search:read,users:read",
-      },
-      tokenExchangeMode: "form_urlencoded",
-      allowTokenRefresh: false,
-    },
-  },
-  strava: {
-    provider: "strava",
-    connectionMode: "oauth",
-    syncMode: "provider_api",
-    requiresStoredToken: true,
-    oauth: {
-      authorizationUrl: "https://www.strava.com/oauth/authorize",
-      tokenUrl: "https://www.strava.com/oauth/token",
-      scopes: ["read,activity:read_all"],
-      credentialSource: "strava",
-      authQueryParams: {
-        approval_prompt: "auto",
-      },
-      tokenExchangeMode: "form_urlencoded",
-      allowTokenRefresh: true,
-    },
-  },
-  todoist: {
-    provider: "todoist",
-    connectionMode: "oauth",
-    syncMode: "provider_api",
-    requiresStoredToken: true,
-    oauth: {
-      authorizationUrl: "https://todoist.com/oauth/authorize",
-      tokenUrl: "https://todoist.com/oauth/access_token",
-      scopes: [],
-      credentialSource: "todoist",
-      tokenExchangeMode: "form_urlencoded",
-      allowTokenRefresh: false,
-    },
-  },
   apple_health: {
     provider: "apple_health",
     connectionMode: "manual",
@@ -247,34 +176,6 @@ export function getOAuthCredentialEnvNames(source: OAuthCredentialSource): {
     return {
       clientIdEnv: "SPOTIFY_CLIENT_ID",
       clientSecretEnv: "SPOTIFY_CLIENT_SECRET",
-    };
-  }
-
-  if (source === "notion") {
-    return {
-      clientIdEnv: "NOTION_CLIENT_ID",
-      clientSecretEnv: "NOTION_CLIENT_SECRET",
-    };
-  }
-
-  if (source === "slack") {
-    return {
-      clientIdEnv: "SLACK_CLIENT_ID",
-      clientSecretEnv: "SLACK_CLIENT_SECRET",
-    };
-  }
-
-  if (source === "strava") {
-    return {
-      clientIdEnv: "STRAVA_CLIENT_ID",
-      clientSecretEnv: "STRAVA_CLIENT_SECRET",
-    };
-  }
-
-  if (source === "todoist") {
-    return {
-      clientIdEnv: "TODOIST_CLIENT_ID",
-      clientSecretEnv: "TODOIST_CLIENT_SECRET",
     };
   }
 

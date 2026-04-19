@@ -9,7 +9,12 @@ import {
   TouchableWithoutFeedback,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { INTEGRATION_PROVIDER_META } from "@repo/ui/lib/constants";
+import {
+  INTEGRATION_COMING_SOON_BADGE_LABEL,
+  INTEGRATION_COMING_SOON_HELPER_TEXT,
+  INTEGRATION_PROVIDER_META,
+  INTEGRATION_PROVIDER_STATUS,
+} from "@repo/ui/lib/constants";
 import { AppCard } from "@/components/ui/app-card";
 import { SectionHeader } from "@/components/ui/section-header";
 import { getAppleHealthSetupIssue } from "@/lib/apple-health-sync";
@@ -362,7 +367,14 @@ export function IntegrationsSection({
             const healthSnapshot = integrationHealthByProvider.get(provider);
             const health = healthSnapshot?.health ?? null;
             const syncRun = syncRunByProvider.get(provider);
+            const catalogStatus =
+              INTEGRATION_PROVIDER_STATUS[
+                provider as keyof typeof INTEGRATION_PROVIDER_STATUS
+              ];
+            const isComingSoonProvider = catalogStatus === "coming_soon";
             const isSupportedProvider = supportedProviderSet.has(provider);
+            const isConnectableProvider =
+              isSupportedProvider && !isComingSoonProvider;
             const status =
               integration?.status ??
               healthSnapshot?.integrationStatus ??
@@ -392,13 +404,15 @@ export function IntegrationsSection({
                   integration?.lastError ??
                   "Latest sync failed. Retry to recover.")
                 : undefined;
-            const statusLabel = !isSupportedProvider
-              ? "coming soon"
-              : isAppleHealthSetupBlocked
-                ? Platform.OS === "ios"
-                  ? "setup required"
-                  : "iOS only"
-                : status;
+            const statusLabel = isComingSoonProvider
+              ? INTEGRATION_COMING_SOON_BADGE_LABEL
+              : !isSupportedProvider
+                ? "unavailable"
+                : isAppleHealthSetupBlocked
+                  ? Platform.OS === "ios"
+                    ? "setup required"
+                    : "iOS only"
+                  : status;
             const syncStateLabel =
               syncState === "success"
                 ? "success"
@@ -472,7 +486,7 @@ export function IntegrationsSection({
                       </View>
                     ) : null}
 
-                    {isSupportedProvider ? (
+                    {isConnectableProvider ? (
                       <>
                         <Text style={styles.integrationSubMuted}>
                           Last sync: {formatSyncTimestamp(latestSyncAt)}
@@ -528,24 +542,62 @@ export function IntegrationsSection({
                           </Text>
                         </TouchableOpacity>
                       </>
+                    ) : isComingSoonProvider ? (
+                      <Text style={styles.integrationSubMuted}>
+                        {INTEGRATION_PROVIDER_META[
+                          provider as keyof typeof INTEGRATION_PROVIDER_META
+                        ]?.helperText ?? INTEGRATION_COMING_SOON_HELPER_TEXT}
+                      </Text>
                     ) : (
                       <Text style={styles.integrationSubMuted}>
-                        This integration is planned and will be available in a
-                        future update.
+                        {integration?.status === "connected"
+                          ? "Legacy integration is no longer supported. Disconnect to clean up this account."
+                          : "This integration is not available in this app build."}
                       </Text>
                     )}
 
                     <View style={styles.integrationActionsRow}>
-                      {!isSupportedProvider ? (
+                      {isComingSoonProvider ? (
                         <TouchableOpacity
                           style={styles.integrationSecondaryBtn}
                           disabled
                           activeOpacity={1}
                         >
                           <Text style={styles.integrationSecondaryBtnText}>
-                            Coming soon
+                            {INTEGRATION_COMING_SOON_BADGE_LABEL}
                           </Text>
                         </TouchableOpacity>
+                      ) : !isSupportedProvider ? (
+                        integration?.status === "connected" ? (
+                          <TouchableOpacity
+                            style={styles.integrationSecondaryBtn}
+                            onPress={() => {
+                              if (!integration) return;
+                              onDisconnectIntegration(
+                                provider,
+                                integration._id,
+                              );
+                            }}
+                            disabled={pending !== undefined}
+                            activeOpacity={0.75}
+                          >
+                            <Text style={styles.integrationSecondaryBtnText}>
+                              {pending === "disconnect"
+                                ? "Disconnecting..."
+                                : "Disconnect"}
+                            </Text>
+                          </TouchableOpacity>
+                        ) : (
+                          <TouchableOpacity
+                            style={styles.integrationSecondaryBtn}
+                            disabled
+                            activeOpacity={1}
+                          >
+                            <Text style={styles.integrationSecondaryBtnText}>
+                              Unavailable
+                            </Text>
+                          </TouchableOpacity>
+                        )
                       ) : status !== "connected" ? (
                         <TouchableOpacity
                           style={styles.integrationPrimaryBtn}

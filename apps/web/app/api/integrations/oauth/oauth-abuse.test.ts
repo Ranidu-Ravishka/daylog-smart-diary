@@ -86,12 +86,6 @@ describe("oauth abuse protection", () => {
     process.env.SPOTIFY_CLIENT_SECRET = "spotify_client_secret";
     process.env.GOOGLE_CLIENT_ID = "google_client_id";
     process.env.GOOGLE_CLIENT_SECRET = "google_client_secret";
-    process.env.SLACK_CLIENT_ID = "slack_client_id";
-    process.env.SLACK_CLIENT_SECRET = "slack_client_secret";
-    process.env.STRAVA_CLIENT_ID = "strava_client_id";
-    process.env.STRAVA_CLIENT_SECRET = "strava_client_secret";
-    process.env.TODOIST_CLIENT_ID = "todoist_client_id";
-    process.env.TODOIST_CLIENT_SECRET = "todoist_client_secret";
   });
 
   afterEach(() => {
@@ -265,74 +259,53 @@ describe("oauth abuse protection", () => {
     expect(getTokenMock).toHaveBeenCalledTimes(1);
   });
 
-  it("accepts Slack OAuth payloads and persists authed user token", async () => {
+  it("rejects coming-soon providers at both OAuth entry points", async () => {
     const { startGet, callbackGet } = await loadRoutes();
 
-    const getTokenMock = vi.fn().mockResolvedValue("convex_jwt_token");
-    authMock.mockResolvedValue({
-      userId: "user_1",
-      getToken: getTokenMock,
-    });
-
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          ok: true,
-          access_token: "xoxb-bot-token",
-          scope: "chat:write",
-          authed_user: {
-            id: "U123",
-            scope: "search:read,users:read",
-            access_token: "xoxp-user-token",
-          },
-        }),
-        { status: 200 },
-      ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    convexMutationMock.mockResolvedValue({ success: true });
+    authMock.mockResolvedValue({ userId: "user_1", getToken: vi.fn() });
 
     const startRequest = makeRequest(
-      "https://app.daylog.test/api/integrations/oauth/slack/start?returnTo=/dashboard/settings",
+      "https://app.daylog.test/api/integrations/oauth/notion/start?returnTo=/dashboard/settings",
+    );
+    const callbackRequest = makeRequest(
+      "https://app.daylog.test/api/integrations/oauth/notion/callback?state=s1&code=c1",
     );
 
     const startResponse = await startGet(startRequest, {
-      params: Promise.resolve({ provider: "slack" }),
+      params: Promise.resolve({ provider: "notion" }),
+    });
+    const callbackResponse = await callbackGet(callbackRequest, {
+      params: Promise.resolve({ provider: "notion" }),
     });
 
     expect(startResponse.status).toBe(307);
-    const setCookieHeader = startResponse.headers.get("set-cookie");
-    expect(setCookieHeader).toBeTruthy();
-
-    const cookiePair = setCookieHeader!.split(";")[0]!;
-    const state = readStateFromCookie(cookiePair);
-
-    const callbackRequest = makeRequest(
-      `https://app.daylog.test/api/integrations/oauth/slack/callback?state=${encodeURIComponent(state)}&code=valid_authorization_code`,
-      cookiePair,
-    );
-
-    const callbackResponse = await callbackGet(callbackRequest, {
-      params: Promise.resolve({ provider: "slack" }),
-    });
-
     expect(callbackResponse.status).toBe(307);
-    const redirect = readRedirect(callbackResponse);
-    expect(redirect.pathname).toBe("/dashboard/settings");
-    expect(redirect.searchParams.get("integrationProvider")).toBe("slack");
-    expect(redirect.searchParams.get("integrationStatus")).toBe("success");
 
-    expect(convexMutationMock).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        provider: "slack",
-        accessToken: "xoxp-user-token",
-        scopes: ["search:read", "users:read"],
-      }),
+    const startRedirect = readRedirect(startResponse);
+    const callbackRedirect = readRedirect(callbackResponse);
+
+    expect(startRedirect.pathname).toBe("/dashboard/settings");
+    expect(callbackRedirect.pathname).toBe("/dashboard/settings");
+    expect(startRedirect.searchParams.get("integrationProvider")).toBe(
+      "notion",
     );
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(getTokenMock).toHaveBeenCalledTimes(1);
+    expect(callbackRedirect.searchParams.get("integrationProvider")).toBe(
+      "notion",
+    );
+    expect(startRedirect.searchParams.get("integrationStatus")).toBe("error");
+    expect(callbackRedirect.searchParams.get("integrationStatus")).toBe(
+      "error",
+    );
+    expect(startRedirect.searchParams.get("integrationMessage")).toMatch(
+      /available soon|coming soon/i,
+    );
+    expect(callbackRedirect.searchParams.get("integrationMessage")).toMatch(
+      /available soon|coming soon/i,
+    );
+
+    expect(convexClientCtorMock).not.toHaveBeenCalled();
+    expect(convexSetAuthMock).not.toHaveBeenCalled();
+    expect(convexMutationMock).not.toHaveBeenCalled();
   });
 
   it("fails safely for malformed callback payloads with no writes", async () => {
