@@ -5,7 +5,10 @@ import { requireAdmin } from "./authz";
 import { clampLimit, validateDayKey, validateRating } from "./validators";
 import { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { assertIntegrationProvider } from "./integrationProviders";
+import {
+  asIntegrationProvider,
+  assertIntegrationProvider,
+} from "./integrationProviders";
 import {
   deleteDayCascadeData,
   deleteMemoryMediaByMemoryId,
@@ -1250,7 +1253,7 @@ export const adminUpdateIntegration = mutation({
     const admin = await requireAdmin(ctx);
     const integration = await ctx.db.get(args.integrationId);
     if (!integration) throw new Error("Integration not found");
-    const currentProvider = assertIntegrationProvider(integration.provider);
+    const currentProvider = asIntegrationProvider(integration.provider);
     const nextProvider =
       args.provider !== undefined
         ? assertIntegrationProvider(args.provider)
@@ -1261,6 +1264,12 @@ export const adminUpdateIntegration = mutation({
     if (args.status !== undefined) updates.status = args.status;
     if (args.scopes !== undefined) updates.scopes = args.scopes;
     if (args.tokenRef !== undefined) {
+      if (!nextProvider) {
+        throw new Error(
+          `Current provider "${integration.provider}" is no longer supported. Set provider to a supported value before updating tokenRef.`,
+        );
+      }
+
       if (args.tokenRef && !args.tokenRef.startsWith(OPAQUE_TOKEN_REF_PREFIX)) {
         updates.tokenRef = await ctx.runMutation(
           internal.integrations.storeIntegrationSecretInternal,

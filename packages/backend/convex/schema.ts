@@ -445,6 +445,9 @@ export default defineSchema(
       lastError: v.optional(v.string()),
       scopes: v.optional(v.array(v.string())),
       tokenRef: v.optional(v.string()),
+      legacyUnsupported: v.optional(v.boolean()),
+      legacyUnsupportedAt: v.optional(v.number()),
+      legacyUnsupportedReason: v.optional(v.string()),
     })
       .index("by_user_provider", ["userId", "provider"])
       .index("by_status", ["status"])

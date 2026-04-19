@@ -1,10 +1,4 @@
-type OAuthCredentialSource =
-  | "google"
-  | "spotify"
-  | "notion"
-  | "slack"
-  | "strava"
-  | "todoist";
+type OAuthCredentialSource = "google" | "spotify";
 
 export type OAuthTokenExchangeMode = "form_urlencoded" | "basic_json";
 
@@ -82,43 +76,6 @@ const OAUTH_PROVIDER_CONFIGS = {
     },
     tokenExchangeMode: "form_urlencoded",
   },
-  notion: {
-    authorizationUrl: "https://api.notion.com/v1/oauth/authorize",
-    tokenUrl: "https://api.notion.com/v1/oauth/token",
-    scopes: [],
-    credentialSource: "notion",
-    authQueryParams: {
-      owner: "user",
-    },
-    tokenExchangeMode: "basic_json",
-  },
-  slack: {
-    authorizationUrl: "https://slack.com/oauth/v2/authorize",
-    tokenUrl: "https://slack.com/api/oauth.v2.access",
-    scopes: [],
-    credentialSource: "slack",
-    authQueryParams: {
-      user_scope: "search:read,users:read",
-    },
-    tokenExchangeMode: "form_urlencoded",
-  },
-  strava: {
-    authorizationUrl: "https://www.strava.com/oauth/authorize",
-    tokenUrl: "https://www.strava.com/oauth/token",
-    scopes: ["read,activity:read_all"],
-    credentialSource: "strava",
-    authQueryParams: {
-      approval_prompt: "auto",
-    },
-    tokenExchangeMode: "form_urlencoded",
-  },
-  todoist: {
-    authorizationUrl: "https://todoist.com/oauth/authorize",
-    tokenUrl: "https://todoist.com/oauth/access_token",
-    scopes: [],
-    credentialSource: "todoist",
-    tokenExchangeMode: "form_urlencoded",
-  },
 } as const satisfies Record<string, OAuthProviderBaseConfig>;
 
 export type OAuthProvider = keyof typeof OAUTH_PROVIDER_CONFIGS;
@@ -135,34 +92,6 @@ function getOAuthCredentialEnvNames(source: OAuthCredentialSource): {
     return {
       clientIdEnv: "SPOTIFY_CLIENT_ID",
       clientSecretEnv: "SPOTIFY_CLIENT_SECRET",
-    };
-  }
-
-  if (source === "notion") {
-    return {
-      clientIdEnv: "NOTION_CLIENT_ID",
-      clientSecretEnv: "NOTION_CLIENT_SECRET",
-    };
-  }
-
-  if (source === "slack") {
-    return {
-      clientIdEnv: "SLACK_CLIENT_ID",
-      clientSecretEnv: "SLACK_CLIENT_SECRET",
-    };
-  }
-
-  if (source === "strava") {
-    return {
-      clientIdEnv: "STRAVA_CLIENT_ID",
-      clientSecretEnv: "STRAVA_CLIENT_SECRET",
-    };
-  }
-
-  if (source === "todoist") {
-    return {
-      clientIdEnv: "TODOIST_CLIENT_ID",
-      clientSecretEnv: "TODOIST_CLIENT_SECRET",
     };
   }
 

@@ -32,9 +32,8 @@ const providerIcons: Record<
   apple_health: "heart-outline",
   apple_calendar: "calendar-number-outline",
   notion: "document-text-outline",
-  slack: "chatbubbles-outline",
-  strava: "bicycle-outline",
-  todoist: "list-outline",
+  microsoft_teams: "people-outline",
+  microsoft_outlook: "mail-open-outline",
 };
 
 export function FinishStep({

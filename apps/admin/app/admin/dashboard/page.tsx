@@ -3,8 +3,13 @@
 import AdminGuard from "@/components/admin-guard";
 import { api } from "@repo/backend/convex";
 import { makeFunctionReference } from "convex/server";
-import { useConvexAuth, useQuery } from "convex/react";
-import { usePaginatedQuery } from "convex/react";
+import {
+  useConvexAuth,
+  useMutation,
+  usePaginatedQuery,
+  useQuery,
+} from "convex/react";
+import { useState } from "react";
 
 type HealthSummary = {
   connected: number;
@@ -29,6 +34,29 @@ type TransportHealthSummary = {
   };
 };
 
+type LegacyUnsupportedCountSummary = {
+  totalRows: number;
+  pendingCleanupRows: number;
+  softDeletedRows: number;
+  affectedUsers: number;
+  rowsByProvider: {
+    slack: number;
+    strava: number;
+    todoist: number;
+  };
+};
+
+type LegacyUnsupportedCleanupResult = {
+  force: boolean;
+  isDone: boolean;
+  matchedRows: number;
+  softDeletedRows: number;
+  hardDeletedRows: number;
+  deletedSecretRows: number;
+  deletedSyncRunRows: number;
+  affectedUsers: number;
+};
+
 export default function AdminDashboardPage() {
   const retentionRunsRef = makeFunctionReference<"query">(
     "retention:listRetentionRunsPaginated",
@@ -42,12 +70,22 @@ export default function AdminDashboardPage() {
   const transportHealthRef = makeFunctionReference<"query">(
     "observabilityIngestion:getObservabilityInfoTransportHealth",
   );
+  const legacyUnsupportedCountRef = makeFunctionReference<"query">(
+    "integrations:adminCountLegacyUnsupportedIntegrations",
+  );
+  const legacyUnsupportedCleanupRef = makeFunctionReference<"mutation">(
+    "integrations:adminCleanupLegacyUnsupportedIntegrations",
+  );
 
   const { isAuthenticated } = useConvexAuth();
+  const [cleanupBusy, setCleanupBusy] = useState<"soft" | "hard" | null>(null);
+  const [cleanupError, setCleanupError] = useState<string | null>(null);
+  const [cleanupStatus, setCleanupStatus] = useState<string | null>(null);
   const isAdmin = useQuery(
     api.users.isCurrentUserAdmin,
     isAuthenticated ? {} : "skip",
   );
+  const runLegacyUnsupportedCleanup = useMutation(legacyUnsupportedCleanupRef);
   const metrics = useQuery(
     api.admin.getDashboardMetrics,
     isAdmin ? {} : "skip",
@@ -64,6 +102,10 @@ export default function AdminDashboardPage() {
         }
       : "skip",
   ) as TransportHealthSummary | undefined;
+  const legacyUnsupportedCounts = useQuery(
+    legacyUnsupportedCountRef,
+    isAdmin ? {} : "skip",
+  ) as LegacyUnsupportedCountSummary | undefined;
 
   const { results: retentionRuns } = usePaginatedQuery(
     retentionRunsRef,
@@ -92,6 +134,41 @@ export default function AdminDashboardPage() {
 
   const lastInfoEventAt = transportHealth?.overall.lastReceivedAt;
   const infoTransportDropRate = transportHealth?.overall.estimatedDropRate ?? 0;
+
+  const executeLegacyCleanup = async (force: boolean) => {
+    if (force) {
+      const confirmed = window.confirm(
+        "Force mode permanently deletes legacy unsupported integration rows. Continue?",
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    setCleanupError(null);
+    setCleanupStatus(null);
+    setCleanupBusy(force ? "hard" : "soft");
+
+    try {
+      const result = (await runLegacyUnsupportedCleanup({
+        force,
+      })) as LegacyUnsupportedCleanupResult;
+
+      setCleanupStatus(
+        result.force
+          ? `Hard cleanup complete: deleted ${result.hardDeletedRows} legacy rows (${result.deletedSecretRows} secrets, ${result.deletedSyncRunRows} sync runs) across ${result.affectedUsers} users.`
+          : `Soft cleanup complete: updated ${result.softDeletedRows} legacy rows (${result.deletedSecretRows} secrets, ${result.deletedSyncRunRows} sync runs) across ${result.affectedUsers} users.${result.isDone ? "" : " More rows remain; run again."}`,
+      );
+    } catch (error) {
+      setCleanupError(
+        error instanceof Error
+          ? error.message
+          : "Legacy cleanup failed unexpectedly.",
+      );
+    } finally {
+      setCleanupBusy(null);
+    }
+  };
 
   return (
     <AdminGuard>
@@ -178,6 +255,90 @@ export default function AdminDashboardPage() {
                 href="/observability/info-events"
               />
             </div>
+
+            <div
+              id="legacy-unsupported-cleanup"
+              className="mt-6 scroll-mt-24 rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900">
+                    Legacy Unsupported Integration Cleanup
+                  </h3>
+                  <p className="mt-1 text-xs text-gray-600">
+                    Monitors and cleans legacy rows for slack, strava, and
+                    todoist.
+                  </p>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => void executeLegacyCleanup(false)}
+                    disabled={cleanupBusy !== null}
+                    className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {cleanupBusy === "soft"
+                      ? "Running Soft Cleanup..."
+                      : "Run Soft Cleanup"}
+                  </button>
+                  <button
+                    onClick={() => void executeLegacyCleanup(true)}
+                    disabled={cleanupBusy !== null}
+                    className="inline-flex items-center rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {cleanupBusy === "hard"
+                      ? "Running Hard Cleanup..."
+                      : "Run Hard Cleanup"}
+                  </button>
+                </div>
+              </div>
+
+              {cleanupStatus ? (
+                <div className="mt-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-700">
+                  {cleanupStatus}
+                </div>
+              ) : null}
+
+              {cleanupError ? (
+                <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  {cleanupError}
+                </div>
+              ) : null}
+
+              {legacyUnsupportedCounts === undefined ? (
+                <p className="mt-3 text-xs text-gray-500">
+                  Loading legacy cleanup metrics...
+                </p>
+              ) : (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <MiniMetric
+                    label="Total Legacy Rows"
+                    value={legacyUnsupportedCounts.totalRows}
+                  />
+                  <MiniMetric
+                    label="Pending Cleanup"
+                    value={legacyUnsupportedCounts.pendingCleanupRows}
+                  />
+                  <MiniMetric
+                    label="Soft-Deleted"
+                    value={legacyUnsupportedCounts.softDeletedRows}
+                  />
+                  <MiniMetric
+                    label="Affected Users"
+                    value={legacyUnsupportedCounts.affectedUsers}
+                  />
+
+                  <div className="sm:col-span-2 lg:col-span-4 rounded-lg border border-gray-100 bg-gray-50 p-3 text-xs text-gray-700">
+                    <span className="font-medium text-gray-900">
+                      By Provider:
+                    </span>{" "}
+                    slack {legacyUnsupportedCounts.rowsByProvider.slack} |
+                    strava {legacyUnsupportedCounts.rowsByProvider.strava} |
+                    todoist {legacyUnsupportedCounts.rowsByProvider.todoist}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -222,5 +383,14 @@ function MaturityCard({
       <p className="text-sm font-semibold text-gray-900">{title}</p>
       <p className="mt-2 text-xs text-gray-600">{subtitle}</p>
     </a>
+  );
+}
+
+function MiniMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+      <p className="text-[11px] text-gray-500">{label}</p>
+      <p className="mt-1 text-lg font-semibold text-gray-900">{value}</p>
+    </div>
   );
 }

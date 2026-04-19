@@ -12,4 +12,15 @@ crons.interval(
   },
 );
 
+crons.interval(
+  "cleanup-legacy-unsupported-integrations-daily",
+  { hours: 24 },
+  internal.integrations.cleanupLegacyUnsupportedIntegrationsInternal,
+  {
+    batchSizePerProvider: 25,
+    maxPasses: 2,
+    force: false,
+  },
+);
+
 export default crons;

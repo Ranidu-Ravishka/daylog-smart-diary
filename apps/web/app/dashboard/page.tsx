@@ -7,7 +7,7 @@ import {
   usePaginatedQuery,
 } from "convex/react";
 import { api } from "@repo/backend/convex";
-import { MOOD_EMOJI } from "@repo/ui/lib/constants";
+import { INTEGRATION_PROVIDER_META, MOOD_EMOJI } from "@repo/ui/lib/constants";
 import {
   getDayKeyForTimestamp,
   getResolvedTimeZone,
@@ -315,16 +315,12 @@ export default function DashboardPage() {
 
   const providerLabel: Record<string, string> = {
     location: "Location (coarse foreground)",
-    google_calendar: "Google Calendar",
-    google_fit: "Google Fit",
-    gmail_summary: "Gmail Summary",
-    spotify: "Spotify",
-    apple_health: "Apple Health",
-    apple_calendar: "Apple Calendar",
-    notion: "Notion",
-    slack: "Slack",
-    strava: "Strava",
-    todoist: "Todoist",
+    ...Object.fromEntries(
+      Object.entries(INTEGRATION_PROVIDER_META).map(([provider, meta]) => [
+        provider,
+        meta.label,
+      ]),
+    ),
   };
 
   const summaryMetrics = summary?.metrics;

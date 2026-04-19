@@ -2,6 +2,16 @@ import {
   MEMORY_MOOD_VALUES,
   USER_SETTINGS_DEFAULTS,
 } from "@repo/user-settings/lib/user-settings";
+import {
+  INTEGRATION_COMING_SOON_BADGE_LABEL,
+  INTEGRATION_COMING_SOON_HELPER_TEXT,
+  INTEGRATION_PROVIDER_CATALOG,
+  INTEGRATION_PROVIDER_META,
+  INTEGRATION_PROVIDERS,
+  INTEGRATION_PROVIDER_STATUS,
+  type IntegrationProvider,
+  type IntegrationProviderStatus,
+} from "@repo/user-settings/lib/integration-provider-catalog";
 
 export const MOOD_EMOJI: Record<string, string> = {
   happy: "😊",
@@ -27,67 +37,13 @@ export const FOCUS_AREAS = [
 ] as const;
 
 export const SETTINGS_DEFAULTS = USER_SETTINGS_DEFAULTS;
-
-export const INTEGRATION_PROVIDERS = [
-  "google_calendar",
-  "google_fit",
-  "gmail_summary",
-  "spotify",
-  "apple_health",
-  "apple_calendar",
-  "notion",
-  "slack",
-  "strava",
-  "todoist",
-] as const;
-
-export type IntegrationProvider = (typeof INTEGRATION_PROVIDERS)[number];
-
-export const INTEGRATION_PROVIDER_META: Record<
-  IntegrationProvider,
-  {
-    label: string;
-    description: string;
-  }
-> = {
-  google_calendar: {
-    label: "Google Calendar",
-    description: "Use calendar activity as daily context",
-  },
-  google_fit: {
-    label: "Google Fit",
-    description: "Sync steps and sleep metrics",
-  },
-  gmail_summary: {
-    label: "Gmail Summary",
-    description: "Summarize inbox activity signals",
-  },
-  spotify: {
-    label: "Spotify",
-    description: "Include listening activity signals",
-  },
-  apple_health: {
-    label: "Apple Health",
-    description: "Upload device health metrics",
-  },
-  apple_calendar: {
-    label: "Apple Calendar",
-    description: "Capture calendar context from Apple devices",
-  },
-  notion: {
-    label: "Notion",
-    description: "Bring notes and workspace updates into context",
-  },
-  slack: {
-    label: "Slack",
-    description: "Add team communication signals",
-  },
-  strava: {
-    label: "Strava",
-    description: "Sync workouts and movement trends",
-  },
-  todoist: {
-    label: "Todoist",
-    description: "Include tasks and completion patterns",
-  },
+export {
+  INTEGRATION_COMING_SOON_BADGE_LABEL,
+  INTEGRATION_COMING_SOON_HELPER_TEXT,
+  INTEGRATION_PROVIDER_CATALOG,
+  INTEGRATION_PROVIDER_META,
+  INTEGRATION_PROVIDERS,
+  INTEGRATION_PROVIDER_STATUS,
 };
+
+export type { IntegrationProvider, IntegrationProviderStatus };

@@ -41,7 +41,9 @@ import {
   type UserSettingsPatchDto,
 } from "@repo/user-settings/lib/user-settings";
 import {
+  INTEGRATION_COMING_SOON_HELPER_TEXT,
   INTEGRATION_PROVIDER_META,
+  INTEGRATION_PROVIDER_STATUS,
   SETTINGS_DEFAULTS,
 } from "@repo/ui/lib/constants";
 import {
@@ -169,11 +171,7 @@ function isOAuthProvider(provider: string): boolean {
     provider === "google_calendar" ||
     provider === "google_fit" ||
     provider === "gmail_summary" ||
-    provider === "spotify" ||
-    provider === "notion" ||
-    provider === "slack" ||
-    provider === "strava" ||
-    provider === "todoist"
+    provider === "spotify"
   );
 }
 
@@ -1894,6 +1892,33 @@ const SettingsScreen = () => {
 
   const handleConnectIntegration = useCallback(
     async (provider: string) => {
+      const providerStatus =
+        INTEGRATION_PROVIDER_STATUS[
+          provider as keyof typeof INTEGRATION_PROVIDER_STATUS
+        ];
+      if (providerStatus === "coming_soon") {
+        setIntegrationFeedback({
+          type: "error",
+          message:
+            INTEGRATION_PROVIDER_META[
+              provider as keyof typeof INTEGRATION_PROVIDER_META
+            ]?.helperText ?? INTEGRATION_COMING_SOON_HELPER_TEXT,
+        });
+        return;
+      }
+
+      if (
+        !(supportedProviders ?? []).some(
+          (supportedProvider) => supportedProvider === provider,
+        )
+      ) {
+        setIntegrationFeedback({
+          type: "error",
+          message: "This integration is currently unavailable.",
+        });
+        return;
+      }
+
       setProviderAction(provider, "connect");
       setIntegrationFeedback(null);
 
@@ -1987,7 +2012,7 @@ const SettingsScreen = () => {
         setProviderAction(provider, undefined);
       }
     },
-    [connectIntegration, setProviderAction],
+    [connectIntegration, setProviderAction, supportedProviders],
   );
 
   const handleDisconnectIntegration = useCallback(
@@ -2227,9 +2252,8 @@ const SettingsScreen = () => {
     spotify: "musical-notes",
     google_fit: "fitness",
     notion: "document-text",
-    slack: "chatbubbles",
-    strava: "bicycle",
-    todoist: "list",
+    microsoft_teams: "people",
+    microsoft_outlook: "mail-open",
   };
   const integrationNames: Record<string, string> = {
     apple_health: "Apple Health",
@@ -2239,9 +2263,8 @@ const SettingsScreen = () => {
     spotify: "Spotify",
     google_fit: "Google Fit",
     notion: "Notion",
-    slack: "Slack",
-    strava: "Strava",
-    todoist: "Todoist",
+    microsoft_teams: "Microsoft Teams",
+    microsoft_outlook: "Microsoft Outlook",
   };
 
   const integrationByProvider = new Map(
@@ -2262,6 +2285,7 @@ const SettingsScreen = () => {
   const providerList = [
     ...new Set([
       ...(supportedProviders ?? []),
+      ...(integrations ?? []).map((integration) => integration.provider),
       ...Object.keys(INTEGRATION_PROVIDER_META),
     ]),
   ];

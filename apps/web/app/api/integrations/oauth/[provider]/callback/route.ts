@@ -10,6 +10,10 @@ import {
   safeReturnPath,
 } from "@/lib/integrations-oauth";
 import { captureException, logInfo, logWarn } from "@/lib/observability";
+import {
+  getIntegrationProviderDefinition,
+  isIntegrationProviderComingSoon,
+} from "@repo/user-settings/lib/integration-provider-catalog";
 
 const OAUTH_COOKIE_PREFIX = "daylog_oauth_state_";
 
@@ -252,51 +256,6 @@ async function exchangeCodeForAccessToken(
       .filter(Boolean);
   };
 
-  if (provider === "slack") {
-    if (tokenPayload.ok === false) {
-      const providerError =
-        typeof tokenPayload.error === "string"
-          ? tokenPayload.error
-          : "unknown_error";
-      throw new Error(
-        `OAuth token exchange returned Slack error: ${providerError}`,
-      );
-    }
-
-    const authedUser =
-      typeof tokenPayload.authed_user === "object" &&
-      tokenPayload.authed_user !== null
-        ? (tokenPayload.authed_user as Record<string, unknown>)
-        : null;
-
-    const userToken =
-      typeof authedUser?.access_token === "string"
-        ? authedUser.access_token.trim()
-        : "";
-    const botToken =
-      typeof tokenPayload.access_token === "string"
-        ? tokenPayload.access_token.trim()
-        : "";
-    const accessToken = userToken || botToken;
-
-    if (!accessToken) {
-      throw new Error("OAuth token exchange returned no access token");
-    }
-
-    const scopeFromUser =
-      typeof authedUser?.scope === "string" ? authedUser.scope : undefined;
-    const scopeFromPayload =
-      typeof tokenPayload.scope === "string" ? tokenPayload.scope : undefined;
-    const grantedScope = splitScopes(scopeFromUser ?? scopeFromPayload);
-
-    return {
-      accessToken,
-      refreshToken: undefined,
-      accessTokenExpiresAt: undefined,
-      grantedScope: grantedScope.length > 0 ? grantedScope : config.scopes,
-    };
-  }
-
   const accessToken =
     typeof tokenPayload.access_token === "string"
       ? tokenPayload.access_token.trim()
@@ -366,6 +325,23 @@ export async function GET(
     providerError: providerError ?? null,
     providerErrorDescription: providerErrorDescription ?? null,
   });
+
+  if (isIntegrationProviderComingSoon(provider)) {
+    const definition = getIntegrationProviderDefinition(provider);
+    logOAuthCallback("warn", "oauth_callback_coming_soon_provider", {
+      provider,
+      message: definition?.helperText ?? "This integration is coming soon.",
+    });
+    return NextResponse.redirect(
+      buildSettingsRedirect(
+        request,
+        provider,
+        "error",
+        definition?.helperText ?? "This integration is coming soon.",
+        "/dashboard/settings",
+      ),
+    );
+  }
 
   if (!isOAuthProvider(provider)) {
     logOAuthCallback("warn", "oauth_callback_unsupported_provider", {
