@@ -438,23 +438,20 @@ async function deleteExportJobsByUserBatch(
   cursor: string | null,
   batchSize: number,
 ): Promise<BatchDeleteResult> {
-  const page = await (ctx.db as any)
+  const page = await ctx.db
     .query("exportJobs")
-    .withIndex("by_user_requestedAt", (q: any) => q.eq("userId", userId))
+    .withIndex("by_user_requestedAt", (q) => q.eq("userId", userId))
     .paginate({
       numItems: batchSize,
       cursor,
     });
 
   let deleted = 0;
-  for (const job of page.page as Array<{
-    _id: string;
-    artifactStorageId?: string;
-  }>) {
+  for (const job of page.page) {
     if (typeof job.artifactStorageId === "string" && job.artifactStorageId) {
       await safeDeleteStorageBlob(ctx, job.artifactStorageId);
     }
-    await (ctx.db as any).delete(job._id);
+    await ctx.db.delete(job._id);
     deleted += 1;
   }
 
@@ -471,17 +468,17 @@ async function deleteRestoreJobsByUserBatch(
   cursor: string | null,
   batchSize: number,
 ): Promise<BatchDeleteResult> {
-  const page = await (ctx.db as any)
+  const page = await ctx.db
     .query("restoreJobs")
-    .withIndex("by_user_requestedAt", (q: any) => q.eq("userId", userId))
+    .withIndex("by_user_requestedAt", (q) => q.eq("userId", userId))
     .paginate({
       numItems: batchSize,
       cursor,
     });
 
   let deleted = 0;
-  for (const job of page.page as Array<{ _id: string }>) {
-    await (ctx.db as any).delete(job._id);
+  for (const job of page.page) {
+    await ctx.db.delete(job._id);
     deleted += 1;
   }
 
@@ -498,17 +495,17 @@ async function deleteSummaryQualityEvaluationsByUserBatch(
   cursor: string | null,
   batchSize: number,
 ): Promise<BatchDeleteResult> {
-  const page = await (ctx.db as any)
+  const page = await ctx.db
     .query("summaryQualityEvaluations")
-    .withIndex("by_user_day_evaluatedAt", (q: any) => q.eq("userId", userId))
+    .withIndex("by_user_day_evaluatedAt", (q) => q.eq("userId", userId))
     .paginate({
       numItems: batchSize,
       cursor,
     });
 
   let deleted = 0;
-  for (const evaluation of page.page as Array<{ _id: string }>) {
-    await (ctx.db as any).delete(evaluation._id);
+  for (const evaluation of page.page) {
+    await ctx.db.delete(evaluation._id);
     deleted += 1;
   }
 
@@ -525,17 +522,17 @@ async function deleteSummaryGenerationEventsByUserBatch(
   cursor: string | null,
   batchSize: number,
 ): Promise<BatchDeleteResult> {
-  const page = await (ctx.db as any)
+  const page = await ctx.db
     .query("summaryGenerationEvents")
-    .withIndex("by_user_day_createdAt", (q: any) => q.eq("userId", userId))
+    .withIndex("by_user_day_createdAt", (q) => q.eq("userId", userId))
     .paginate({
       numItems: batchSize,
       cursor,
     });
 
   let deleted = 0;
-  for (const event of page.page as Array<{ _id: string }>) {
-    await (ctx.db as any).delete(event._id);
+  for (const event of page.page) {
+    await ctx.db.delete(event._id);
     deleted += 1;
   }
 
@@ -552,17 +549,17 @@ async function deleteIntegrationHealthEventsByUserBatch(
   cursor: string | null,
   batchSize: number,
 ): Promise<BatchDeleteResult> {
-  const page = await (ctx.db as any)
+  const page = await ctx.db
     .query("integrationHealthEvents")
-    .withIndex("by_userId_at", (q: any) => q.eq("userId", userId))
+    .withIndex("by_userId_at", (q) => q.eq("userId", userId))
     .paginate({
       numItems: batchSize,
       cursor,
     });
 
   let deleted = 0;
-  for (const event of page.page as Array<{ _id: string }>) {
-    await (ctx.db as any).delete(event._id);
+  for (const event of page.page) {
+    await ctx.db.delete(event._id);
     deleted += 1;
   }
 
@@ -633,17 +630,17 @@ async function deletePlatformAuditEventsByUserBatch(
   cursor: string | null,
   batchSize: number,
 ): Promise<BatchDeleteResult> {
-  const page = await (ctx.db as any)
+  const page = await ctx.db
     .query("platformAuditEvents")
-    .withIndex("by_actorUserId_at", (q: any) => q.eq("actorUserId", userId))
+    .withIndex("by_actorUserId_at", (q) => q.eq("actorUserId", userId))
     .paginate({
       numItems: batchSize,
       cursor,
     });
 
   let deleted = 0;
-  for (const event of page.page as Array<{ _id: string }>) {
-    await (ctx.db as any).delete(event._id);
+  for (const event of page.page) {
+    await ctx.db.delete(event._id);
     deleted += 1;
   }
 
