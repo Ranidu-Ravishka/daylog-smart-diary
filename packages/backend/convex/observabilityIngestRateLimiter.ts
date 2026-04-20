@@ -1,5 +1,7 @@
 import { v } from "convex/values";
 import { internalMutation } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
+import type { DatabaseWriter } from "./_generated/server";
 
 const CLIENT_IP_HEADER_CANDIDATES = [
   "cf-connecting-ip",
@@ -33,22 +35,25 @@ type BucketConfig = {
   refillPerSecond: number;
 };
 
-type RateLimitStateRow = {
-  _id?: string;
-  tokens?: number;
-  lastRefillAt?: number;
-  allowedRequests?: number;
-  blockedRequests?: number;
-  burstAttempts?: number;
-};
+type RateLimitDb = Pick<DatabaseWriter, "query" | "insert" | "patch">;
+type RateLimitStateRow = Pick<
+  Doc<"observabilityIngestRateLimits">,
+  | "_id"
+  | "tokens"
+  | "lastRefillAt"
+  | "allowedRequests"
+  | "blockedRequests"
+  | "burstAttempts"
+>;
 
-type RateLimitMetricsRow = {
-  _id?: string;
-  epochMinute?: number;
-  allowedRequests?: number;
-  blockedRequests?: number;
-  burstAttempts?: number;
-};
+type RateLimitMetricsRow = Pick<
+  Doc<"observabilityIngestRateLimitMetrics">,
+  | "_id"
+  | "epochMinute"
+  | "allowedRequests"
+  | "blockedRequests"
+  | "burstAttempts"
+>;
 
 type ScopeEvaluation = {
   scope: RateLimitScope;
@@ -231,7 +236,7 @@ function getInitialTokens(
   row: RateLimitStateRow | null,
   capacity: number,
 ): number {
-  if (!row || typeof row.tokens !== "number" || !Number.isFinite(row.tokens)) {
+  if (!row) {
     return capacity;
   }
 
@@ -242,11 +247,7 @@ function getInitialLastRefillAt(
   row: RateLimitStateRow | null,
   now: number,
 ): number {
-  if (
-    !row ||
-    typeof row.lastRefillAt !== "number" ||
-    !Number.isFinite(row.lastRefillAt)
-  ) {
+  if (!row) {
     return now;
   }
 
@@ -257,7 +258,7 @@ function getCounter(
   row: RateLimitStateRow | null,
   key: "allowedRequests" | "blockedRequests" | "burstAttempts",
 ): number {
-  if (!row || typeof row[key] !== "number" || !Number.isFinite(row[key])) {
+  if (!row) {
     return 0;
   }
 
@@ -265,18 +266,18 @@ function getCounter(
 }
 
 async function fetchRateLimitRow(
-  db: any,
+  db: RateLimitDb,
   scope: RateLimitScope,
   key: string,
 ): Promise<RateLimitStateRow | null> {
   return await db
     .query("observabilityIngestRateLimits")
-    .withIndex("by_scope_key", (q: any) => q.eq("scope", scope).eq("key", key))
+    .withIndex("by_scope_key", (q) => q.eq("scope", scope).eq("key", key))
     .unique();
 }
 
 async function upsertScopeRow(
-  db: any,
+  db: RateLimitDb,
   evaluation: ScopeEvaluation,
   allowed: boolean,
   now: number,
@@ -322,7 +323,7 @@ async function upsertScopeRow(
 }
 
 async function upsertMetricsRow(
-  db: any,
+  db: RateLimitDb,
   args: {
     now: number;
     allowed: boolean;
@@ -337,7 +338,7 @@ async function upsertMetricsRow(
 
   const existing: RateLimitMetricsRow | null = await db
     .query("observabilityIngestRateLimitMetrics")
-    .withIndex("by_slot_shard", (q: any) =>
+    .withIndex("by_slot_shard", (q) =>
       q.eq("slotMinute", slotMinute).eq("shard", shard),
     )
     .unique();
@@ -387,7 +388,7 @@ export const evaluateObservabilityIngestRateLimitInternal = internalMutation({
   },
   handler: async (ctx, args): Promise<ObservabilityIngestRateLimitDecision> => {
     const now = normalizeNow(args.receivedAt);
-    const db = ctx.db as any;
+    const db = ctx.db;
 
     const configs: Array<BucketConfig & { key: string }> = [
       {

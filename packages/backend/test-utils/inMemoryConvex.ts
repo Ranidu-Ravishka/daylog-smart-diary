@@ -494,6 +494,14 @@ export class InMemoryDb {
     return found ? { ...found } : null;
   }
 
+  normalizeId(table: TableName, id: string): string | null {
+    if (typeof id !== "string" || id.trim().length === 0) {
+      return null;
+    }
+
+    return id.startsWith(`${table}_`) ? id : null;
+  }
+
   async delete(id: string): Promise<void> {
     for (const table of Object.keys(this.tables) as TableName[]) {
       const index = this.tables[table].findIndex((item) => item._id === id);

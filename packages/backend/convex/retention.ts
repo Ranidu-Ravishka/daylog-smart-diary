@@ -350,16 +350,16 @@ async function purgeSummaryGenerationQuotas(
   maxDeletes: number,
   dryRun: boolean,
 ): Promise<number> {
-  const staleQuotas = await (ctx.db as any)
+  const staleQuotas = await ctx.db
     .query("summaryGenerationQuotas")
-    .withIndex("by_quotaDayKey", (q: any) => q.lt("quotaDayKey", cutoffDayKey))
+    .withIndex("by_quotaDayKey", (q) => q.lt("quotaDayKey", cutoffDayKey))
     .order("asc")
     .take(maxDeletes);
 
   if (dryRun) return staleQuotas.length;
 
   for (const quota of staleQuotas) {
-    await (ctx.db as any).delete(quota._id);
+    await ctx.db.delete(quota._id);
   }
 
   return staleQuotas.length;
@@ -371,16 +371,16 @@ async function purgeIntegrationSyncRuns(
   maxDeletes: number,
   dryRun: boolean,
 ): Promise<number> {
-  const staleRuns = await (ctx.db as any)
+  const staleRuns = await ctx.db
     .query("integrationSyncRuns")
-    .withIndex("by_updatedAt", (q: any) => q.lt("updatedAt", cutoff))
+    .withIndex("by_updatedAt", (q) => q.lt("updatedAt", cutoff))
     .order("asc")
     .take(maxDeletes);
 
   if (dryRun) return staleRuns.length;
 
   for (const run of staleRuns) {
-    await (ctx.db as any).delete(run._id);
+    await ctx.db.delete(run._id);
   }
 
   return staleRuns.length;
@@ -392,16 +392,16 @@ async function purgeIntegrationHealthEvents(
   maxDeletes: number,
   dryRun: boolean,
 ): Promise<number> {
-  const staleEvents = await (ctx.db as any)
+  const staleEvents = await ctx.db
     .query("integrationHealthEvents")
-    .withIndex("by_at", (q: any) => q.lt("at", cutoff))
+    .withIndex("by_at", (q) => q.lt("at", cutoff))
     .order("asc")
     .take(maxDeletes);
 
   if (dryRun) return staleEvents.length;
 
   for (const event of staleEvents) {
-    await (ctx.db as any).delete(event._id);
+    await ctx.db.delete(event._id);
   }
 
   return staleEvents.length;
@@ -434,16 +434,16 @@ async function purgePlatformAuditEvents(
   maxDeletes: number,
   dryRun: boolean,
 ): Promise<number> {
-  const staleEvents = await (ctx.db as any)
+  const staleEvents = await ctx.db
     .query("platformAuditEvents")
-    .withIndex("by_at", (q: any) => q.lt("at", cutoff))
+    .withIndex("by_at", (q) => q.lt("at", cutoff))
     .order("asc")
     .take(maxDeletes);
 
   if (dryRun) return staleEvents.length;
 
   for (const event of staleEvents) {
-    await (ctx.db as any).delete(event._id);
+    await ctx.db.delete(event._id);
   }
 
   return staleEvents.length;
@@ -455,9 +455,9 @@ async function purgeExportJobs(
   maxDeletes: number,
   dryRun: boolean,
 ): Promise<number> {
-  const staleJobs = await (ctx.db as any)
+  const staleJobs = await ctx.db
     .query("exportJobs")
-    .withIndex("by_requestedAt", (q: any) => q.lt("requestedAt", cutoff))
+    .withIndex("by_requestedAt", (q) => q.lt("requestedAt", cutoff))
     .order("asc")
     .take(maxDeletes);
 
@@ -472,7 +472,7 @@ async function purgeExportJobs(
       }
     }
 
-    await (ctx.db as any).delete(job._id);
+    await ctx.db.delete(job._id);
   }
 
   return staleJobs.length;
@@ -484,16 +484,16 @@ async function purgeRestoreJobs(
   maxDeletes: number,
   dryRun: boolean,
 ): Promise<number> {
-  const staleJobs = await (ctx.db as any)
+  const staleJobs = await ctx.db
     .query("restoreJobs")
-    .withIndex("by_requestedAt", (q: any) => q.lt("requestedAt", cutoff))
+    .withIndex("by_requestedAt", (q) => q.lt("requestedAt", cutoff))
     .order("asc")
     .take(maxDeletes);
 
   if (dryRun) return staleJobs.length;
 
   for (const job of staleJobs) {
-    await (ctx.db as any).delete(job._id);
+    await ctx.db.delete(job._id);
   }
 
   return staleJobs.length;
@@ -530,16 +530,16 @@ async function purgeInfoEvents(
   maxDeletes: number,
   dryRun: boolean,
 ): Promise<number> {
-  const staleEvents = await (ctx.db as any)
+  const staleEvents = await ctx.db
     .query("observabilityInfoEvents")
-    .withIndex("by_receivedAt", (q: any) => q.lt("receivedAt", cutoff))
+    .withIndex("by_receivedAt", (q) => q.lt("receivedAt", cutoff))
     .order("asc")
     .take(maxDeletes);
 
   if (dryRun) return staleEvents.length;
 
   for (const event of staleEvents) {
-    await (ctx.db as any).delete(event._id);
+    await ctx.db.delete(event._id);
   }
 
   return staleEvents.length;

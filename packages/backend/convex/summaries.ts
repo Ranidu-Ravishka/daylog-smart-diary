@@ -9,10 +9,11 @@ import {
   getRetentionDeleteBatchSize,
   getSummaryDailyGenerationLimit,
 } from "./runtimeConfig";
-import type { Doc, Id } from "./_generated/dataModel";
+import type { Doc, Id, TableNames } from "./_generated/dataModel";
 import type { ActionCtx, MutationCtx } from "./_generated/server";
 import { applyDashboardMetricsDelta } from "./dashboardMetrics";
 import { captureException, logInfo } from "./observability";
+import type { IntegrationDailyContext } from "./integrations.dailyData";
 import {
   buildDaySensitiveWritePayload,
   buildIntegrationDailySensitiveWritePayload,
@@ -23,9 +24,6 @@ import {
   readMemorySensitiveFields,
   readSummarySensitiveFields,
   withSummarySensitiveFields,
-  type DaySensitiveRecord,
-  type IntegrationDailySensitiveRecord,
-  type MemorySensitiveRecord,
   type SummarySensitiveRecord,
 } from "./sensitiveDataFields";
 
@@ -49,9 +47,6 @@ type UpsertSummaryInput = {
 };
 
 type SummaryDocRecord = Doc<"daySummaries"> & SummarySensitiveRecord;
-type MemoryDocRecord = Doc<"memories"> & MemorySensitiveRecord;
-type DayDocRecord = Doc<"days"> & DaySensitiveRecord;
-type IntegrationDocRecord = IntegrationDailySensitiveRecord;
 
 export async function upsertSummaryForUserDay(
   db: SummaryDb,
@@ -385,6 +380,102 @@ const exportCountsObjectValidator = v.object({
   days: v.number(),
   integrationDailyData: v.number(),
 });
+const exportMetricsObjectValidator = v.object({
+  steps: v.optional(v.number()),
+  sleepMinutes: v.optional(v.number()),
+  screenTimeMinutes: v.optional(v.number()),
+  spendingTotal: v.optional(v.number()),
+});
+const integrationLocationStayPointObjectValidator = v.object({
+  label: v.string(),
+  startedAt: v.number(),
+  endedAt: v.number(),
+  durationMinutes: v.number(),
+  latitude: v.optional(v.number()),
+  longitude: v.optional(v.number()),
+  radiusMeters: v.optional(v.number()),
+});
+const integrationDailyContextObjectValidator = v.object({
+  schemaVersion: v.optional(v.number()),
+  location: v.optional(
+    v.object({
+      mode: v.union(
+        v.literal("foreground"),
+        v.literal("background_controlled"),
+      ),
+      totalTrackedMinutes: v.optional(v.number()),
+      totalDistanceMeters: v.optional(v.number()),
+      stayPoints: v.optional(
+        v.array(integrationLocationStayPointObjectValidator),
+      ),
+    }),
+  ),
+  fitness: v.optional(
+    v.object({
+      steps: v.optional(v.number()),
+      distanceMeters: v.optional(v.number()),
+      activeMinutes: v.optional(v.number()),
+      idleMinutes: v.optional(v.number()),
+      source: v.optional(v.string()),
+    }),
+  ),
+  calendar: v.optional(
+    v.object({
+      meetingsCount: v.optional(v.number()),
+      busyMinutes: v.optional(v.number()),
+      remindersCount: v.optional(v.number()),
+      eventTitles: v.optional(v.array(v.string())),
+    }),
+  ),
+  activitySummary: v.optional(
+    v.object({
+      callsCount: v.optional(v.number()),
+      callDurationMinutes: v.optional(v.number()),
+      mood: v.optional(v.string()),
+      moodConfidence: v.optional(v.number()),
+      activityLevel: v.optional(
+        v.union(v.literal("active"), v.literal("mixed"), v.literal("idle")),
+      ),
+    }),
+  ),
+});
+const exportSummaryRowObjectValidator = v.object({
+  dayKey: v.string(),
+  story: v.string(),
+  highlights: v.array(v.string()),
+  metrics: v.optional(exportMetricsObjectValidator),
+  sourcesUsed: v.array(v.string()),
+  generatedAt: v.number(),
+});
+const exportMemoryRowObjectValidator = v.object({
+  clientRequestId: v.optional(v.string()),
+  dayKey: v.string(),
+  title: v.string(),
+  description: v.optional(v.string()),
+  mood: v.optional(v.string()),
+  happenedAt: v.number(),
+});
+const exportDayRowObjectValidator = v.object({
+  dayKey: v.string(),
+  rating: v.optional(v.number()),
+  manualNotes: v.array(v.string()),
+  peopleTags: v.array(v.string()),
+});
+const exportIntegrationRowObjectValidator = v.object({
+  provider: v.string(),
+  dayKey: v.string(),
+  syncedAt: v.number(),
+  summary: v.optional(v.string()),
+  metrics: v.optional(exportMetricsObjectValidator),
+  signals: v.optional(v.array(v.string())),
+  context: v.optional(integrationDailyContextObjectValidator),
+});
+const restoreRowObjectValidator = v.union(
+  exportSummaryRowObjectValidator,
+  exportMemoryRowObjectValidator,
+  exportDayRowObjectValidator,
+  exportIntegrationRowObjectValidator,
+);
 
 type ExportDataset = "summaries" | "memories" | "days" | "integrationDailyData";
 type ExportFormat = "json" | "txt";
@@ -431,7 +522,7 @@ type ExportIntegrationRow = {
   summary?: string;
   metrics?: ExportMetrics;
   signals?: string[];
-  context?: unknown;
+  context?: IntegrationDailyContext;
 };
 
 type ExportCounts = {
@@ -490,10 +581,16 @@ type RestoreBatchResult = {
 type RestoreBatchDatasetArgs = {
   userId: Id<"user">;
   dataset: ExportDataset;
-  rows: unknown[];
+  rows: RestoreImportRow[];
   conflictMode: RestoreConflictMode;
   allowPartial: boolean;
 };
+
+type RestoreImportRow =
+  | ExportSummaryRow
+  | ExportMemoryRow
+  | ExportDayRow
+  | ExportIntegrationRow;
 
 function createEmptyRestoreBatchResult(): RestoreBatchResult {
   return {
@@ -627,6 +724,244 @@ function parseOptionalMetrics(
   return hasValues ? parsed : undefined;
 }
 
+function parseLocationMode(
+  value: unknown,
+  fieldName: string,
+): "foreground" | "background_controlled" {
+  if (value === "foreground" || value === "background_controlled") {
+    return value;
+  }
+
+  throw new Error(
+    `Invalid ${fieldName}: expected "foreground" or "background_controlled"`,
+  );
+}
+
+function parseIntegrationStayPoint(
+  value: unknown,
+  fieldName: string,
+): NonNullable<
+  NonNullable<IntegrationDailyContext["location"]>["stayPoints"]
+>[number] {
+  if (!isRecord(value)) {
+    throw new Error(`Invalid ${fieldName}: expected object`);
+  }
+
+  return {
+    label: assertNonEmptyString(value.label, `${fieldName}.label`),
+    startedAt: parseFiniteNumber(value.startedAt, `${fieldName}.startedAt`),
+    endedAt: parseFiniteNumber(value.endedAt, `${fieldName}.endedAt`),
+    durationMinutes: parseFiniteNumber(
+      value.durationMinutes,
+      `${fieldName}.durationMinutes`,
+    ),
+    latitude: parseOptionalFiniteNumber(
+      value.latitude,
+      `${fieldName}.latitude`,
+    ),
+    longitude: parseOptionalFiniteNumber(
+      value.longitude,
+      `${fieldName}.longitude`,
+    ),
+    radiusMeters: parseOptionalFiniteNumber(
+      value.radiusMeters,
+      `${fieldName}.radiusMeters`,
+    ),
+  };
+}
+
+function parseOptionalIntegrationLocation(
+  value: unknown,
+  fieldName: string,
+): IntegrationDailyContext["location"] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    throw new Error(`Invalid ${fieldName}: expected object`);
+  }
+
+  const rawStayPoints = value.stayPoints;
+  const stayPoints =
+    rawStayPoints === undefined
+      ? undefined
+      : Array.isArray(rawStayPoints)
+        ? rawStayPoints.map((item, index) =>
+            parseIntegrationStayPoint(
+              item,
+              `${fieldName}.stayPoints[${index}]`,
+            ),
+          )
+        : (() => {
+            throw new Error(`Invalid ${fieldName}.stayPoints: expected array`);
+          })();
+
+  return {
+    mode: parseLocationMode(value.mode, `${fieldName}.mode`),
+    totalTrackedMinutes: parseOptionalFiniteNumber(
+      value.totalTrackedMinutes,
+      `${fieldName}.totalTrackedMinutes`,
+    ),
+    totalDistanceMeters: parseOptionalFiniteNumber(
+      value.totalDistanceMeters,
+      `${fieldName}.totalDistanceMeters`,
+    ),
+    stayPoints,
+  };
+}
+
+function parseOptionalIntegrationFitness(
+  value: unknown,
+  fieldName: string,
+): IntegrationDailyContext["fitness"] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    throw new Error(`Invalid ${fieldName}: expected object`);
+  }
+
+  return {
+    steps: parseOptionalFiniteNumber(value.steps, `${fieldName}.steps`),
+    distanceMeters: parseOptionalFiniteNumber(
+      value.distanceMeters,
+      `${fieldName}.distanceMeters`,
+    ),
+    activeMinutes: parseOptionalFiniteNumber(
+      value.activeMinutes,
+      `${fieldName}.activeMinutes`,
+    ),
+    idleMinutes: parseOptionalFiniteNumber(
+      value.idleMinutes,
+      `${fieldName}.idleMinutes`,
+    ),
+    source: parseOptionalString(value.source, `${fieldName}.source`),
+  };
+}
+
+function parseOptionalIntegrationCalendar(
+  value: unknown,
+  fieldName: string,
+): IntegrationDailyContext["calendar"] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    throw new Error(`Invalid ${fieldName}: expected object`);
+  }
+
+  return {
+    meetingsCount: parseOptionalFiniteNumber(
+      value.meetingsCount,
+      `${fieldName}.meetingsCount`,
+    ),
+    busyMinutes: parseOptionalFiniteNumber(
+      value.busyMinutes,
+      `${fieldName}.busyMinutes`,
+    ),
+    remindersCount: parseOptionalFiniteNumber(
+      value.remindersCount,
+      `${fieldName}.remindersCount`,
+    ),
+    eventTitles:
+      value.eventTitles === undefined
+        ? undefined
+        : parseStringArray(value.eventTitles, `${fieldName}.eventTitles`),
+  };
+}
+
+function parseActivityLevel(
+  value: unknown,
+  fieldName: string,
+): "active" | "mixed" | "idle" | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (value === "active" || value === "mixed" || value === "idle") {
+    return value;
+  }
+
+  throw new Error(
+    `Invalid ${fieldName}: expected "active", "mixed", or "idle"`,
+  );
+}
+
+function parseOptionalIntegrationActivitySummary(
+  value: unknown,
+  fieldName: string,
+): IntegrationDailyContext["activitySummary"] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    throw new Error(`Invalid ${fieldName}: expected object`);
+  }
+
+  return {
+    callsCount: parseOptionalFiniteNumber(
+      value.callsCount,
+      `${fieldName}.callsCount`,
+    ),
+    callDurationMinutes: parseOptionalFiniteNumber(
+      value.callDurationMinutes,
+      `${fieldName}.callDurationMinutes`,
+    ),
+    mood: parseOptionalString(value.mood, `${fieldName}.mood`),
+    moodConfidence: parseOptionalFiniteNumber(
+      value.moodConfidence,
+      `${fieldName}.moodConfidence`,
+    ),
+    activityLevel: parseActivityLevel(
+      value.activityLevel,
+      `${fieldName}.activityLevel`,
+    ),
+  };
+}
+
+function parseOptionalIntegrationContext(
+  value: unknown,
+  fieldName: string,
+): IntegrationDailyContext | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    throw new Error(`Invalid ${fieldName}: expected object`);
+  }
+
+  const parsed: IntegrationDailyContext = {
+    schemaVersion: parseOptionalFiniteNumber(
+      value.schemaVersion,
+      `${fieldName}.schemaVersion`,
+    ),
+    location: parseOptionalIntegrationLocation(
+      value.location,
+      `${fieldName}.location`,
+    ),
+    fitness: parseOptionalIntegrationFitness(
+      value.fitness,
+      `${fieldName}.fitness`,
+    ),
+    calendar: parseOptionalIntegrationCalendar(
+      value.calendar,
+      `${fieldName}.calendar`,
+    ),
+    activitySummary: parseOptionalIntegrationActivitySummary(
+      value.activitySummary,
+      `${fieldName}.activitySummary`,
+    ),
+  };
+
+  const hasValues = Object.values(parsed).some((item) => item !== undefined);
+  return hasValues ? parsed : undefined;
+}
+
 function parseSummaryRows(value: unknown): ExportSummaryRow[] {
   if (!Array.isArray(value)) {
     throw new Error("Invalid summaries: expected array");
@@ -748,15 +1083,6 @@ function parseIntegrationRows(value: unknown): ExportIntegrationRow[] {
     );
     validateDayKey(dayKey);
 
-    const rawContext = item.context;
-    if (
-      rawContext !== undefined &&
-      rawContext !== null &&
-      !isRecord(rawContext)
-    ) {
-      throw new Error(`Invalid integrationDailyData[${index}].context`);
-    }
-
     const rawSignals = item.signals;
     const parsedSignals =
       rawSignals === undefined
@@ -785,7 +1111,10 @@ function parseIntegrationRows(value: unknown): ExportIntegrationRow[] {
         `integrationDailyData[${index}].metrics`,
       ),
       signals: parsedSignals,
-      context: rawContext ?? undefined,
+      context: parseOptionalIntegrationContext(
+        item.context,
+        `integrationDailyData[${index}].context`,
+      ),
     };
   });
 }
@@ -1104,11 +1433,9 @@ function metricsEqual(
 
 async function memoryRowEquivalent(
   row: ExportMemoryRow,
-  existing: any,
+  existing: Doc<"memories">,
 ): Promise<boolean> {
-  const existingSensitive = await readMemorySensitiveFields(
-    existing as MemoryDocRecord,
-  );
+  const existingSensitive = await readMemorySensitiveFields(existing);
 
   return (
     existing.dayKey === row.dayKey &&
@@ -1121,11 +1448,9 @@ async function memoryRowEquivalent(
 
 async function summaryRowEquivalent(
   row: ExportSummaryRow,
-  existing: any,
+  existing: Doc<"daySummaries">,
 ): Promise<boolean> {
-  const existingSensitive = await readSummarySensitiveFields(
-    existing as SummaryDocRecord,
-  );
+  const existingSensitive = await readSummarySensitiveFields(existing);
 
   return (
     existing.dayKey === row.dayKey &&
@@ -1139,11 +1464,9 @@ async function summaryRowEquivalent(
 
 async function dayRowEquivalent(
   row: ExportDayRow,
-  existing: any,
+  existing: Doc<"days">,
 ): Promise<boolean> {
-  const existingSensitive = await readDaySensitiveFields(
-    existing as DayDocRecord,
-  );
+  const existingSensitive = await readDaySensitiveFields(existing);
 
   return (
     existing.dayKey === row.dayKey &&
@@ -1155,11 +1478,9 @@ async function dayRowEquivalent(
 
 async function integrationRowEquivalent(
   row: ExportIntegrationRow,
-  existing: any,
+  existing: Doc<"integrationDailyData">,
 ): Promise<boolean> {
-  const existingSensitive = await readIntegrationDailySensitiveFields(
-    existing as IntegrationDocRecord,
-  );
+  const existingSensitive = await readIntegrationDailySensitiveFields(existing);
 
   return (
     existing.provider === row.provider &&
@@ -1219,6 +1540,368 @@ function sanitizeRestoreErrorMessage(error: unknown): string {
   }
 
   return "Restore failed for one or more rows.";
+}
+
+type IdNormalizer = {
+  normalizeId<TTableName extends TableNames>(
+    tableName: TTableName,
+    id: string,
+  ): Id<TTableName> | null;
+};
+
+function requireNormalizedId<TTableName extends TableNames>(
+  db: IdNormalizer,
+  tableName: TTableName,
+  rawId: string,
+  errorMessage: string,
+): Id<TTableName> {
+  const normalized = db.normalizeId(tableName, rawId);
+  if (!normalized) {
+    throw new Error(errorMessage);
+  }
+
+  return normalized;
+}
+
+function requireSingleParsedRow<TItem>(
+  rows: TItem[],
+  errorMessage: string,
+): TItem {
+  const row = rows[0];
+  if (!row) {
+    throw new Error(errorMessage);
+  }
+
+  return row;
+}
+
+function parseSummaryRestoreRow(rawRow: unknown): ExportSummaryRow {
+  return requireSingleParsedRow(
+    parseSummaryRows([rawRow]),
+    "Invalid summary restore row payload.",
+  );
+}
+
+function parseMemoryRestoreRow(rawRow: unknown): ExportMemoryRow {
+  return requireSingleParsedRow(
+    parseMemoryRows([rawRow]),
+    "Invalid memory restore row payload.",
+  );
+}
+
+function parseDayRestoreRow(rawRow: unknown): ExportDayRow {
+  return requireSingleParsedRow(
+    parseDayRows([rawRow]),
+    "Invalid day restore row payload.",
+  );
+}
+
+function parseIntegrationRestoreRow(rawRow: unknown): ExportIntegrationRow {
+  return requireSingleParsedRow(
+    parseIntegrationRows([rawRow]),
+    "Invalid integration restore row payload.",
+  );
+}
+
+type RestoreRowOutcome = "inserted" | "updated" | "skipped" | "conflict";
+
+function applyRestoreOutcome(
+  result: RestoreBatchResult,
+  outcome: RestoreRowOutcome,
+): void {
+  if (outcome === "inserted") {
+    result.inserted += 1;
+    return;
+  }
+
+  if (outcome === "updated") {
+    result.updated += 1;
+    return;
+  }
+
+  if (outcome === "skipped") {
+    result.skipped += 1;
+    return;
+  }
+
+  result.conflicts += 1;
+  result.skipped += 1;
+}
+
+async function restoreSummaryDatasetRow(
+  db: MutationCtx["db"],
+  args: {
+    userId: Id<"user">;
+    row: ExportSummaryRow;
+    conflictMode: RestoreConflictMode;
+  },
+): Promise<RestoreRowOutcome> {
+  const existing = await db
+    .query("daySummaries")
+    .withIndex("by_user_day", (q) =>
+      q.eq("userId", args.userId).eq("dayKey", args.row.dayKey),
+    )
+    .unique();
+
+  const encryptedPayload = await buildSummarySensitiveWritePayload({
+    userId: args.userId,
+    story: args.row.story,
+    highlights: args.row.highlights,
+    sensitiveDataNonce: existing?.sensitiveDataNonce,
+  });
+
+  if (!existing) {
+    await db.insert("daySummaries", {
+      userId: args.userId,
+      dayKey: args.row.dayKey,
+      ...encryptedPayload,
+      metrics: args.row.metrics,
+      sourcesUsed: args.row.sourcesUsed,
+      generatedAt: args.row.generatedAt,
+    });
+    return "inserted";
+  }
+
+  if (await summaryRowEquivalent(args.row, existing)) {
+    return "skipped";
+  }
+
+  if (args.conflictMode === "overwrite") {
+    await db.patch(existing._id, {
+      ...encryptedPayload,
+      metrics: args.row.metrics,
+      sourcesUsed: args.row.sourcesUsed,
+      generatedAt: args.row.generatedAt,
+    });
+    return "updated";
+  }
+
+  return "conflict";
+}
+
+async function restoreDayDatasetRow(
+  db: MutationCtx["db"],
+  args: {
+    userId: Id<"user">;
+    row: ExportDayRow;
+    conflictMode: RestoreConflictMode;
+  },
+): Promise<RestoreRowOutcome> {
+  const existing = await db
+    .query("days")
+    .withIndex("by_user_day", (q) =>
+      q.eq("userId", args.userId).eq("dayKey", args.row.dayKey),
+    )
+    .unique();
+
+  const encryptedPayload = await buildDaySensitiveWritePayload({
+    userId: args.userId,
+    manualNotes: args.row.manualNotes,
+    peopleTags: args.row.peopleTags,
+    sensitiveDataNonce: existing?.sensitiveDataNonce,
+  });
+
+  if (!existing) {
+    await db.insert("days", {
+      userId: args.userId,
+      dayKey: args.row.dayKey,
+      rating: args.row.rating,
+      ...encryptedPayload,
+    });
+    return "inserted";
+  }
+
+  if (await dayRowEquivalent(args.row, existing)) {
+    return "skipped";
+  }
+
+  if (args.conflictMode === "overwrite") {
+    await db.patch(existing._id, {
+      rating: args.row.rating,
+      ...encryptedPayload,
+    });
+    return "updated";
+  }
+
+  return "conflict";
+}
+
+async function restoreIntegrationDatasetRow(
+  db: MutationCtx["db"],
+  args: {
+    userId: Id<"user">;
+    row: ExportIntegrationRow;
+    conflictMode: RestoreConflictMode;
+  },
+): Promise<RestoreRowOutcome> {
+  const existing = await db
+    .query("integrationDailyData")
+    .withIndex("by_user_provider_day", (q) =>
+      q
+        .eq("userId", args.userId)
+        .eq("provider", args.row.provider)
+        .eq("dayKey", args.row.dayKey),
+    )
+    .unique();
+
+  const encryptedPayload = await buildIntegrationDailySensitiveWritePayload({
+    userId: args.userId,
+    summary: args.row.summary,
+    signals: args.row.signals,
+    context: args.row.context,
+    sensitiveDataNonce: existing?.sensitiveDataNonce,
+  });
+
+  if (!existing) {
+    await db.insert("integrationDailyData", {
+      userId: args.userId,
+      provider: args.row.provider,
+      dayKey: args.row.dayKey,
+      syncedAt: args.row.syncedAt,
+      ...encryptedPayload,
+      metrics: args.row.metrics,
+    });
+    return "inserted";
+  }
+
+  if (await integrationRowEquivalent(args.row, existing)) {
+    return "skipped";
+  }
+
+  if (args.conflictMode === "overwrite") {
+    await db.patch(existing._id, {
+      syncedAt: args.row.syncedAt,
+      ...encryptedPayload,
+      metrics: args.row.metrics,
+    });
+    return "updated";
+  }
+
+  return "conflict";
+}
+
+async function restoreMemoryDatasetRow(
+  db: MutationCtx["db"],
+  args: {
+    userId: Id<"user">;
+    row: ExportMemoryRow;
+    conflictMode: RestoreConflictMode;
+  },
+): Promise<RestoreRowOutcome> {
+  const restoreClientRequestId = buildRestoreMemoryClientRequestId(args.row);
+
+  const existingByRestoreRequestId = await db
+    .query("memories")
+    .withIndex("by_user_clientRequestId", (q) =>
+      q.eq("userId", args.userId).eq("clientRequestId", restoreClientRequestId),
+    )
+    .unique();
+
+  if (existingByRestoreRequestId) {
+    if (await memoryRowEquivalent(args.row, existingByRestoreRequestId)) {
+      return "skipped";
+    }
+
+    if (args.conflictMode === "overwrite") {
+      const encryptedPayload = await buildMemorySensitiveWritePayload({
+        userId: args.userId,
+        title: args.row.title,
+        description: args.row.description,
+        mood: args.row.mood,
+        sensitiveDataNonce: existingByRestoreRequestId.sensitiveDataNonce,
+      });
+
+      await db.patch(existingByRestoreRequestId._id, {
+        clientRequestId: restoreClientRequestId,
+        dayKey: args.row.dayKey,
+        ...encryptedPayload,
+        happenedAt: args.row.happenedAt,
+      });
+      return "updated";
+    }
+
+    return "conflict";
+  }
+
+  const rowsByTimestamp = await db
+    .query("memories")
+    .withIndex("by_user_happenedAt", (q) =>
+      q.eq("userId", args.userId).eq("happenedAt", args.row.happenedAt),
+    )
+    .collect();
+
+  let exactDuplicate: Doc<"memories"> | undefined;
+  let potentialConflict: Doc<"memories"> | undefined;
+
+  for (const existing of rowsByTimestamp) {
+    const existingSensitive = await readMemorySensitiveFields(existing);
+
+    const equivalent =
+      existing.dayKey === args.row.dayKey &&
+      existing.happenedAt === args.row.happenedAt &&
+      existingSensitive.title === args.row.title &&
+      optionalStringEqual(
+        existingSensitive.description,
+        args.row.description,
+      ) &&
+      optionalStringEqual(existingSensitive.mood, args.row.mood);
+
+    if (equivalent) {
+      exactDuplicate = existing;
+      break;
+    }
+
+    if (
+      !potentialConflict &&
+      existing.dayKey === args.row.dayKey &&
+      existingSensitive.title === args.row.title
+    ) {
+      potentialConflict = existing;
+    }
+  }
+
+  if (exactDuplicate) {
+    return "skipped";
+  }
+
+  if (potentialConflict) {
+    if (args.conflictMode === "overwrite") {
+      const encryptedPayload = await buildMemorySensitiveWritePayload({
+        userId: args.userId,
+        title: args.row.title,
+        description: args.row.description,
+        mood: args.row.mood,
+        sensitiveDataNonce: potentialConflict.sensitiveDataNonce,
+      });
+
+      await db.patch(potentialConflict._id, {
+        clientRequestId: restoreClientRequestId,
+        dayKey: args.row.dayKey,
+        ...encryptedPayload,
+        happenedAt: args.row.happenedAt,
+      });
+      return "updated";
+    }
+
+    return "conflict";
+  }
+
+  const encryptedPayload = await buildMemorySensitiveWritePayload({
+    userId: args.userId,
+    title: args.row.title,
+    description: args.row.description,
+    mood: args.row.mood,
+  });
+
+  await db.insert("memories", {
+    userId: args.userId,
+    clientRequestId: restoreClientRequestId,
+    dayKey: args.row.dayKey,
+    ...encryptedPayload,
+    happenedAt: args.row.happenedAt,
+  });
+
+  return "inserted";
 }
 
 const exportMyDiaryDataRef = makeFunctionReference<"query">(
@@ -1468,9 +2151,7 @@ export const exportMyDiaryData = query({
 
       const mappedPage = await Promise.all(
         page.page.map(async (summary) => {
-          const sensitive = await readSummarySensitiveFields(
-            summary as SummaryDocRecord,
-          );
+          const sensitive = await readSummarySensitiveFields(summary);
 
           return {
             dayKey: summary.dayKey,
@@ -1504,9 +2185,7 @@ export const exportMyDiaryData = query({
 
       const mappedPage = await Promise.all(
         page.page.map(async (memory) => {
-          const sensitive = await readMemorySensitiveFields(
-            memory as MemoryDocRecord,
-          );
+          const sensitive = await readMemorySensitiveFields(memory);
 
           return {
             clientRequestId: memory.clientRequestId,
@@ -1540,7 +2219,7 @@ export const exportMyDiaryData = query({
 
       const mappedPage = await Promise.all(
         page.page.map(async (day) => {
-          const sensitive = await readDaySensitiveFields(day as DayDocRecord);
+          const sensitive = await readDaySensitiveFields(day);
 
           return {
             dayKey: day.dayKey,
@@ -1608,8 +2287,7 @@ export const createExportJobInternal = internalMutation({
     expiresAt: v.number(),
   },
   handler: async (ctx, args) => {
-    const exportJobsDb = ctx.db as any;
-    const jobId = await exportJobsDb.insert("exportJobs", {
+    const jobId = await ctx.db.insert("exportJobs", {
       userId: args.userId,
       status: "queued" satisfies ExportJobStatus,
       format: args.format,
@@ -1620,7 +2298,7 @@ export const createExportJobInternal = internalMutation({
     });
 
     return {
-      jobId: String(jobId),
+      jobId,
       status: "queued" as ExportJobStatus,
       requestedAt: args.requestedAt,
       expiresAt: args.expiresAt,
@@ -1630,24 +2308,23 @@ export const createExportJobInternal = internalMutation({
 
 export const markExportJobRunningInternal = internalMutation({
   args: {
-    jobId: v.string(),
+    jobId: v.id("exportJobs"),
     startedAt: v.number(),
   },
   handler: async (ctx, args) => {
-    const exportJobsDb = ctx.db as any;
-    const job = await exportJobsDb.get(args.jobId);
+    const job = await ctx.db.get(args.jobId);
     if (!job) {
       throw new Error("Export job not found");
     }
 
-    await exportJobsDb.patch(job._id, {
+    await ctx.db.patch(job._id, {
       status: "running",
       startedAt: args.startedAt,
       updatedAt: args.startedAt,
     });
 
     return {
-      jobId: String(job._id),
+      jobId: job._id,
       status: "running" as ExportJobStatus,
       startedAt: args.startedAt,
     };
@@ -1656,7 +2333,7 @@ export const markExportJobRunningInternal = internalMutation({
 
 export const markExportJobReadyInternal = internalMutation({
   args: {
-    jobId: v.string(),
+    jobId: v.id("exportJobs"),
     completedAt: v.number(),
     storageId: v.string(),
     fileName: v.string(),
@@ -1670,13 +2347,12 @@ export const markExportJobReadyInternal = internalMutation({
     }),
   },
   handler: async (ctx, args) => {
-    const exportJobsDb = ctx.db as any;
-    const job = await exportJobsDb.get(args.jobId);
+    const job = await ctx.db.get(args.jobId);
     if (!job) {
       throw new Error("Export job not found");
     }
 
-    await exportJobsDb.patch(job._id, {
+    await ctx.db.patch(job._id, {
       status: "ready",
       completedAt: args.completedAt,
       updatedAt: args.completedAt,
@@ -1688,7 +2364,7 @@ export const markExportJobReadyInternal = internalMutation({
     });
 
     return {
-      jobId: String(job._id),
+      jobId: job._id,
       status: "ready" as ExportJobStatus,
       completedAt: args.completedAt,
     };
@@ -1697,18 +2373,17 @@ export const markExportJobReadyInternal = internalMutation({
 
 export const markExportJobFailedInternal = internalMutation({
   args: {
-    jobId: v.string(),
+    jobId: v.id("exportJobs"),
     failedAt: v.number(),
     error: v.string(),
   },
   handler: async (ctx, args) => {
-    const exportJobsDb = ctx.db as any;
-    const job = await exportJobsDb.get(args.jobId);
+    const job = await ctx.db.get(args.jobId);
     if (!job) {
       throw new Error("Export job not found");
     }
 
-    await exportJobsDb.patch(job._id, {
+    await ctx.db.patch(job._id, {
       status: "failed",
       failedAt: args.failedAt,
       updatedAt: args.failedAt,
@@ -1716,7 +2391,7 @@ export const markExportJobFailedInternal = internalMutation({
     });
 
     return {
-      jobId: String(job._id),
+      jobId: job._id,
       status: "failed" as ExportJobStatus,
       failedAt: args.failedAt,
     };
@@ -1729,15 +2404,14 @@ export const listMyExportJobsPaginated = query({
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
-    const exportJobsDb = ctx.db as any;
-    const page = await exportJobsDb
+    const page = await ctx.db
       .query("exportJobs")
-      .withIndex("by_user_requestedAt", (q: any) => q.eq("userId", user._id))
+      .withIndex("by_user_requestedAt", (q) => q.eq("userId", user._id))
       .order("desc")
       .paginate(args.paginationOpts);
 
     const mappedPage = await Promise.all(
-      page.page.map(async (job: any) => {
+      page.page.map(async (job) => {
         const downloadUrl =
           job.status === "ready" && typeof job.artifactStorageId === "string"
             ? await ctx.storage.getUrl(job.artifactStorageId)
@@ -1780,8 +2454,13 @@ export const getMyExportJobDownloadUrl = query({
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
-    const exportJobsDb = ctx.db as any;
-    const job = await exportJobsDb.get(args.jobId);
+    const jobId = requireNormalizedId(
+      ctx.db,
+      "exportJobs",
+      args.jobId,
+      "Export job not found",
+    );
+    const job = await ctx.db.get(jobId);
 
     if (!job) {
       throw new Error("Export job not found");
@@ -1823,8 +2502,7 @@ export const createRestoreJobInternal = internalMutation({
     selectedDatasets: v.array(exportDatasetValidator),
   },
   handler: async (ctx, args) => {
-    const restoreJobsDb = ctx.db as any;
-    const jobId = await restoreJobsDb.insert("restoreJobs", {
+    const jobId = await ctx.db.insert("restoreJobs", {
       userId: args.userId,
       status: "running" satisfies RestoreJobStatus,
       requestedAt: args.requestedAt,
@@ -1835,7 +2513,7 @@ export const createRestoreJobInternal = internalMutation({
     });
 
     return {
-      jobId: String(jobId),
+      jobId,
       status: "running" as RestoreJobStatus,
       requestedAt: args.requestedAt,
     };
@@ -1844,7 +2522,7 @@ export const createRestoreJobInternal = internalMutation({
 
 export const markRestoreJobCompletedInternal = internalMutation({
   args: {
-    jobId: v.string(),
+    jobId: v.id("restoreJobs"),
     status: v.union(v.literal("succeeded"), v.literal("partial")),
     completedAt: v.number(),
     exportedAt: v.string(),
@@ -1853,14 +2531,13 @@ export const markRestoreJobCompletedInternal = internalMutation({
     datasetResults: restoreDatasetResultsValidator,
   },
   handler: async (ctx, args) => {
-    const restoreJobsDb = ctx.db as any;
-    const job = await restoreJobsDb.get(args.jobId);
+    const job = await ctx.db.get(args.jobId);
 
     if (!job) {
       throw new Error("Restore job not found");
     }
 
-    await restoreJobsDb.patch(job._id, {
+    await ctx.db.patch(job._id, {
       status: args.status,
       completedAt: args.completedAt,
       updatedAt: args.completedAt,
@@ -1871,7 +2548,7 @@ export const markRestoreJobCompletedInternal = internalMutation({
     });
 
     return {
-      jobId: String(job._id),
+      jobId: job._id,
       status: args.status,
       completedAt: args.completedAt,
     };
@@ -1880,19 +2557,18 @@ export const markRestoreJobCompletedInternal = internalMutation({
 
 export const markRestoreJobFailedInternal = internalMutation({
   args: {
-    jobId: v.string(),
+    jobId: v.id("restoreJobs"),
     failedAt: v.number(),
     error: v.string(),
   },
   handler: async (ctx, args) => {
-    const restoreJobsDb = ctx.db as any;
-    const job = await restoreJobsDb.get(args.jobId);
+    const job = await ctx.db.get(args.jobId);
 
     if (!job) {
       throw new Error("Restore job not found");
     }
 
-    await restoreJobsDb.patch(job._id, {
+    await ctx.db.patch(job._id, {
       status: "failed",
       failedAt: args.failedAt,
       updatedAt: args.failedAt,
@@ -1900,7 +2576,7 @@ export const markRestoreJobFailedInternal = internalMutation({
     });
 
     return {
-      jobId: String(job._id),
+      jobId: job._id,
       status: "failed" as RestoreJobStatus,
       failedAt: args.failedAt,
     };
@@ -1913,14 +2589,13 @@ export const listMyRestoreJobsPaginated = query({
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
-    const restoreJobsDb = ctx.db as any;
-    const page = await restoreJobsDb
+    const page = await ctx.db
       .query("restoreJobs")
-      .withIndex("by_user_requestedAt", (q: any) => q.eq("userId", user._id))
+      .withIndex("by_user_requestedAt", (q) => q.eq("userId", user._id))
       .order("desc")
       .paginate(args.paginationOpts);
 
-    const mappedPage = page.page.map((job: any) => ({
+    const mappedPage = page.page.map((job) => ({
       jobId: String(job._id),
       status: job.status,
       requestedAt: job.requestedAt,
@@ -1962,10 +2637,9 @@ export const runScheduledExportJobRetentionCleanupInternal = internalMutation({
     const retentionDays = getExportJobRetentionDays();
     const cutoff = now - retentionDays * MS_PER_DAY;
 
-    const exportJobsDb = ctx.db as any;
-    const staleJobs = await exportJobsDb
+    const staleJobs = await ctx.db
       .query("exportJobs")
-      .withIndex("by_requestedAt", (q: any) => q.lt("requestedAt", cutoff))
+      .withIndex("by_requestedAt", (q) => q.lt("requestedAt", cutoff))
       .order("asc")
       .take(maxDeletes);
 
@@ -1982,7 +2656,7 @@ export const runScheduledExportJobRetentionCleanupInternal = internalMutation({
         }
       }
 
-      await exportJobsDb.delete(job._id);
+      await ctx.db.delete(job._id);
       deletedJobs += 1;
     }
 
@@ -2011,17 +2685,16 @@ export const runScheduledRestoreJobRetentionCleanupInternal = internalMutation({
     const retentionDays = getRestoreJobRetentionDays();
     const cutoff = now - retentionDays * MS_PER_DAY;
 
-    const restoreJobsDb = ctx.db as any;
-    const staleJobs = await restoreJobsDb
+    const staleJobs = await ctx.db
       .query("restoreJobs")
-      .withIndex("by_requestedAt", (q: any) => q.lt("requestedAt", cutoff))
+      .withIndex("by_requestedAt", (q) => q.lt("requestedAt", cutoff))
       .order("asc")
       .take(maxDeletes);
 
     let deletedJobs = 0;
 
     for (const job of staleJobs) {
-      await restoreJobsDb.delete(job._id);
+      await ctx.db.delete(job._id);
       deletedJobs += 1;
     }
 
@@ -2114,294 +2787,46 @@ export const restoreDiaryDatasetBatchInternal = internalMutation({
   args: {
     userId: v.id("user"),
     dataset: exportDatasetValidator,
-    rows: v.array(v.any()),
+    rows: v.array(restoreRowObjectValidator),
     conflictMode: restoreConflictModeValidator,
     allowPartial: v.boolean(),
   },
   handler: async (ctx, args: RestoreBatchDatasetArgs) => {
-    const db = ctx.db as any;
     const result = createEmptyRestoreBatchResult();
 
     for (const rawRow of args.rows) {
       result.processed += 1;
 
       try {
+        let outcome: RestoreRowOutcome;
+
         if (args.dataset === "summaries") {
-          const row = rawRow as ExportSummaryRow;
-          const existing = await db
-            .query("daySummaries")
-            .withIndex("by_user_day", (q: any) =>
-              q.eq("userId", args.userId).eq("dayKey", row.dayKey),
-            )
-            .unique();
-
-          const encryptedPayload = await buildSummarySensitiveWritePayload({
+          outcome = await restoreSummaryDatasetRow(ctx.db, {
             userId: args.userId,
-            story: row.story,
-            highlights: row.highlights,
-            sensitiveDataNonce: existing?.sensitiveDataNonce,
+            row: parseSummaryRestoreRow(rawRow),
+            conflictMode: args.conflictMode,
           });
-
-          if (!existing) {
-            await db.insert("daySummaries", {
-              userId: args.userId,
-              dayKey: row.dayKey,
-              ...encryptedPayload,
-              metrics: row.metrics,
-              sourcesUsed: row.sourcesUsed,
-              generatedAt: row.generatedAt,
-            });
-            result.inserted += 1;
-            continue;
-          }
-
-          if (await summaryRowEquivalent(row, existing)) {
-            result.skipped += 1;
-            continue;
-          }
-
-          if (args.conflictMode === "overwrite") {
-            await db.patch(existing._id, {
-              ...encryptedPayload,
-              metrics: row.metrics,
-              sourcesUsed: row.sourcesUsed,
-              generatedAt: row.generatedAt,
-            });
-            result.updated += 1;
-            continue;
-          }
-
-          result.conflicts += 1;
-          result.skipped += 1;
-          continue;
-        }
-
-        if (args.dataset === "days") {
-          const row = rawRow as ExportDayRow;
-          const existing = await db
-            .query("days")
-            .withIndex("by_user_day", (q: any) =>
-              q.eq("userId", args.userId).eq("dayKey", row.dayKey),
-            )
-            .unique();
-
-          const encryptedPayload = await buildDaySensitiveWritePayload({
+        } else if (args.dataset === "days") {
+          outcome = await restoreDayDatasetRow(ctx.db, {
             userId: args.userId,
-            manualNotes: row.manualNotes,
-            peopleTags: row.peopleTags,
-            sensitiveDataNonce: existing?.sensitiveDataNonce,
+            row: parseDayRestoreRow(rawRow),
+            conflictMode: args.conflictMode,
           });
-
-          if (!existing) {
-            await db.insert("days", {
-              userId: args.userId,
-              dayKey: row.dayKey,
-              rating: row.rating,
-              ...encryptedPayload,
-            });
-            result.inserted += 1;
-            continue;
-          }
-
-          if (await dayRowEquivalent(row, existing)) {
-            result.skipped += 1;
-            continue;
-          }
-
-          if (args.conflictMode === "overwrite") {
-            await db.patch(existing._id, {
-              rating: row.rating,
-              ...encryptedPayload,
-            });
-            result.updated += 1;
-            continue;
-          }
-
-          result.conflicts += 1;
-          result.skipped += 1;
-          continue;
+        } else if (args.dataset === "integrationDailyData") {
+          outcome = await restoreIntegrationDatasetRow(ctx.db, {
+            userId: args.userId,
+            row: parseIntegrationRestoreRow(rawRow),
+            conflictMode: args.conflictMode,
+          });
+        } else {
+          outcome = await restoreMemoryDatasetRow(ctx.db, {
+            userId: args.userId,
+            row: parseMemoryRestoreRow(rawRow),
+            conflictMode: args.conflictMode,
+          });
         }
 
-        if (args.dataset === "integrationDailyData") {
-          const row = rawRow as ExportIntegrationRow;
-          const existing = await db
-            .query("integrationDailyData")
-            .withIndex("by_user_provider_day", (q: any) =>
-              q
-                .eq("userId", args.userId)
-                .eq("provider", row.provider)
-                .eq("dayKey", row.dayKey),
-            )
-            .unique();
-
-          const encryptedPayload =
-            await buildIntegrationDailySensitiveWritePayload({
-              userId: args.userId,
-              summary: row.summary,
-              signals: row.signals,
-              context: row.context as any,
-              sensitiveDataNonce: existing?.sensitiveDataNonce,
-            });
-
-          if (!existing) {
-            await db.insert("integrationDailyData", {
-              userId: args.userId,
-              provider: row.provider,
-              dayKey: row.dayKey,
-              syncedAt: row.syncedAt,
-              ...encryptedPayload,
-              metrics: row.metrics,
-            });
-            result.inserted += 1;
-            continue;
-          }
-
-          if (await integrationRowEquivalent(row, existing)) {
-            result.skipped += 1;
-            continue;
-          }
-
-          if (args.conflictMode === "overwrite") {
-            await db.patch(existing._id, {
-              syncedAt: row.syncedAt,
-              ...encryptedPayload,
-              metrics: row.metrics,
-            });
-            result.updated += 1;
-            continue;
-          }
-
-          result.conflicts += 1;
-          result.skipped += 1;
-          continue;
-        }
-
-        const row = rawRow as ExportMemoryRow;
-        const restoreClientRequestId = buildRestoreMemoryClientRequestId(row);
-
-        const existingByRestoreRequestId = await db
-          .query("memories")
-          .withIndex("by_user_clientRequestId", (q: any) =>
-            q
-              .eq("userId", args.userId)
-              .eq("clientRequestId", restoreClientRequestId),
-          )
-          .unique();
-
-        if (existingByRestoreRequestId) {
-          if (await memoryRowEquivalent(row, existingByRestoreRequestId)) {
-            result.skipped += 1;
-            continue;
-          }
-
-          if (args.conflictMode === "overwrite") {
-            const encryptedPayload = await buildMemorySensitiveWritePayload({
-              userId: args.userId,
-              title: row.title,
-              description: row.description,
-              mood: row.mood,
-              sensitiveDataNonce: existingByRestoreRequestId.sensitiveDataNonce,
-            });
-
-            await db.patch(existingByRestoreRequestId._id, {
-              clientRequestId: restoreClientRequestId,
-              dayKey: row.dayKey,
-              ...encryptedPayload,
-              happenedAt: row.happenedAt,
-            });
-            result.updated += 1;
-            continue;
-          }
-
-          result.conflicts += 1;
-          result.skipped += 1;
-          continue;
-        }
-
-        const rowsByTimestamp = await db
-          .query("memories")
-          .withIndex("by_user_happenedAt", (q: any) =>
-            q.eq("userId", args.userId).eq("happenedAt", row.happenedAt),
-          )
-          .collect();
-
-        let exactDuplicate: MemoryDocRecord | undefined;
-        let potentialConflict: MemoryDocRecord | undefined;
-
-        for (const existing of rowsByTimestamp) {
-          const existingSensitive = await readMemorySensitiveFields(
-            existing as MemoryDocRecord,
-          );
-
-          const equivalent =
-            existing.dayKey === row.dayKey &&
-            existing.happenedAt === row.happenedAt &&
-            existingSensitive.title === row.title &&
-            optionalStringEqual(
-              existingSensitive.description,
-              row.description,
-            ) &&
-            optionalStringEqual(existingSensitive.mood, row.mood);
-
-          if (equivalent) {
-            exactDuplicate = existing;
-            break;
-          }
-
-          if (
-            !potentialConflict &&
-            existing.dayKey === row.dayKey &&
-            existingSensitive.title === row.title
-          ) {
-            potentialConflict = existing;
-          }
-        }
-
-        if (exactDuplicate) {
-          result.skipped += 1;
-          continue;
-        }
-
-        if (potentialConflict) {
-          if (args.conflictMode === "overwrite") {
-            const encryptedPayload = await buildMemorySensitiveWritePayload({
-              userId: args.userId,
-              title: row.title,
-              description: row.description,
-              mood: row.mood,
-              sensitiveDataNonce: potentialConflict.sensitiveDataNonce,
-            });
-
-            await db.patch(potentialConflict._id, {
-              clientRequestId: restoreClientRequestId,
-              dayKey: row.dayKey,
-              ...encryptedPayload,
-              happenedAt: row.happenedAt,
-            });
-            result.updated += 1;
-            continue;
-          }
-
-          result.conflicts += 1;
-          result.skipped += 1;
-          continue;
-        }
-
-        const encryptedPayload = await buildMemorySensitiveWritePayload({
-          userId: args.userId,
-          title: row.title,
-          description: row.description,
-          mood: row.mood,
-        });
-
-        await db.insert("memories", {
-          userId: args.userId,
-          clientRequestId: restoreClientRequestId,
-          dayKey: row.dayKey,
-          ...encryptedPayload,
-          happenedAt: row.happenedAt,
-        });
-        result.inserted += 1;
+        applyRestoreOutcome(result, outcome);
       } catch (error) {
         if (!args.allowPartial) {
           throw error;
