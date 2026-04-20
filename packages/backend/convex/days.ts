@@ -5,6 +5,14 @@ import { validateDayKey, validateRating, clampLimit } from "./validators";
 import { deleteDayCascadeData } from "./cascadeCleanup";
 import { applyDashboardMetricsDelta } from "./dashboardMetrics";
 import { captureException, logInfo } from "./observability";
+import type { Doc } from "./_generated/dataModel";
+import {
+  buildDaySensitiveWritePayload,
+  needsDaySensitiveMigration,
+  readDaySensitiveFields,
+  type DaySensitiveRecord,
+  withDaySensitiveFields,
+} from "./sensitiveDataFields";
 
 function normalizeStringArray(items: string[] | undefined): string[] {
   if (!items || items.length === 0) {
@@ -34,6 +42,16 @@ function mergeUnique(base: string[], additions: string[]): string[] {
   return merged;
 }
 
+type DayRecord = Doc<"days"> & DaySensitiveRecord;
+
+async function mapDayForResponse<T extends DayRecord | null>(day: T) {
+  if (!day) {
+    return day;
+  }
+
+  return await withDaySensitiveFields(day);
+}
+
 // ── Get or create a day record ──────────────────────────────
 export const upsertDay = mutation({
   args: {
@@ -58,27 +76,57 @@ export const upsertDay = mutation({
     if (existing) {
       const updates: Record<string, unknown> = {};
       if (args.rating !== undefined) updates.rating = args.rating;
-      if (args.manualNotes !== undefined)
-        updates.manualNotes = args.manualNotes;
-      if (args.peopleTags !== undefined) updates.peopleTags = args.peopleTags;
+
+      const shouldEncryptSensitiveFields =
+        args.manualNotes !== undefined ||
+        args.peopleTags !== undefined ||
+        needsDaySensitiveMigration(existing as DayRecord);
+
+      if (shouldEncryptSensitiveFields) {
+        const currentSensitive = await readDaySensitiveFields(
+          existing as DayRecord,
+        );
+
+        const encryptedPayload = await buildDaySensitiveWritePayload({
+          userId: user._id,
+          manualNotes:
+            args.manualNotes !== undefined
+              ? args.manualNotes
+              : currentSensitive.manualNotes,
+          peopleTags:
+            args.peopleTags !== undefined
+              ? args.peopleTags
+              : currentSensitive.peopleTags,
+          sensitiveDataNonce: existing.sensitiveDataNonce,
+        });
+
+        Object.assign(updates, encryptedPayload);
+      }
 
       await ctx.db.patch(existing._id, updates);
-      return await ctx.db.get(existing._id);
+      return await mapDayForResponse(
+        (await ctx.db.get(existing._id)) as DayRecord,
+      );
     }
+
+    const encryptedPayload = await buildDaySensitiveWritePayload({
+      userId: user._id,
+      manualNotes: args.manualNotes,
+      peopleTags: args.peopleTags,
+    });
 
     const id = await ctx.db.insert("days", {
       userId: user._id,
       dayKey: args.dayKey,
       rating: args.rating,
-      manualNotes: args.manualNotes,
-      peopleTags: args.peopleTags,
+      ...encryptedPayload,
     });
 
     await applyDashboardMetricsDelta(ctx.db, {
       totalDays: 1,
     });
 
-    return await ctx.db.get(id);
+    return await mapDayForResponse((await ctx.db.get(id)) as DayRecord);
   },
 });
 
@@ -107,12 +155,15 @@ export const appendDayLogEntries = mutation({
       .unique();
 
     if (existing) {
+      const currentSensitive = await readDaySensitiveFields(
+        existing as DayRecord,
+      );
       const nextManualNotes = mergeUnique(
-        existing.manualNotes ?? [],
+        currentSensitive.manualNotes,
         manualNotesToAdd,
       );
       const nextPeopleTags = mergeUnique(
-        existing.peopleTags ?? [],
+        currentSensitive.peopleTags,
         peopleTagsToAdd,
       );
 
@@ -126,29 +177,52 @@ export const appendDayLogEntries = mutation({
       }
 
       if (peopleTagsToAdd.length > 0) {
-        updates.peopleTags = nextPeopleTags;
+        // No-op: encrypted patch below applies merged people tags.
+      }
+
+      const shouldEncryptSensitiveFields =
+        manualNotesToAdd.length > 0 ||
+        peopleTagsToAdd.length > 0 ||
+        needsDaySensitiveMigration(existing as DayRecord);
+
+      if (shouldEncryptSensitiveFields) {
+        const encryptedPayload = await buildDaySensitiveWritePayload({
+          userId: user._id,
+          manualNotes: nextManualNotes,
+          peopleTags: nextPeopleTags,
+          sensitiveDataNonce: existing.sensitiveDataNonce,
+        });
+
+        Object.assign(updates, encryptedPayload);
       }
 
       if (Object.keys(updates).length > 0) {
         await ctx.db.patch(existing._id, updates);
       }
 
-      return await ctx.db.get(existing._id);
+      return await mapDayForResponse(
+        (await ctx.db.get(existing._id)) as DayRecord,
+      );
     }
+
+    const encryptedPayload = await buildDaySensitiveWritePayload({
+      userId: user._id,
+      manualNotes: manualNotesToAdd.length > 0 ? manualNotesToAdd : undefined,
+      peopleTags: peopleTagsToAdd.length > 0 ? peopleTagsToAdd : undefined,
+    });
 
     const id = await ctx.db.insert("days", {
       userId: user._id,
       dayKey: args.dayKey,
       rating: args.rating,
-      manualNotes: manualNotesToAdd.length > 0 ? manualNotesToAdd : undefined,
-      peopleTags: peopleTagsToAdd.length > 0 ? peopleTagsToAdd : undefined,
+      ...encryptedPayload,
     });
 
     await applyDashboardMetricsDelta(ctx.db, {
       totalDays: 1,
     });
 
-    return await ctx.db.get(id);
+    return await mapDayForResponse((await ctx.db.get(id)) as DayRecord);
   },
 });
 
@@ -161,12 +235,14 @@ export const getDay = query({
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
 
-    return await ctx.db
+    const day = await ctx.db
       .query("days")
       .withIndex("by_user_day", (q) =>
         q.eq("userId", user._id).eq("dayKey", args.dayKey),
       )
       .unique();
+
+    return await mapDayForResponse(day as DayRecord | null);
   },
 });
 
@@ -182,7 +258,7 @@ export const getDayById = query({
     }
 
     requireOwnership(user, day.userId);
-    return day;
+    return await mapDayForResponse(day as DayRecord);
   },
 });
 
@@ -193,11 +269,15 @@ export const listRecentDays = query({
     const user = await requireUser(ctx);
     const limit = clampLimit(args.limit ?? 30);
 
-    return await ctx.db
+    const days = await ctx.db
       .query("days")
       .withIndex("by_user_day", (q) => q.eq("userId", user._id))
       .order("desc")
       .take(limit);
+
+    return await Promise.all(
+      days.map(async (day) => mapDayForResponse(day as DayRecord)),
+    );
   },
 });
 
@@ -221,21 +301,43 @@ export const updateDayRating = mutation({
       .unique();
 
     if (!day) {
+      const encryptedPayload = await buildDaySensitiveWritePayload({
+        userId: user._id,
+        manualNotes: undefined,
+        peopleTags: undefined,
+      });
+
       const id = await ctx.db.insert("days", {
         userId: user._id,
         dayKey: args.dayKey,
         rating: args.rating,
+        ...encryptedPayload,
       });
 
       await applyDashboardMetricsDelta(ctx.db, {
         totalDays: 1,
       });
 
-      return await ctx.db.get(id);
+      return await mapDayForResponse((await ctx.db.get(id)) as DayRecord);
     }
 
-    await ctx.db.patch(day._id, { rating: args.rating });
-    return await ctx.db.get(day._id);
+    const updates: Record<string, unknown> = {
+      rating: args.rating,
+    };
+
+    if (needsDaySensitiveMigration(day as DayRecord)) {
+      const currentSensitive = await readDaySensitiveFields(day as DayRecord);
+      const encryptedPayload = await buildDaySensitiveWritePayload({
+        userId: user._id,
+        manualNotes: currentSensitive.manualNotes,
+        peopleTags: currentSensitive.peopleTags,
+        sensitiveDataNonce: day.sensitiveDataNonce,
+      });
+      Object.assign(updates, encryptedPayload);
+    }
+
+    await ctx.db.patch(day._id, updates);
+    return await mapDayForResponse((await ctx.db.get(day._id)) as DayRecord);
   },
 });
 

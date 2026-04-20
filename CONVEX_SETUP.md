@@ -151,6 +151,20 @@ INTEGRATION_SECRETS_KEYRING_JSON=
 INTEGRATION_SECRETS_ACTIVE_KEY_ID=
 ```
 
+Sensitive-data encryption at rest (required for encrypted memory/day/summary/integration fields):
+
+```dotenv
+SENSITIVE_DATA_KEYRING_JSON=
+SENSITIVE_DATA_ACTIVE_KEY_ID=
+```
+
+Key-ID policy for `SENSITIVE_DATA_KEYRING_JSON`:
+
+- Use unique, monotonic key IDs (for example `sd_YYYYMMDDHHmmss_env`).
+- Never reuse a key ID for different key material.
+- Keep prior key IDs in the keyring during rotations so older ciphertext remains decryptable.
+- Point `SENSITIVE_DATA_ACTIVE_KEY_ID` to the new key ID for new writes.
+
 Validation behavior already enforced in code:
 
 - `CLERK_JWT_ISSUER_DOMAIN` must be valid `https` URL.
@@ -238,3 +252,20 @@ pnpm --filter mobile start
 - If callback or sync fails with integration secret encryption config error, set:
   - `INTEGRATION_SECRETS_KEYRING_JSON`
   - `INTEGRATION_SECRETS_ACTIVE_KEY_ID`
+
+### Sensitive-data migration and validation rejects
+
+- Before migration rollout, rotate keyring and activate a new key ID:
+
+```bash
+pnpm ops:rotate-sensitive-data-keyring -- --target <target>
+```
+
+- Run staged migration with audit monitoring:
+
+```bash
+pnpm ops:run-sensitive-data-migration -- --target <target> --mode dry-run
+pnpm ops:run-sensitive-data-migration -- --target <target> --mode full
+```
+
+- If output reports `validationRejectRiskRows > 0`, stop rollout and investigate rows flagged as migrated-with-plaintext or encrypted-without-nonce.

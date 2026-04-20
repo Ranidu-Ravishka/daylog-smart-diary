@@ -182,6 +182,8 @@ export default function SummariesPage() {
                 </p>
               ) : selectedSummary === undefined ? (
                 <p className="text-sm text-gray-600">Loading detail…</p>
+              ) : selectedSummary === null ? (
+                <p className="text-sm text-red-600">Summary not found.</p>
               ) : (
                 <div className="space-y-3 text-sm">
                   <div>

@@ -19,9 +19,53 @@ import {
   replaceDashboardMetricsSnapshot,
   type DashboardMetricsSnapshot,
 } from "./dashboardMetrics";
+import {
+  buildDaySensitiveWritePayload,
+  buildMemorySensitiveWritePayload,
+  buildSummarySensitiveWritePayload,
+  needsDaySensitiveMigration,
+  needsSummarySensitiveMigration,
+  readDaySensitiveFields,
+  readMemorySensitiveFields,
+  readSummarySensitiveFields,
+  withDaySensitiveFields,
+  withMemorySensitiveFields,
+  withSummarySensitiveFields,
+  type DaySensitiveRecord,
+  type MemorySensitiveRecord,
+  type SummarySensitiveRecord,
+} from "./sensitiveDataFields";
 
 const OPAQUE_TOKEN_REF_PREFIX = "tokref_";
 const DELETE_BATCH_SIZE = 256;
+
+type AdminMemoryRecord = Doc<"memories"> & MemorySensitiveRecord;
+type AdminDayRecord = Doc<"days"> & DaySensitiveRecord;
+type AdminSummaryRecord = Doc<"daySummaries"> & SummarySensitiveRecord;
+
+async function mapAdminMemoryRecord(record: AdminMemoryRecord | null) {
+  if (!record) {
+    return null;
+  }
+
+  return await withMemorySensitiveFields(record);
+}
+
+async function mapAdminDayRecord(record: AdminDayRecord | null) {
+  if (!record) {
+    return null;
+  }
+
+  return await withDaySensitiveFields(record);
+}
+
+async function mapAdminSummaryRecord(record: AdminSummaryRecord | null) {
+  if (!record) {
+    return null;
+  }
+
+  return await withSummarySensitiveFields(record);
+}
 
 function buildAdminRoleStatePatch(
   user: Pick<
@@ -695,11 +739,17 @@ export const adminCreateMemory = mutation({
   handler: async (ctx, args) => {
     const admin = await requireAdmin(ctx);
     validateDayKey(args.dayKey);
-    const id = await ctx.db.insert("memories", {
+
+    const encryptedPayload = await buildMemorySensitiveWritePayload({
       userId: args.userId,
       title: args.title,
       description: args.description,
       mood: args.mood,
+    });
+
+    const id = await ctx.db.insert("memories", {
+      userId: args.userId,
+      ...encryptedPayload,
       happenedAt: args.happenedAt,
       dayKey: args.dayKey,
     });
@@ -709,7 +759,9 @@ export const adminCreateMemory = mutation({
     });
 
     await logAdminAction(ctx, admin._id, "create_memory", args.title);
-    return await ctx.db.get(id);
+    return await mapAdminMemoryRecord(
+      (await ctx.db.get(id)) as AdminMemoryRecord,
+    );
   },
 });
 
@@ -717,11 +769,18 @@ export const listAllMemories = query({
   args: {},
   handler: async (ctx) => {
     await requireAdmin(ctx);
-    return await ctx.db
+
+    const rows = await ctx.db
       .query("memories")
       .withIndex("by_happenedAt")
       .order("desc")
       .take(200);
+
+    return await Promise.all(
+      rows.map(
+        async (row) => await mapAdminMemoryRecord(row as AdminMemoryRecord),
+      ),
+    );
   },
 });
 
@@ -735,26 +794,53 @@ export const listMemoriesPaginated = query({
     await requireAdmin(ctx);
 
     if (args.userId) {
-      return await ctx.db
+      const page = await ctx.db
         .query("memories")
         .withIndex("by_user_happenedAt", (q) => q.eq("userId", args.userId!))
         .order("desc")
         .paginate(args.paginationOpts);
+
+      return {
+        ...page,
+        page: await Promise.all(
+          page.page.map(
+            async (row) => await mapAdminMemoryRecord(row as AdminMemoryRecord),
+          ),
+        ),
+      };
     }
 
     if (args.dayKey) {
-      return await ctx.db
+      const page = await ctx.db
         .query("memories")
         .withIndex("by_day_happenedAt", (q) => q.eq("dayKey", args.dayKey!))
         .order("desc")
         .paginate(args.paginationOpts);
+
+      return {
+        ...page,
+        page: await Promise.all(
+          page.page.map(
+            async (row) => await mapAdminMemoryRecord(row as AdminMemoryRecord),
+          ),
+        ),
+      };
     }
 
-    return await ctx.db
+    const page = await ctx.db
       .query("memories")
       .withIndex("by_happenedAt")
       .order("desc")
       .paginate(args.paginationOpts);
+
+    return {
+      ...page,
+      page: await Promise.all(
+        page.page.map(
+          async (row) => await mapAdminMemoryRecord(row as AdminMemoryRecord),
+        ),
+      ),
+    };
   },
 });
 
@@ -764,7 +850,7 @@ export const adminGetMemory = query({
     await requireAdmin(ctx);
     const memory = await ctx.db.get(args.memoryId);
     if (!memory) throw new Error("Memory not found");
-    return memory;
+    return await mapAdminMemoryRecord(memory as AdminMemoryRecord);
   },
 });
 
@@ -783,12 +869,34 @@ export const adminUpdateMemory = mutation({
     const memory = await ctx.db.get(args.memoryId);
     if (!memory) throw new Error("Memory not found");
 
+    const currentSensitive = await readMemorySensitiveFields(
+      memory as AdminMemoryRecord,
+    );
+
     const updates: Record<string, unknown> = {};
-    if (args.title !== undefined) updates.title = args.title;
-    if (args.description !== undefined) updates.description = args.description;
-    if (args.mood !== undefined) updates.mood = args.mood;
     if (args.happenedAt !== undefined) updates.happenedAt = args.happenedAt;
     if (args.dayKey !== undefined) updates.dayKey = args.dayKey;
+
+    const shouldEncryptSensitiveFields =
+      args.title !== undefined ||
+      args.description !== undefined ||
+      args.mood !== undefined ||
+      !memory.titleEncrypted ||
+      !memory.sensitiveDataNonce;
+
+    if (shouldEncryptSensitiveFields) {
+      const encryptedPayload = await buildMemorySensitiveWritePayload({
+        userId: memory.userId,
+        title: args.title ?? currentSensitive.title,
+        description:
+          args.description !== undefined
+            ? args.description
+            : currentSensitive.description,
+        mood: args.mood !== undefined ? args.mood : currentSensitive.mood,
+        sensitiveDataNonce: memory.sensitiveDataNonce,
+      });
+      Object.assign(updates, encryptedPayload);
+    }
 
     await ctx.db.patch(args.memoryId, updates);
     await logAdminAction(
@@ -797,7 +905,9 @@ export const adminUpdateMemory = mutation({
       "update_memory",
       String(args.memoryId),
     );
-    return await ctx.db.get(args.memoryId);
+    return await mapAdminMemoryRecord(
+      (await ctx.db.get(args.memoryId)) as AdminMemoryRecord,
+    );
   },
 });
 
@@ -808,6 +918,10 @@ export const adminDeleteMemory = mutation({
     const memory = await ctx.db.get(args.memoryId);
     if (!memory) throw new Error("Memory not found");
 
+    const sensitive = await readMemorySensitiveFields(
+      memory as AdminMemoryRecord,
+    );
+
     await deleteMemoryMediaByMemoryId(ctx, args.memoryId);
 
     await ctx.db.delete(args.memoryId);
@@ -816,7 +930,7 @@ export const adminDeleteMemory = mutation({
       totalMemories: -1,
     });
 
-    await logAdminAction(ctx, admin._id, "delete_memory", memory.title);
+    await logAdminAction(ctx, admin._id, "delete_memory", sensitive.title);
     return { success: true };
   },
 });
@@ -837,12 +951,18 @@ export const adminCreateDay = mutation({
     const admin = await requireAdmin(ctx);
     validateDayKey(args.dayKey);
     if (args.rating !== undefined) validateRating(args.rating);
+
+    const encryptedPayload = await buildDaySensitiveWritePayload({
+      userId: args.userId,
+      manualNotes: args.manualNotes,
+      peopleTags: args.peopleTags,
+    });
+
     const id = await ctx.db.insert("days", {
       userId: args.userId,
       dayKey: args.dayKey,
       rating: args.rating,
-      manualNotes: args.manualNotes,
-      peopleTags: args.peopleTags,
+      ...encryptedPayload,
     });
 
     await applyDashboardMetricsDelta(ctx.db, {
@@ -850,7 +970,7 @@ export const adminCreateDay = mutation({
     });
 
     await logAdminAction(ctx, admin._id, "create_day", args.dayKey);
-    return await ctx.db.get(id);
+    return await mapAdminDayRecord((await ctx.db.get(id)) as AdminDayRecord);
   },
 });
 
@@ -858,11 +978,16 @@ export const listAllDays = query({
   args: {},
   handler: async (ctx) => {
     await requireAdmin(ctx);
-    return await ctx.db
+
+    const rows = await ctx.db
       .query("days")
       .withIndex("by_dayKey")
       .order("desc")
       .take(200);
+
+    return await Promise.all(
+      rows.map(async (row) => await mapAdminDayRecord(row as AdminDayRecord)),
+    );
   },
 });
 
@@ -876,34 +1001,70 @@ export const listDaysPaginated = query({
     await requireAdmin(ctx);
 
     if (args.userId && args.dayKey) {
-      return await ctx.db
+      const page = await ctx.db
         .query("days")
         .withIndex("by_user_day", (q) =>
           q.eq("userId", args.userId!).eq("dayKey", args.dayKey!),
         )
         .paginate(args.paginationOpts);
+
+      return {
+        ...page,
+        page: await Promise.all(
+          page.page.map(
+            async (row) => await mapAdminDayRecord(row as AdminDayRecord),
+          ),
+        ),
+      };
     }
 
     if (args.userId) {
-      return await ctx.db
+      const page = await ctx.db
         .query("days")
         .withIndex("by_user_day", (q) => q.eq("userId", args.userId!))
         .order("desc")
         .paginate(args.paginationOpts);
+
+      return {
+        ...page,
+        page: await Promise.all(
+          page.page.map(
+            async (row) => await mapAdminDayRecord(row as AdminDayRecord),
+          ),
+        ),
+      };
     }
 
     if (args.dayKey) {
-      return await ctx.db
+      const page = await ctx.db
         .query("days")
         .withIndex("by_dayKey", (q) => q.eq("dayKey", args.dayKey!))
         .paginate(args.paginationOpts);
+
+      return {
+        ...page,
+        page: await Promise.all(
+          page.page.map(
+            async (row) => await mapAdminDayRecord(row as AdminDayRecord),
+          ),
+        ),
+      };
     }
 
-    return await ctx.db
+    const page = await ctx.db
       .query("days")
       .withIndex("by_dayKey")
       .order("desc")
       .paginate(args.paginationOpts);
+
+    return {
+      ...page,
+      page: await Promise.all(
+        page.page.map(
+          async (row) => await mapAdminDayRecord(row as AdminDayRecord),
+        ),
+      ),
+    };
   },
 });
 
@@ -913,7 +1074,7 @@ export const adminGetDay = query({
     await requireAdmin(ctx);
     const day = await ctx.db.get(args.dayId);
     if (!day) throw new Error("Day not found");
-    return day;
+    return await mapAdminDayRecord(day as AdminDayRecord);
   },
 });
 
@@ -932,15 +1093,40 @@ export const adminUpdateDay = mutation({
     const day = await ctx.db.get(args.dayId);
     if (!day) throw new Error("Day not found");
 
+    const currentSensitive = await readDaySensitiveFields(
+      day as AdminDayRecord,
+    );
+
     const updates: Record<string, unknown> = {};
     if (args.dayKey !== undefined) updates.dayKey = args.dayKey;
     if (args.rating !== undefined) updates.rating = args.rating;
-    if (args.manualNotes !== undefined) updates.manualNotes = args.manualNotes;
-    if (args.peopleTags !== undefined) updates.peopleTags = args.peopleTags;
+
+    const shouldEncryptSensitiveFields =
+      args.manualNotes !== undefined ||
+      args.peopleTags !== undefined ||
+      needsDaySensitiveMigration(day as AdminDayRecord);
+
+    if (shouldEncryptSensitiveFields) {
+      const encryptedPayload = await buildDaySensitiveWritePayload({
+        userId: day.userId,
+        manualNotes:
+          args.manualNotes !== undefined
+            ? args.manualNotes
+            : currentSensitive.manualNotes,
+        peopleTags:
+          args.peopleTags !== undefined
+            ? args.peopleTags
+            : currentSensitive.peopleTags,
+        sensitiveDataNonce: day.sensitiveDataNonce,
+      });
+      Object.assign(updates, encryptedPayload);
+    }
 
     await ctx.db.patch(args.dayId, updates);
     await logAdminAction(ctx, admin._id, "update_day", String(args.dayId));
-    return await ctx.db.get(args.dayId);
+    return await mapAdminDayRecord(
+      (await ctx.db.get(args.dayId)) as AdminDayRecord,
+    );
   },
 });
 
@@ -984,11 +1170,17 @@ export const adminCreateSummary = mutation({
   handler: async (ctx, args) => {
     const admin = await requireAdmin(ctx);
     validateDayKey(args.dayKey);
+
+    const encryptedPayload = await buildSummarySensitiveWritePayload({
+      userId: args.userId,
+      story: args.story,
+      highlights: args.highlights,
+    });
+
     const id = await ctx.db.insert("daySummaries", {
       userId: args.userId,
       dayKey: args.dayKey,
-      story: args.story,
-      highlights: args.highlights,
+      ...encryptedPayload,
       sourcesUsed: args.sourcesUsed,
       generatedAt: Date.now(),
     });
@@ -998,7 +1190,9 @@ export const adminCreateSummary = mutation({
     });
 
     await logAdminAction(ctx, admin._id, "create_summary", args.dayKey);
-    return await ctx.db.get(id);
+    return await mapAdminSummaryRecord(
+      (await ctx.db.get(id)) as AdminSummaryRecord,
+    );
   },
 });
 
@@ -1006,11 +1200,18 @@ export const listAllSummaries = query({
   args: {},
   handler: async (ctx) => {
     await requireAdmin(ctx);
-    return await ctx.db
+
+    const rows = await ctx.db
       .query("daySummaries")
       .withIndex("by_generatedAt")
       .order("desc")
       .take(200);
+
+    return await Promise.all(
+      rows.map(
+        async (row) => await mapAdminSummaryRecord(row as AdminSummaryRecord),
+      ),
+    );
   },
 });
 
@@ -1024,35 +1225,74 @@ export const listSummariesPaginated = query({
     await requireAdmin(ctx);
 
     if (args.userId && args.dayKey) {
-      return await ctx.db
+      const page = await ctx.db
         .query("daySummaries")
         .withIndex("by_user_day", (q) =>
           q.eq("userId", args.userId!).eq("dayKey", args.dayKey!),
         )
         .paginate(args.paginationOpts);
+
+      return {
+        ...page,
+        page: await Promise.all(
+          page.page.map(
+            async (row) =>
+              await mapAdminSummaryRecord(row as AdminSummaryRecord),
+          ),
+        ),
+      };
     }
 
     if (args.userId) {
-      return await ctx.db
+      const page = await ctx.db
         .query("daySummaries")
         .withIndex("by_user_generatedAt", (q) => q.eq("userId", args.userId!))
         .order("desc")
         .paginate(args.paginationOpts);
+
+      return {
+        ...page,
+        page: await Promise.all(
+          page.page.map(
+            async (row) =>
+              await mapAdminSummaryRecord(row as AdminSummaryRecord),
+          ),
+        ),
+      };
     }
 
     if (args.dayKey) {
-      return await ctx.db
+      const page = await ctx.db
         .query("daySummaries")
         .withIndex("by_day_generatedAt", (q) => q.eq("dayKey", args.dayKey!))
         .order("desc")
         .paginate(args.paginationOpts);
+
+      return {
+        ...page,
+        page: await Promise.all(
+          page.page.map(
+            async (row) =>
+              await mapAdminSummaryRecord(row as AdminSummaryRecord),
+          ),
+        ),
+      };
     }
 
-    return await ctx.db
+    const page = await ctx.db
       .query("daySummaries")
       .withIndex("by_generatedAt")
       .order("desc")
       .paginate(args.paginationOpts);
+
+    return {
+      ...page,
+      page: await Promise.all(
+        page.page.map(
+          async (row) => await mapAdminSummaryRecord(row as AdminSummaryRecord),
+        ),
+      ),
+    };
   },
 });
 
@@ -1062,7 +1302,7 @@ export const adminGetSummary = query({
     await requireAdmin(ctx);
     const summary = await ctx.db.get(args.summaryId);
     if (!summary) throw new Error("Summary not found");
-    return summary;
+    return await mapAdminSummaryRecord(summary as AdminSummaryRecord);
   },
 });
 
@@ -1080,12 +1320,32 @@ export const adminUpdateSummary = mutation({
     const summary = await ctx.db.get(args.summaryId);
     if (!summary) throw new Error("Summary not found");
 
+    const currentSensitive = await readSummarySensitiveFields(
+      summary as AdminSummaryRecord,
+    );
+
     const updates: Record<string, unknown> = {};
     if (args.dayKey !== undefined) updates.dayKey = args.dayKey;
-    if (args.story !== undefined) updates.story = args.story;
-    if (args.highlights !== undefined) updates.highlights = args.highlights;
     if (args.sourcesUsed !== undefined) updates.sourcesUsed = args.sourcesUsed;
     updates.generatedAt = Date.now();
+
+    const shouldEncryptSensitiveFields =
+      args.story !== undefined ||
+      args.highlights !== undefined ||
+      needsSummarySensitiveMigration(summary as AdminSummaryRecord);
+
+    if (shouldEncryptSensitiveFields) {
+      const encryptedPayload = await buildSummarySensitiveWritePayload({
+        userId: summary.userId,
+        story: args.story ?? currentSensitive.story,
+        highlights:
+          args.highlights !== undefined
+            ? args.highlights
+            : currentSensitive.highlights,
+        sensitiveDataNonce: summary.sensitiveDataNonce,
+      });
+      Object.assign(updates, encryptedPayload);
+    }
 
     await ctx.db.patch(args.summaryId, updates);
     await logAdminAction(
@@ -1094,7 +1354,9 @@ export const adminUpdateSummary = mutation({
       "update_summary",
       String(args.summaryId),
     );
-    return await ctx.db.get(args.summaryId);
+    return await mapAdminSummaryRecord(
+      (await ctx.db.get(args.summaryId)) as AdminSummaryRecord,
+    );
   },
 });
 

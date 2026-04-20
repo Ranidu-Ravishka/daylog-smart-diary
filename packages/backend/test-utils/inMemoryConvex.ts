@@ -1,5 +1,17 @@
 type Primitive = string | number | boolean | null | undefined;
 
+const TEST_SENSITIVE_DATA_KEY_ID = "test-sensitive-data-key-v1";
+
+if (!process.env.SENSITIVE_DATA_KEYRING_JSON) {
+  process.env.SENSITIVE_DATA_KEYRING_JSON = JSON.stringify({
+    [TEST_SENSITIVE_DATA_KEY_ID]: Buffer.alloc(32, 17).toString("base64url"),
+  });
+}
+
+if (!process.env.SENSITIVE_DATA_ACTIVE_KEY_ID) {
+  process.env.SENSITIVE_DATA_ACTIVE_KEY_ID = TEST_SENSITIVE_DATA_KEY_ID;
+}
+
 type Condition = {
   op: "eq" | "gte" | "lte" | "gt" | "lt";
   field: string;

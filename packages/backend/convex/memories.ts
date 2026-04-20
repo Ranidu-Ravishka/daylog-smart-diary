@@ -7,6 +7,12 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { applyDashboardMetricsDelta } from "./dashboardMetrics";
 import { getPlanLimitsForTier, normalizeUserPlanTier } from "./planLimits";
 import { captureException, logInfo } from "./observability";
+import {
+  buildMemorySensitiveWritePayload,
+  readMemorySensitiveFields,
+  type MemorySensitiveRecord,
+  withMemorySensitiveFields,
+} from "./sensitiveDataFields";
 
 const IMAGE_CONTENT_TYPE_PREFIX = "image/";
 const VIDEO_CONTENT_TYPE_PREFIX = "video/";
@@ -34,6 +40,16 @@ function clampSummaryGenerationMemoryLimit(value: number | undefined): number {
 
 function bytesToMbLabel(bytes: number): string {
   return `${Math.round((bytes / (1024 * 1024)) * 10) / 10}MB`;
+}
+
+type MemoryRecord = Doc<"memories"> & MemorySensitiveRecord;
+
+async function mapMemoryForResponse<T extends MemoryRecord | null>(memory: T) {
+  if (!memory) {
+    return memory;
+  }
+
+  return await withMemorySensitiveFields(memory);
 }
 
 function assertMemoryTextLimits(args: {
@@ -281,11 +297,16 @@ export const createMemory = mutation({
           .unique();
 
         if (existing) {
+          const existingSensitive = await readMemorySensitiveFields(
+            existing as MemoryRecord,
+          );
+
           const samePayload =
-            existing.title === args.title &&
-            (existing.description ?? undefined) ===
+            existingSensitive.title === args.title &&
+            (existingSensitive.description ?? undefined) ===
               (args.description ?? undefined) &&
-            (existing.mood ?? undefined) === (args.mood ?? undefined) &&
+            (existingSensitive.mood ?? undefined) ===
+              (args.mood ?? undefined) &&
             existing.happenedAt === args.happenedAt &&
             existing.dayKey === args.dayKey;
 
@@ -304,16 +325,21 @@ export const createMemory = mutation({
             durationMs: Date.now() - startedAt,
           });
 
-          return existing;
+          return await mapMemoryForResponse(existing as MemoryRecord);
         }
       }
+
+      const encryptedPayload = await buildMemorySensitiveWritePayload({
+        userId: user._id,
+        title: args.title,
+        description: args.description,
+        mood: args.mood,
+      });
 
       const id = await ctx.db.insert("memories", {
         userId: user._id,
         clientRequestId: args.clientRequestId,
-        title: args.title,
-        description: args.description,
-        mood: args.mood,
+        ...encryptedPayload,
         happenedAt: args.happenedAt,
         dayKey: args.dayKey,
       });
@@ -331,7 +357,7 @@ export const createMemory = mutation({
         durationMs: Date.now() - startedAt,
       });
 
-      return await ctx.db.get(id);
+      return await mapMemoryForResponse((await ctx.db.get(id)) as MemoryRecord);
     } catch (error) {
       captureException("memory_creation.failed", error, {
         status: "failed",
@@ -357,7 +383,7 @@ export const getMemory = query({
     }
 
     requireOwnership(user, memory.userId);
-    return memory;
+    return await mapMemoryForResponse(memory as MemoryRecord);
   },
 });
 
@@ -370,12 +396,18 @@ export const listMemoriesByDay = query({
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
 
-    return await ctx.db
+    const memories = await ctx.db
       .query("memories")
       .withIndex("by_user_day", (q) =>
         q.eq("userId", user._id).eq("dayKey", args.dayKey),
       )
       .collect();
+
+    return await Promise.all(
+      memories.map(async (memory) =>
+        mapMemoryForResponse(memory as MemoryRecord),
+      ),
+    );
   },
 });
 
@@ -400,13 +432,19 @@ export const listMemoriesByDayForSummaryGeneration = query({
         cursor: null,
       });
 
-    return paginated.page
+    const sorted = paginated.page
       .slice()
       .sort(
         (left, right) =>
           right.happenedAt - left.happenedAt ||
           right._creationTime - left._creationTime,
       );
+
+    return await Promise.all(
+      sorted.map(async (memory) =>
+        mapMemoryForResponse(memory as MemoryRecord),
+      ),
+    );
   },
 });
 
@@ -441,9 +479,15 @@ export const listMemoriesByDayPaginated = query({
 
     const storageIdToUrl = await resolveStorageUrls(ctx, uniqueStorageIds);
 
+    const pageWithSensitiveFields = await Promise.all(
+      paginated.page.map(
+        async (memory) => await mapMemoryForResponse(memory as MemoryRecord),
+      ),
+    );
+
     return {
       ...paginated,
-      page: paginated.page.map((memory) => ({
+      page: pageWithSensitiveFields.map((memory) => ({
         ...memory,
         thumbnailUrl: memory.thumbnailStorageId
           ? (storageIdToUrl.get(memory.thumbnailStorageId) ?? null)
@@ -463,11 +507,17 @@ export const listRecentMemories = query({
     const user = await requireUser(ctx);
     const limit = clampLimit(args.limit ?? 20);
 
-    return await ctx.db
+    const memories = await ctx.db
       .query("memories")
       .withIndex("by_user_happenedAt", (q) => q.eq("userId", user._id))
       .order("desc")
       .take(limit);
+
+    return await Promise.all(
+      memories.map(async (memory) =>
+        mapMemoryForResponse(memory as MemoryRecord),
+      ),
+    );
   },
 });
 
@@ -509,24 +559,52 @@ export const updateMemory = mutation({
 
     requireOwnership(user, memory.userId);
 
+    const currentSensitive = await readMemorySensitiveFields(
+      memory as MemoryRecord,
+    );
+
     assertMemoryTextLimits({
-      title: args.title ?? memory.title,
-      description: args.description ?? memory.description,
+      title: args.title ?? currentSensitive.title,
+      description:
+        args.description !== undefined
+          ? args.description
+          : currentSensitive.description,
       planTier: user.planTier,
     });
 
     const updates: Record<string, unknown> = {};
-    if (args.title !== undefined) updates.title = args.title;
-    if (args.description !== undefined) updates.description = args.description;
-    if (args.mood !== undefined) updates.mood = args.mood;
     if (args.happenedAt !== undefined) updates.happenedAt = args.happenedAt;
     if (args.dayKey !== undefined) {
       validateDayKey(args.dayKey);
       updates.dayKey = args.dayKey;
     }
 
+    const shouldEncryptSensitiveFields =
+      args.title !== undefined ||
+      args.description !== undefined ||
+      args.mood !== undefined ||
+      !memory.titleEncrypted ||
+      !memory.sensitiveDataNonce;
+
+    if (shouldEncryptSensitiveFields) {
+      const encryptedPayload = await buildMemorySensitiveWritePayload({
+        userId: user._id,
+        title: args.title ?? currentSensitive.title,
+        description:
+          args.description !== undefined
+            ? args.description
+            : currentSensitive.description,
+        mood: args.mood !== undefined ? args.mood : currentSensitive.mood,
+        sensitiveDataNonce: memory.sensitiveDataNonce,
+      });
+
+      Object.assign(updates, encryptedPayload);
+    }
+
     await ctx.db.patch(args.memoryId, updates);
-    return await ctx.db.get(args.memoryId);
+    return await mapMemoryForResponse(
+      (await ctx.db.get(args.memoryId)) as MemoryRecord,
+    );
   },
 });
 

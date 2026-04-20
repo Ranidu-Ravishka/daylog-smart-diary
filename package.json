@@ -24,7 +24,9 @@
     "test:mobile": "pnpm --filter mobile test",
     "test:coverage": "pnpm test:coverage:backend",
     "test:coverage:backend": "pnpm --filter @repo/backend test:coverage:backend",
-    "verify:branch-protection": "node scripts/verify-branch-protection.mjs"
+    "verify:branch-protection": "node scripts/verify-branch-protection.mjs",
+    "ops:rotate-sensitive-data-keyring": "node scripts/rotate-sensitive-data-keyring.mjs",
+    "ops:run-sensitive-data-migration": "node scripts/run-sensitive-data-migration.mjs"
   },
   "devDependencies": {
     "prettier": "^3.6.2",

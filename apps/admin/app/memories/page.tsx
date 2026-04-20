@@ -187,6 +187,8 @@ export default function MemoriesPage() {
                 </p>
               ) : memoryDetail === undefined ? (
                 <p className="text-sm text-gray-600">Loading detail…</p>
+              ) : memoryDetail === null ? (
+                <p className="text-sm text-red-600">Memory not found.</p>
               ) : (
                 <div className="space-y-3 text-sm">
                   <div>

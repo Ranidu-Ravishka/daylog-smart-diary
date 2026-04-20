@@ -3,6 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Id } from "./_generated/dataModel";
 import { createAuthCtx, createInMemoryDb } from "../test-utils/inMemoryConvex";
 import * as summariesModule from "./summaries";
+import {
+  buildMemorySensitiveWritePayload,
+  readMemorySensitiveFields,
+  readSummarySensitiveFields,
+  type MemorySensitiveRecord,
+  type SummarySensitiveRecord,
+} from "./sensitiveDataFields";
 
 const originalSummaryDailyLimit = process.env.SUMMARY_DAILY_GENERATION_LIMIT;
 const originalExportJobsRetentionDays = process.env.RETENTION_EXPORT_JOBS_DAYS;
@@ -1033,7 +1040,11 @@ describe("summaries behavior", () => {
         q.eq("userId", USER_ID).eq("dayKey", "2026-04-03"),
       )
       .unique();
-    expect(updatedSummary?.story).toBe("Restored story");
+    expect(updatedSummary).not.toBeNull();
+    const updatedSummarySensitive = await readSummarySensitiveFields(
+      updatedSummary as unknown as SummarySensitiveRecord,
+    );
+    expect(updatedSummarySensitive.story).toBe("Restored story");
   });
 
   it("captures row failures when partial restore is enabled", async () => {
@@ -1756,16 +1767,41 @@ describe("summaries behavior", () => {
     });
     expect(byRequestIdInserted.inserted).toBe(1);
 
-    const insertedMemory = db
-      .getTable("memories")
-      .find(
-        (row) => row.dayKey === "2026-04-11" && row.title === "By request id",
+    let insertedMemory:
+      | {
+          _id: string;
+          dayKey?: unknown;
+        }
+      | undefined;
+
+    for (const row of db.getTable("memories")) {
+      const sensitive = await readMemorySensitiveFields(
+        row as unknown as MemorySensitiveRecord,
       );
+
+      if (row.dayKey === "2026-04-11" && sensitive.title === "By request id") {
+        insertedMemory = row as {
+          _id: string;
+          dayKey?: unknown;
+        };
+        break;
+      }
+    }
+
     expect(insertedMemory?._id).toBeDefined();
 
-    await db.patch(insertedMemory!._id, {
+    const insertedMemoryDoc = await db.get(insertedMemory!._id);
+    const mutatedEncryptedPayload = await buildMemorySensitiveWritePayload({
+      userId: USER_ID,
+      title: "By request id",
       description: "mutated-existing-row",
+      mood: "focused",
+      sensitiveDataNonce: insertedMemoryDoc?.sensitiveDataNonce as
+        | string
+        | undefined,
     });
+
+    await db.patch(insertedMemory!._id, mutatedEncryptedPayload);
 
     const byRequestIdConflictSkip = await restoreDiaryDatasetBatchInternal(
       ctx,

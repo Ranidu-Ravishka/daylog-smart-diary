@@ -78,6 +78,8 @@ Convex deployment environment:
 - `SENTRY_DSN`
 - `INTEGRATION_SECRETS_KEYRING_JSON`
 - `INTEGRATION_SECRETS_ACTIVE_KEY_ID`
+- `SENSITIVE_DATA_KEYRING_JSON`
+- `SENSITIVE_DATA_ACTIVE_KEY_ID`
 
 Retention policy values by environment (set these explicitly in Convex env):
 
@@ -219,6 +221,9 @@ Security/integration data:
 1. Audit encrypted integration secrets:
    - `integrations:adminAuditIntegrationSecretsEncryptionStatus`
 2. If `legacyPlaintextRows` is non-zero, stop rollout and complete a controlled data cleanup before continuing.
+3. Audit sensitive-data migration validation risk:
+   - `sensitiveDataMigration:adminAuditSensitiveDataTableStatus`
+4. If any table reports `validationRejectRiskRows > 0`, stop rollout before enabling/continuing writes.
 
 ## 6) Operational Commands
 
@@ -227,6 +232,34 @@ Backend logs:
 ```bash
 pnpm --filter @repo/backend logs
 ```
+
+Sensitive-data key rotation (target: `dev`, `prod`, `preview:<name>`, or `deployment:<name>`):
+
+```bash
+pnpm ops:rotate-sensitive-data-keyring -- --target <target>
+```
+
+Sensitive-data migration and audit:
+
+```bash
+pnpm ops:run-sensitive-data-migration -- --target <target> --mode dry-run
+pnpm ops:run-sensitive-data-migration -- --target <target> --mode full
+```
+
+Key ID policy for sensitive-data keyring:
+
+- Use monotonic, unique key IDs (for example `sd_YYYYMMDDHHmmss_env`).
+- Keep old key IDs in `SENSITIVE_DATA_KEYRING_JSON` while any old ciphertext may still exist.
+- Rotate by adding a new key ID/key and setting `SENSITIVE_DATA_ACTIVE_KEY_ID` to the new ID.
+
+Staging to production rollout sequence:
+
+1. Rotate keyring in staging target.
+2. Run staging dry-run migration.
+3. Run staging full migration.
+4. Confirm `validationRejectRiskRows` is zero across all tables.
+5. Rotate keyring in production target.
+6. Run production full migration and verify audit output remains at zero risk.
 
 Admin bootstrap:
 
