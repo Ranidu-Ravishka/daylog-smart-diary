@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { captureException, logInfo } from "@/lib/observability";
 
 export type SummaryFormValues = {
   dayKey: string;
@@ -68,6 +69,26 @@ export default function SummaryForm({
     setStatus("saving");
     setErrorMessage(null);
 
+    const highlightCount = highlights
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean).length;
+    const sourcesUsedCount = sourcesUsed
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean).length;
+
+    const submitContext = {
+      status: "started",
+      formTitle: title,
+      hasDayKey: dayKey.trim().length > 0,
+      hasStory: story.trim().length > 0,
+      highlightCount,
+      sourcesUsedCount,
+    };
+
+    logInfo("admin_summary_write_started", submitContext);
+
     try {
       await onSubmit({
         dayKey: dayKey.trim(),
@@ -81,8 +102,17 @@ export default function SummaryForm({
           .map((s) => s.trim())
           .filter(Boolean),
       });
+
+      logInfo("admin_summary_write_succeeded", {
+        ...submitContext,
+        status: "succeeded",
+      });
       setStatus("saved");
     } catch (error) {
+      captureException("admin_summary_write_failed", error, {
+        ...submitContext,
+        status: "failed",
+      });
       setStatus("error");
       setErrorMessage(
         error instanceof Error ? error.message : "Failed to save summary.",
