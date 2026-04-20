@@ -198,6 +198,18 @@ export function normalizeTokenRef(value: unknown): string | null {
   return next.length > 0 ? next : null;
 }
 
+export function assertOpaqueTokenRef(value: unknown, context: string): string {
+  const tokenRef = normalizeTokenRef(value);
+
+  if (!tokenRef || !isOpaqueTokenRef(tokenRef)) {
+    throw new Error(
+      `${context} must be an opaque token reference prefixed with "${OPAQUE_TOKEN_REF_PREFIX}". Raw or legacy token formats are not allowed.`,
+    );
+  }
+
+  return tokenRef;
+}
+
 export function isLegacyNonOpaqueTokenRef(value: unknown): value is string {
   const tokenRef = normalizeTokenRef(value);
   return tokenRef !== null && !isOpaqueTokenRef(tokenRef);

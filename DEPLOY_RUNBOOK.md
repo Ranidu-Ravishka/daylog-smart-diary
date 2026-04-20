@@ -218,9 +218,13 @@ Observability:
 
 Security/integration data:
 
-1. Audit encrypted integration secrets:
-   - `integrations:adminAuditIntegrationSecretsEncryptionStatus`
-2. If `legacyPlaintextRows` is non-zero, stop rollout and complete a controlled data cleanup before continuing.
+1. Run integration token hardening gate:
+   - `pnpm ops:run-integration-token-hardening -- --target <target> --mode migrate`
+2. The command must report and enforce all-zero values before deployment:
+   - `nonOpaqueCount`
+   - `unsafeCount`
+   - `legacyPlaintextRows`
+   - `missingEncryptedAccessRows`
 3. Audit sensitive-data migration validation risk:
    - `sensitiveDataMigration:adminAuditSensitiveDataTableStatus`
 4. If any table reports `validationRejectRiskRows > 0`, stop rollout before enabling/continuing writes.
@@ -244,6 +248,13 @@ Sensitive-data migration and audit:
 ```bash
 pnpm ops:run-sensitive-data-migration -- --target <target> --mode dry-run
 pnpm ops:run-sensitive-data-migration -- --target <target> --mode full
+```
+
+Integration token hardening migration and audit:
+
+```bash
+pnpm ops:run-integration-token-hardening -- --target <target> --mode migrate
+pnpm ops:run-integration-token-hardening -- --target <target> --mode audit
 ```
 
 Key ID policy for sensitive-data keyring:

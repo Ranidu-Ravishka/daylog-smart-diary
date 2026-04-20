@@ -49,6 +49,7 @@ import {
   type IntegrationDailyMetrics,
 } from "./integrations.dailyData";
 import {
+  assertOpaqueTokenRef,
   assertEncryptedOnlySecretRecord,
   deleteIntegrationSecretByRef,
   hasLegacyPlaintextSecretFields,
@@ -97,6 +98,8 @@ const LEGACY_TOKEN_REF_MIGRATION_AUDIT_ACTION =
   "migrate_legacy_integration_token_ref";
 const OPAQUE_TOKEN_REF_DEFINITION =
   'A tokenRef is opaque when it is a non-empty string prefixed with "tokref_" and does not store raw provider tokens.';
+const UNSAFE_LEGACY_TOKEN_REF_REASON =
+  "Unsafe legacy integration token reference was invalidated. Reconnect this integration.";
 const LEGACY_UNSUPPORTED_REASON =
   "This integration provider is no longer supported and has been automatically disconnected.";
 
@@ -214,6 +217,16 @@ type LegacyIntegrationTokenRefAuditRow = {
   tokenRefLength: number;
 };
 
+type UnsafeIntegrationTokenRefAuditRow = {
+  integrationId: Id<"integrations">;
+  userId: Id<"user">;
+  provider: string;
+  status: "connected" | "disconnected" | "error";
+  tokenRefState: "missing" | "legacy_non_opaque";
+  tokenRefPreview: string;
+  tokenRefLength: number;
+};
+
 type LegacyIntegrationTokenRefAuditCounts = {
   totalRows: number;
   nonOpaqueCount: number;
@@ -231,11 +244,23 @@ type LegacyIntegrationTokenRefMigrationCounts = {
   migratedCount: number;
   skippedCount: number;
   failedCount: number;
+  invalidatedCount: number;
   auditLogCount: number;
   scannedRows: number;
   nonOpaqueDetectedCount: number;
   opaqueCount: number;
   missingTokenRefRows: number;
+};
+
+type UnsafeIntegrationTokenRefAuditCounts = {
+  totalRows: number;
+  unsafeCount: number;
+  pagesScanned: number;
+  pageSize: number;
+  isDone: boolean;
+  continueCursor: string | null;
+  rows: UnsafeIntegrationTokenRefAuditRow[];
+  rowsTruncated: boolean;
 };
 
 type LegacyUnsupportedCleanupCounts = {
@@ -628,6 +653,116 @@ async function scanLegacyIntegrationTokenRefs(
     continueCursor: cursor,
     rows,
     rowsTruncated: options.includeRows && rows.length < nonOpaqueCount,
+  };
+}
+
+function providerRequiresStoredToken(provider: string): boolean {
+  const normalizedProvider = asIntegrationProvider(provider);
+  if (!normalizedProvider) {
+    return false;
+  }
+
+  return getRequiredIntegrationPlugin(normalizedProvider).requiresStoredToken;
+}
+
+function classifyUnsafeTokenRefState(
+  integration: IntegrationRecord,
+): "missing" | "legacy_non_opaque" | null {
+  if (integration.status === "disconnected") {
+    return null;
+  }
+
+  if (!providerRequiresStoredToken(integration.provider)) {
+    return null;
+  }
+
+  const tokenRef = normalizeTokenRef(integration.tokenRef);
+  if (!tokenRef) {
+    return "missing";
+  }
+
+  if (!isOpaqueTokenRef(tokenRef)) {
+    return "legacy_non_opaque";
+  }
+
+  return null;
+}
+
+async function scanUnsafeIntegrationTokenRefs(
+  db: QueryCtx["db"] | MutationCtx["db"],
+  options: {
+    pageSize: number;
+    maxPages: number;
+    includeRows: boolean;
+    maxRows: number;
+  },
+): Promise<UnsafeIntegrationTokenRefAuditCounts> {
+  let cursor: string | null = null;
+  let pagesScanned = 0;
+
+  let totalRows = 0;
+  let unsafeCount = 0;
+  const rows: UnsafeIntegrationTokenRefAuditRow[] = [];
+
+  while (pagesScanned < options.maxPages) {
+    const page = await db.query("integrations").paginate({
+      numItems: options.pageSize,
+      cursor,
+    });
+
+    pagesScanned += 1;
+
+    for (const integration of page.page as IntegrationRecord[]) {
+      totalRows += 1;
+
+      const tokenRefState = classifyUnsafeTokenRefState(integration);
+      if (!tokenRefState) {
+        continue;
+      }
+
+      unsafeCount += 1;
+
+      if (options.includeRows && rows.length < options.maxRows) {
+        const tokenRef = normalizeTokenRef(integration.tokenRef);
+
+        rows.push({
+          integrationId: integration._id,
+          userId: integration.userId,
+          provider: integration.provider,
+          status: integration.status,
+          tokenRefState,
+          tokenRefPreview: tokenRef ? redactTokenRef(tokenRef) : "<missing>",
+          tokenRefLength: tokenRef ? tokenRef.length : 0,
+        });
+      }
+    }
+
+    if (page.isDone) {
+      return {
+        totalRows,
+        unsafeCount,
+        pagesScanned,
+        pageSize: options.pageSize,
+        isDone: true,
+        continueCursor: null,
+        rows,
+        rowsTruncated: options.includeRows && rows.length < unsafeCount,
+      };
+    }
+
+    cursor = page.continueCursor;
+    if (!cursor) break;
+  }
+
+  return {
+    totalRows,
+    unsafeCount,
+    pagesScanned,
+    pageSize: options.pageSize,
+    isDone: false,
+    continueCursor: cursor,
+    rows,
+    rowsTruncated: options.includeRows && rows.length < unsafeCount,
   };
 }
 
@@ -1119,7 +1254,6 @@ export const connectIntegration = mutation({
     accessToken: v.optional(v.string()),
     refreshToken: v.optional(v.string()),
     accessTokenExpiresAt: v.optional(v.number()),
-    tokenRef: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
@@ -1133,10 +1267,9 @@ export const connectIntegration = mutation({
       scopesCount: args.scopes?.length ?? 0,
       hasAccessToken: Boolean(args.accessToken),
       hasRefreshToken: Boolean(args.refreshToken),
-      hasTokenRefInput: Boolean(args.tokenRef),
     });
 
-    const accessToken = args.accessToken ?? args.tokenRef;
+    const accessToken = args.accessToken;
 
     if (plugin.connectionMode === "oauth" && !accessToken) {
       throw new Error(
@@ -1351,7 +1484,12 @@ export const updateIntegrationTokenRefInternal = internalMutation({
     tokenRef: v.string(),
   },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.integrationId, { tokenRef: args.tokenRef });
+    const tokenRef = assertOpaqueTokenRef(
+      args.tokenRef,
+      "updateIntegrationTokenRefInternal.tokenRef",
+    );
+
+    await ctx.db.patch(args.integrationId, { tokenRef });
     return { success: true };
   },
 });
@@ -2063,8 +2201,11 @@ export { syncMyIntegrationForDayImpl };
 // Runbook (legacy integrations.tokenRef migration):
 // 1) Audit candidates with adminAuditLegacyIntegrationTokenRefs.
 // 2) Execute migration with adminMigrateLegacyIntegrationTokenRefsAll.
-// 3) Verify completion with adminCountLegacyNonOpaqueIntegrationTokenRefs.
-// 4) A successful rollout ends with nonOpaqueCount === 0.
+// 3) Verify completion with adminCountLegacyNonOpaqueIntegrationTokenRefs and
+//    adminAuditUnsafeIntegrationTokenRefs.
+// 4) Validate encrypted-only storage with adminAuditIntegrationSecretsEncryptionStatus.
+// 5) A successful rollout ends with nonOpaqueCount === 0, unsafeCount === 0,
+//    and legacyPlaintextRows === 0.
 type LegacyTokenRefAuditArgs = {
   pageSize?: number;
   maxPages?: number;
@@ -2142,6 +2283,30 @@ export async function adminCountLegacyNonOpaqueIntegrationTokenRefsImpl(
   };
 }
 
+export async function adminAuditUnsafeIntegrationTokenRefsImpl(
+  ctx: QueryCtx,
+  args: LegacyTokenRefAuditArgs,
+) {
+  await requireAdmin(ctx as never);
+
+  const pageSize = normalizeAuditPageSize(args.pageSize);
+  const maxPages = normalizeAuditMaxPages(args.maxPages);
+  const maxRows = normalizeAuditMaxRows(args.maxRows);
+
+  const counts = await scanUnsafeIntegrationTokenRefs(ctx.db, {
+    pageSize,
+    maxPages,
+    includeRows: true,
+    maxRows,
+  });
+
+  return {
+    ...counts,
+    maxRows,
+    opaqueTokenRefDefinition: OPAQUE_TOKEN_REF_DEFINITION,
+  };
+}
+
 export async function adminCountLegacyUnsupportedIntegrationsImpl(
   ctx: QueryCtx,
   args: LegacyUnsupportedCountArgs = {},
@@ -2190,6 +2355,7 @@ export async function adminMigrateLegacyIntegrationTokenRefsAllImpl(
     migratedCount: 0,
     skippedCount: 0,
     failedCount: 0,
+    invalidatedCount: 0,
     auditLogCount: 0,
     scannedRows: 0,
     nonOpaqueDetectedCount: 0,
@@ -2234,6 +2400,16 @@ export async function adminMigrateLegacyIntegrationTokenRefsAllImpl(
       const tokenRef = normalizeTokenRef(integration.tokenRef);
       if (!tokenRef) {
         counts.missingTokenRefRows += 1;
+
+        if (classifyUnsafeTokenRefState(integration) === "missing") {
+          await ctx.db.patch(integration._id, {
+            status: "disconnected",
+            tokenRef: undefined,
+            lastSyncAt: undefined,
+            lastError: UNSAFE_LEGACY_TOKEN_REF_REASON,
+          });
+          counts.invalidatedCount += 1;
+        }
       } else if (isOpaqueTokenRef(tokenRef)) {
         counts.opaqueCount += 1;
       }
@@ -2289,6 +2465,20 @@ export const adminCountLegacyNonOpaqueIntegrationTokenRefs = query({
     adminCountLegacyNonOpaqueIntegrationTokenRefsImpl(ctx, {
       pageSize: args.pageSize,
       maxPages: args.maxPages,
+    }),
+});
+
+export const adminAuditUnsafeIntegrationTokenRefs = query({
+  args: {
+    pageSize: v.optional(v.number()),
+    maxPages: v.optional(v.number()),
+    maxRows: v.optional(v.number()),
+  },
+  handler: (ctx, args) =>
+    adminAuditUnsafeIntegrationTokenRefsImpl(ctx, {
+      pageSize: args.pageSize,
+      maxPages: args.maxPages,
+      maxRows: args.maxRows,
     }),
 });
 
