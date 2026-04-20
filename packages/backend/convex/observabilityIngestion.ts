@@ -6,6 +6,7 @@ import { requireAdmin } from "./authz";
 import { captureException, logWarn } from "./observability";
 import {
   getObservabilityIngestCorsDecision,
+  type ObservabilityIngestAuthContext,
   verifyObservabilityIngestAuth,
 } from "./observabilityIngestionSecurity";
 import {
@@ -26,6 +27,8 @@ const MAX_TRANSPORT_HEALTH_FILTER_LENGTH = 80;
 const DEFAULT_RATE_LIMIT_METRICS_WINDOW_MINUTES = 60;
 const MAX_RATE_LIMIT_METRICS_WINDOW_MINUTES = 24 * 60;
 const MAX_RATE_LIMIT_METRICS_ROWS = 25_000;
+const MAX_REPLAY_NONCE_LENGTH = 160;
+const NONCE_SWEEP_BATCH_SIZE = 32;
 
 const textEncoder = new TextEncoder();
 
@@ -80,6 +83,11 @@ type ObservabilityInfoEventInsert = {
   sampleRate: number;
   sourceEnvironment?: string;
   contextJson?: string;
+};
+
+type ReplayNonceConsumeResult = {
+  accepted: boolean;
+  reason?: "replay";
 };
 
 function isObservabilityInfoEventPayloadInput(
@@ -252,6 +260,19 @@ function jsonResponse(
   });
 }
 
+function toRequestContext(
+  request: Request,
+): Record<string, string | undefined> {
+  const origin = request.headers.get("origin")?.trim();
+  const userAgent = request.headers.get("user-agent")?.trim();
+
+  return {
+    method: request.method,
+    origin: origin && origin.length > 0 ? origin : undefined,
+    userAgent: userAgent && userAgent.length > 0 ? userAgent : undefined,
+  };
+}
+
 function parseDeclaredContentLength(request: Request): number | null {
   const rawValue = request.headers.get("content-length")?.trim() ?? "";
   if (!rawValue) {
@@ -362,6 +383,60 @@ export const insertObservabilityInfoEventInternal = internalMutation({
     };
 
     return await ctx.db.insert("observabilityInfoEvents", row);
+  },
+});
+
+export const consumeObservabilityIngestNonceInternal = internalMutation({
+  args: {
+    nonce: v.string(),
+    userId: v.string(),
+    sessionId: v.string(),
+    issuedAtSeconds: v.number(),
+    expiresAtSeconds: v.number(),
+    consumedAt: v.number(),
+  },
+  handler: async (ctx, args): Promise<ReplayNonceConsumeResult> => {
+    const nonce = args.nonce.trim().slice(0, MAX_REPLAY_NONCE_LENGTH);
+    if (!nonce) {
+      return {
+        accepted: false,
+        reason: "replay",
+      };
+    }
+
+    const existing = await ctx.db
+      .query("observabilityIngestNonces")
+      .withIndex("by_nonce", (q) => q.eq("nonce", nonce))
+      .unique();
+
+    if (existing) {
+      return {
+        accepted: false,
+        reason: "replay",
+      };
+    }
+
+    const expiredRows = await ctx.db
+      .query("observabilityIngestNonces")
+      .withIndex("by_expiresAt", (q) => q.lte("expiresAt", args.consumedAt))
+      .order("asc")
+      .take(NONCE_SWEEP_BATCH_SIZE);
+
+    await Promise.all(expiredRows.map((row) => ctx.db.delete(row._id)));
+
+    await ctx.db.insert("observabilityIngestNonces", {
+      nonce,
+      userId: args.userId,
+      sessionId: args.sessionId,
+      issuedAtSeconds: args.issuedAtSeconds,
+      expiresAt: args.expiresAtSeconds * 1000,
+      consumedAt: args.consumedAt,
+      createdAt: args.consumedAt,
+    });
+
+    return {
+      accepted: true,
+    };
   },
 });
 
@@ -577,6 +652,7 @@ export const observabilityInfoEventOptions = httpAction(
     if (!corsDecision.allowed) {
       logWarn("observability_info_event_origin_rejected", {
         reason: corsDecision.reason,
+        ...toRequestContext(request),
       });
 
       return jsonResponse(
@@ -598,7 +674,7 @@ export const ingestObservabilityInfoEvent = httpAction(async (ctx, request) => {
   if (!corsDecision.allowed) {
     logWarn("observability_info_event_origin_rejected", {
       reason: corsDecision.reason,
-      method: request.method,
+      ...toRequestContext(request),
     });
 
     return jsonResponse(
@@ -616,10 +692,11 @@ export const ingestObservabilityInfoEvent = httpAction(async (ctx, request) => {
     );
   }
 
-  const authDecision = verifyObservabilityIngestAuth(request);
+  const authDecision = await verifyObservabilityIngestAuth(request);
   if (!authDecision.ok) {
     logWarn("observability_info_event_auth_rejected", {
       reason: authDecision.reason,
+      ...toRequestContext(request),
     });
 
     return jsonResponse(
@@ -629,8 +706,52 @@ export const ingestObservabilityInfoEvent = httpAction(async (ctx, request) => {
     );
   }
 
-  const rateLimitIdentity =
-    resolveObservabilityIngestRateLimitIdentity(request);
+  const authContext: ObservabilityIngestAuthContext = authDecision.auth;
+
+  let replayDecision: ReplayNonceConsumeResult | null = null;
+  try {
+    replayDecision = (await ctx.runMutation(
+      (internal as any).observabilityIngestion
+        .consumeObservabilityIngestNonceInternal,
+      {
+        nonce: authContext.tokenId,
+        userId: authContext.userId,
+        sessionId: authContext.sessionId,
+        issuedAtSeconds: authContext.issuedAtSeconds,
+        expiresAtSeconds: authContext.expiresAtSeconds,
+        consumedAt: Date.now(),
+      },
+    )) as ReplayNonceConsumeResult;
+  } catch (error) {
+    captureException("observability_info_event_replay_guard_failed", error, {
+      status: "failed_closed",
+      ...toRequestContext(request),
+    });
+
+    return jsonResponse(
+      503,
+      { error: "Temporarily unavailable" },
+      corsDecision.responseHeaders,
+    );
+  }
+
+  if (!replayDecision?.accepted) {
+    logWarn("observability_info_event_replay_rejected", {
+      reason: replayDecision?.reason ?? "replay",
+      ...toRequestContext(request),
+    });
+
+    return jsonResponse(
+      409,
+      { error: "Replay detected" },
+      corsDecision.responseHeaders,
+    );
+  }
+
+  const rateLimitIdentity = resolveObservabilityIngestRateLimitIdentity(
+    request,
+    authContext.principalKey,
+  );
   let rateLimitDecision: ObservabilityIngestRateLimitDecision | null = null;
 
   try {
@@ -648,6 +769,7 @@ export const ingestObservabilityInfoEvent = httpAction(async (ctx, request) => {
       status: "failed_open",
       ipKeyHash: fingerprintRateLimitKey(rateLimitIdentity.ipKey),
       userKeyHash: fingerprintRateLimitKey(rateLimitIdentity.userKey),
+      ...toRequestContext(request),
     });
   }
 
@@ -661,6 +783,7 @@ export const ingestObservabilityInfoEvent = httpAction(async (ctx, request) => {
       ipKeyHash: fingerprintRateLimitKey(rateLimitDecision.ipKey),
       userKeyHash: fingerprintRateLimitKey(rateLimitDecision.userKey),
       burstAttempt: rateLimitDecision.burstAttempt,
+      ...toRequestContext(request),
     });
 
     return jsonResponse(
@@ -682,6 +805,7 @@ export const ingestObservabilityInfoEvent = httpAction(async (ctx, request) => {
       blockedScopes: rateLimitDecision.blockedScopes,
       ipKeyHash: fingerprintRateLimitKey(rateLimitDecision.ipKey),
       userKeyHash: fingerprintRateLimitKey(rateLimitDecision.userKey),
+      ...toRequestContext(request),
     });
   }
 

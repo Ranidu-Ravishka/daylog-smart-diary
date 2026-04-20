@@ -1,6 +1,11 @@
-const OBSERVABILITY_INGEST_TOKEN_ENV = "OBSERVABILITY_INGEST_TOKEN";
+const OBSERVABILITY_INGEST_JWT_SECRETS_ENV = "OBSERVABILITY_INGEST_JWT_SECRETS";
 const OBSERVABILITY_INGEST_ALLOWED_ORIGINS_ENV =
   "OBSERVABILITY_INGEST_ALLOWED_ORIGINS";
+
+const INGEST_JWT_ISSUER = "daylog-observability-token";
+const INGEST_JWT_AUDIENCE = "daylog-observability-ingest";
+const INGEST_JWT_ALGORITHM = "HS256";
+const INGEST_JWT_TYPE = "JWT";
 
 const LOCAL_DEVELOPMENT_ORIGINS = [
   "http://localhost:3000",
@@ -11,24 +16,34 @@ const LOCAL_DEVELOPMENT_ORIGINS = [
 
 const PRODUCTION_ENVIRONMENT_VALUES = new Set(["production", "prod"]);
 
-const INGEST_TOKEN_MIN_LENGTH = 24;
+const JWT_SECRET_MIN_LENGTH = 32;
+const MAX_TOKEN_LIFETIME_SECONDS = 5 * 60;
+const MAX_CLOCK_SKEW_SECONDS = 30;
 
-const INGEST_TOKEN_HEADER_NAME = "x-daylog-ingest-token";
 const AUTHORIZATION_HEADER_NAME = "authorization";
 
 const CORS_ALLOW_METHODS = "POST, OPTIONS";
-const CORS_ALLOW_HEADERS =
-  "Content-Type, X-Daylog-Ingest-Token, X-Daylog-User-Id, Authorization";
+const CORS_ALLOW_HEADERS = "Content-Type, Authorization";
 
 type IngestSecurityConfig = {
-  ingestToken: string | null;
+  jwtSecrets: string[];
   allowedOrigins: Set<string>;
   configurationError: string | null;
+};
+
+export type ObservabilityIngestAuthContext = {
+  userId: string;
+  sessionId: string;
+  tokenId: string;
+  issuedAtSeconds: number;
+  expiresAtSeconds: number;
+  principalKey: string;
 };
 
 type IngestAuthDecision =
   | {
       ok: true;
+      auth: ObservabilityIngestAuthContext;
     }
   | {
       ok: false;
@@ -40,6 +55,21 @@ type IngestCorsDecision = {
   allowed: boolean;
   reason?: string;
   responseHeaders: Record<string, string>;
+};
+
+type JwtHeaderInput = {
+  alg?: unknown;
+  typ?: unknown;
+};
+
+type JwtPayloadInput = {
+  sub?: unknown;
+  sid?: unknown;
+  jti?: unknown;
+  iat?: unknown;
+  exp?: unknown;
+  iss?: unknown;
+  aud?: unknown;
 };
 
 let cachedConfigKey: string | null = null;
@@ -162,13 +192,215 @@ function parseBearerToken(value: string | null): string | null {
   return token.length > 0 ? token : null;
 }
 
-function resolveRequestIngestToken(request: Request): string | null {
-  const headerToken = request.headers.get(INGEST_TOKEN_HEADER_NAME)?.trim();
-  if (headerToken) {
-    return headerToken;
+function resolveRequestBearerToken(request: Request): string | null {
+  return parseBearerToken(request.headers.get(AUTHORIZATION_HEADER_NAME));
+}
+
+function toFiniteInteger(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
   }
 
-  return parseBearerToken(request.headers.get(AUTHORIZATION_HEADER_NAME));
+  return Math.floor(value);
+}
+
+function decodeBase64UrlJson(value: string): unknown {
+  try {
+    const json = Buffer.from(value, "base64url").toString("utf8");
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+async function signJwtInput(input: string, secret: string): Promise<string> {
+  const keyData = new TextEncoder().encode(secret);
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    keyData,
+    {
+      name: "HMAC",
+      hash: "SHA-256",
+    },
+    false,
+    ["sign"],
+  );
+
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    cryptoKey,
+    new TextEncoder().encode(input),
+  );
+
+  return Buffer.from(signature).toString("base64url");
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function parseConfiguredJwtSecrets(raw: string | undefined): {
+  secrets: string[];
+  invalidEntries: string[];
+} {
+  const unique = new Set<string>();
+  const invalidEntries: string[] = [];
+
+  const entries = (raw ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  for (const entry of entries) {
+    if (entry.length < JWT_SECRET_MIN_LENGTH) {
+      invalidEntries.push(entry);
+      continue;
+    }
+
+    unique.add(entry);
+  }
+
+  return {
+    secrets: [...unique],
+    invalidEntries,
+  };
+}
+
+function resolveJwtTokenParts(token: string): {
+  headerPart: string;
+  payloadPart: string;
+  signaturePart: string;
+} | null {
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    return null;
+  }
+
+  const [headerPart, payloadPart, signaturePart] = parts;
+  if (!headerPart || !payloadPart || !signaturePart) {
+    return null;
+  }
+
+  return {
+    headerPart,
+    payloadPart,
+    signaturePart,
+  };
+}
+
+function isExpectedJwtHeader(value: unknown): value is JwtHeaderInput {
+  return typeof value === "object" && value !== null;
+}
+
+function isExpectedJwtPayload(value: unknown): value is JwtPayloadInput {
+  return typeof value === "object" && value !== null;
+}
+
+function validateJwtClaims(payload: JwtPayloadInput):
+  | {
+      ok: true;
+      userId: string;
+      sessionId: string;
+      tokenId: string;
+      issuedAtSeconds: number;
+      expiresAtSeconds: number;
+    }
+  | {
+      ok: false;
+      reason: string;
+    } {
+  const userId = asNonEmptyString(payload.sub);
+  if (!userId) {
+    return {
+      ok: false,
+      reason: "token subject claim is invalid",
+    };
+  }
+
+  const sessionId = asNonEmptyString(payload.sid);
+  if (!sessionId) {
+    return {
+      ok: false,
+      reason: "token session claim is invalid",
+    };
+  }
+
+  const tokenId = asNonEmptyString(payload.jti);
+  if (!tokenId) {
+    return {
+      ok: false,
+      reason: "token id claim is invalid",
+    };
+  }
+
+  const issuedAtSeconds = toFiniteInteger(payload.iat);
+  const expiresAtSeconds = toFiniteInteger(payload.exp);
+
+  if (issuedAtSeconds === null || expiresAtSeconds === null) {
+    return {
+      ok: false,
+      reason: "token iat/exp claims must be integers",
+    };
+  }
+
+  if (expiresAtSeconds <= issuedAtSeconds) {
+    return {
+      ok: false,
+      reason: "token expiration must be after issue time",
+    };
+  }
+
+  const lifetimeSeconds = expiresAtSeconds - issuedAtSeconds;
+  if (lifetimeSeconds > MAX_TOKEN_LIFETIME_SECONDS) {
+    return {
+      ok: false,
+      reason: "token lifetime exceeds maximum allowed duration",
+    };
+  }
+
+  if (payload.iss !== INGEST_JWT_ISSUER) {
+    return {
+      ok: false,
+      reason: "token issuer claim is invalid",
+    };
+  }
+
+  if (payload.aud !== INGEST_JWT_AUDIENCE) {
+    return {
+      ok: false,
+      reason: "token audience claim is invalid",
+    };
+  }
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
+
+  if (issuedAtSeconds > nowSeconds + MAX_CLOCK_SKEW_SECONDS) {
+    return {
+      ok: false,
+      reason: "token issue time is in the future",
+    };
+  }
+
+  if (expiresAtSeconds <= nowSeconds - MAX_CLOCK_SKEW_SECONDS) {
+    return {
+      ok: false,
+      reason: "token is expired",
+    };
+  }
+
+  return {
+    ok: true,
+    userId,
+    sessionId,
+    tokenId,
+    issuedAtSeconds,
+    expiresAtSeconds,
+  };
 }
 
 function resolveConfigCacheKey(): string {
@@ -178,7 +410,7 @@ function resolveConfigCacheKey(): string {
     process.env.DEPLOY_ENV ?? "",
     process.env.VERCEL_ENV ?? "",
     process.env.NODE_ENV ?? "",
-    process.env[OBSERVABILITY_INGEST_TOKEN_ENV] ?? "",
+    process.env[OBSERVABILITY_INGEST_JWT_SECRETS_ENV] ?? "",
     process.env[OBSERVABILITY_INGEST_ALLOWED_ORIGINS_ENV] ?? "",
   ].join("\n");
 }
@@ -192,27 +424,27 @@ function getObservabilityIngestSecurityConfig(): IngestSecurityConfig {
   const errors: string[] = [];
   const isProduction = isProductionEnvironment();
 
-  const configuredToken =
-    process.env[OBSERVABILITY_INGEST_TOKEN_ENV]?.trim() ?? "";
-  const ingestToken = configuredToken.length > 0 ? configuredToken : null;
-
-  if (ingestToken && ingestToken.length < INGEST_TOKEN_MIN_LENGTH) {
-    errors.push(
-      `${OBSERVABILITY_INGEST_TOKEN_ENV} must be at least ${INGEST_TOKEN_MIN_LENGTH} characters.`,
-    );
-  }
-
-  if (isProduction && !ingestToken) {
-    errors.push(`${OBSERVABILITY_INGEST_TOKEN_ENV} must be configured.`);
-  }
-
-  const { origins, invalidEntries } = parseConfiguredOrigins(
-    process.env[OBSERVABILITY_INGEST_ALLOWED_ORIGINS_ENV],
+  const { secrets, invalidEntries } = parseConfiguredJwtSecrets(
+    process.env[OBSERVABILITY_INGEST_JWT_SECRETS_ENV],
   );
 
   if (invalidEntries.length > 0) {
     errors.push(
-      `${OBSERVABILITY_INGEST_ALLOWED_ORIGINS_ENV} contains invalid entries: ${invalidEntries.join(", ")}.`,
+      `${OBSERVABILITY_INGEST_JWT_SECRETS_ENV} contains entries shorter than ${JWT_SECRET_MIN_LENGTH} characters.`,
+    );
+  }
+
+  if (isProduction && secrets.length === 0) {
+    errors.push(`${OBSERVABILITY_INGEST_JWT_SECRETS_ENV} must be configured.`);
+  }
+
+  const { origins, invalidEntries: invalidOrigins } = parseConfiguredOrigins(
+    process.env[OBSERVABILITY_INGEST_ALLOWED_ORIGINS_ENV],
+  );
+
+  if (invalidOrigins.length > 0) {
+    errors.push(
+      `${OBSERVABILITY_INGEST_ALLOWED_ORIGINS_ENV} contains invalid entries: ${invalidOrigins.join(", ")}.`,
     );
   }
 
@@ -230,7 +462,7 @@ function getObservabilityIngestSecurityConfig(): IngestSecurityConfig {
 
   cachedConfigKey = cacheKey;
   cachedConfig = {
-    ingestToken,
+    jwtSecrets: secrets,
     allowedOrigins: origins,
     configurationError: errors.length > 0 ? errors.join(" ") : null,
   };
@@ -238,9 +470,9 @@ function getObservabilityIngestSecurityConfig(): IngestSecurityConfig {
   return cachedConfig;
 }
 
-export function verifyObservabilityIngestAuth(
+export async function verifyObservabilityIngestAuth(
   request: Request,
-): IngestAuthDecision {
+): Promise<IngestAuthDecision> {
   const config = getObservabilityIngestSecurityConfig();
 
   if (config.configurationError) {
@@ -251,32 +483,100 @@ export function verifyObservabilityIngestAuth(
     };
   }
 
-  if (!config.ingestToken) {
+  if (config.jwtSecrets.length === 0) {
     return {
       ok: false,
       status: 401,
-      reason: `${OBSERVABILITY_INGEST_TOKEN_ENV} is not configured`,
+      reason: `${OBSERVABILITY_INGEST_JWT_SECRETS_ENV} is not configured`,
     };
   }
 
-  const requestToken = resolveRequestIngestToken(request);
-  if (!requestToken) {
+  const bearerToken = resolveRequestBearerToken(request);
+  if (!bearerToken) {
     return {
       ok: false,
       status: 401,
-      reason: "missing ingest token",
+      reason: "missing bearer token",
     };
   }
 
-  if (!constantTimeEquals(requestToken, config.ingestToken)) {
+  const tokenParts = resolveJwtTokenParts(bearerToken);
+  if (!tokenParts) {
     return {
       ok: false,
       status: 401,
-      reason: "invalid ingest token",
+      reason: "malformed jwt token",
     };
   }
 
-  return { ok: true };
+  const decodedHeader = decodeBase64UrlJson(tokenParts.headerPart);
+  if (!isExpectedJwtHeader(decodedHeader)) {
+    return {
+      ok: false,
+      status: 401,
+      reason: "invalid jwt header",
+    };
+  }
+
+  if (
+    decodedHeader.alg !== INGEST_JWT_ALGORITHM ||
+    decodedHeader.typ !== INGEST_JWT_TYPE
+  ) {
+    return {
+      ok: false,
+      status: 401,
+      reason: "unsupported jwt header",
+    };
+  }
+
+  const decodedPayload = decodeBase64UrlJson(tokenParts.payloadPart);
+  if (!isExpectedJwtPayload(decodedPayload)) {
+    return {
+      ok: false,
+      status: 401,
+      reason: "invalid jwt payload",
+    };
+  }
+
+  const signingInput = `${tokenParts.headerPart}.${tokenParts.payloadPart}`;
+
+  let hasValidSignature = false;
+  for (const secret of config.jwtSecrets) {
+    const expectedSignature = await signJwtInput(signingInput, secret);
+    if (constantTimeEquals(tokenParts.signaturePart, expectedSignature)) {
+      hasValidSignature = true;
+      break;
+    }
+  }
+
+  if (!hasValidSignature) {
+    return {
+      ok: false,
+      status: 401,
+      reason: "invalid jwt signature",
+    };
+  }
+
+  const claims = validateJwtClaims(decodedPayload);
+  if (!claims.ok) {
+    return {
+      ok: false,
+      status: 401,
+      reason: claims.reason,
+    };
+  }
+
+  return {
+    ok: true,
+    auth: {
+      userId: claims.userId,
+      sessionId: claims.sessionId,
+      tokenId: claims.tokenId,
+      issuedAtSeconds: claims.issuedAtSeconds,
+      expiresAtSeconds: claims.expiresAtSeconds,
+      principalKey: `${claims.userId}:${claims.sessionId}`,
+    },
+  };
 }
 
 export function getObservabilityIngestCorsDecision(
@@ -295,7 +595,8 @@ export function getObservabilityIngestCorsDecision(
   const rawOrigin = request.headers.get("origin")?.trim() ?? "";
   if (rawOrigin.length === 0) {
     return {
-      allowed: true,
+      allowed: false,
+      reason: "missing origin header",
       responseHeaders: buildCorsHeaders(null),
     };
   }

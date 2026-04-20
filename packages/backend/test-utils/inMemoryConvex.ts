@@ -31,6 +31,7 @@ type TableName =
   | "integrationProviderHealth"
   | "integrationHealthEvents"
   | "observabilityInfoEvents"
+  | "observabilityIngestNonces"
   | "observabilityIngestRateLimits"
   | "observabilityIngestRateLimitMetrics"
   | "summaryGenerationEvents"
@@ -143,6 +144,11 @@ const INDEX_FIELDS: Record<TableName, Record<string, string[]>> = {
     by_receivedAt: ["receivedAt"],
     by_surface_receivedAt: ["surface", "receivedAt"],
     by_event_receivedAt: ["event", "receivedAt"],
+  },
+  observabilityIngestNonces: {
+    by_nonce: ["nonce"],
+    by_expiresAt: ["expiresAt"],
+    by_user_session_consumedAt: ["userId", "sessionId", "consumedAt"],
   },
   observabilityIngestRateLimits: {
     by_scope_key: ["scope", "key"],
@@ -428,6 +434,7 @@ export class InMemoryDb {
       integrationProviderHealth: [...(seed?.integrationProviderHealth ?? [])],
       integrationHealthEvents: [...(seed?.integrationHealthEvents ?? [])],
       observabilityInfoEvents: [...(seed?.observabilityInfoEvents ?? [])],
+      observabilityIngestNonces: [...(seed?.observabilityIngestNonces ?? [])],
       observabilityIngestRateLimits: [
         ...(seed?.observabilityIngestRateLimits ?? []),
       ],

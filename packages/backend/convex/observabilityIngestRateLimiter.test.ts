@@ -7,19 +7,19 @@ import {
 } from "./observabilityIngestRateLimiter";
 
 describe("observability ingest rate limiter utility", () => {
-  it("resolves sanitized ip and user keys from request headers", () => {
+  it("resolves sanitized ip and principal keys", () => {
     const identity = resolveObservabilityIngestRateLimitIdentity(
       new Request("https://convex.site/observability/info-event", {
         headers: {
           "x-forwarded-for": "203.0.113.24, 10.0.0.1",
-          "x-daylog-user-id": "User_001",
         },
       }),
+      "User_001:Session_01",
     );
 
     expect(identity).toEqual({
       ipKey: "203.0.113.24",
-      userKey: "user_001",
+      userKey: "user_001:session_01",
     });
   });
 

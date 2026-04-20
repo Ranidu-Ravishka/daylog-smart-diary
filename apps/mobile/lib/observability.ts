@@ -4,7 +4,6 @@ type StructuredContext = Record<string, unknown>;
 type LogLevel = "info" | "warn" | "error";
 
 const INFO_EVENT_SAMPLE_RATE_DEFAULT = 0.1;
-const INFO_EVENT_MAX_CONTEXT_JSON_LENGTH = 4_000;
 
 type SerializableError = {
   name: string;
@@ -34,8 +33,6 @@ const durableInfoEventSampleRate = toSampleRate(
   process.env.EXPO_PUBLIC_INFO_EVENT_SAMPLE_RATE,
   INFO_EVENT_SAMPLE_RATE_DEFAULT,
 );
-const durableInfoEventIngestToken =
-  process.env.EXPO_PUBLIC_OBSERVABILITY_INGEST_TOKEN?.trim() ?? "";
 const durableInfoEventEndpoint = resolveInfoEventEndpoint(
   process.env.EXPO_PUBLIC_CONVEX_URL,
 );
@@ -74,19 +71,6 @@ function resolveInfoEventEndpoint(
   return `${trimmed.replace(/\/+$/, "")}/observability/info-event`;
 }
 
-function toContextJson(context: StructuredContext): string | undefined {
-  try {
-    const serialized = JSON.stringify(context);
-    if (!serialized || serialized === "{}") {
-      return undefined;
-    }
-
-    return serialized.slice(0, INFO_EVENT_MAX_CONTEXT_JSON_LENGTH);
-  } catch {
-    return undefined;
-  }
-}
-
 function toSerializableError(error: unknown): SerializableError {
   if (error instanceof Error) {
     return {
@@ -100,19 +84,6 @@ function toSerializableError(error: unknown): SerializableError {
     name: "UnknownError",
     message: String(error),
   };
-}
-
-function buildInfoEventHeaders(userId: string | null): Record<string, string> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "X-Daylog-Ingest-Token": durableInfoEventIngestToken,
-  };
-
-  if (userId) {
-    headers["X-Daylog-User-Id"] = userId;
-  }
-
-  return headers;
 }
 
 function toStringOrNull(value: unknown): string | null {
@@ -179,7 +150,6 @@ function emitDurableInfoEvent(payload: StructuredLogEnvelope) {
   }
 
   if (
-    !durableInfoEventIngestToken ||
     !durableInfoEventEndpoint ||
     (!isLifecycleEvent(payload.event) &&
       !shouldSample(durableInfoEventSampleRate))
@@ -187,28 +157,9 @@ function emitDurableInfoEvent(payload: StructuredLogEnvelope) {
     return;
   }
 
-  const requestBody = JSON.stringify({
-    schemaVersion: payload.schemaVersion,
-    app: payload.app,
-    surface: payload.surface,
-    level: payload.level,
-    event: payload.event,
-    timestamp: payload.timestamp,
-    sampleRate: durableInfoEventSampleRate,
-    sourceEnvironment: mobileEnvironment,
-    contextJson: toContextJson({
-      ...payload.context,
-      userId: payload.userId,
-      status: payload.status,
-      errorMessage: payload.errorMessage,
-    }),
-  });
-
-  void fetch(durableInfoEventEndpoint, {
-    method: "POST",
-    headers: buildInfoEventHeaders(payload.userId),
-    body: requestBody,
-  }).catch(() => undefined);
+  // Native transport is intentionally disabled until mobile receives
+  // server-issued short-lived ingest JWTs.
+  return;
 }
 
 function writeStructuredLog(
