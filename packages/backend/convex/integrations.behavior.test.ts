@@ -255,6 +255,36 @@ describe("integration sync behavior", () => {
     expect(state.recordSyncCalls).toBe(0);
   });
 
+  it("rejects unsafe legacy non-opaque token refs during sync", async () => {
+    const state = createBaseState({
+      integration: {
+        _id: "integration_legacy_001",
+        userId: "user_001",
+        provider: "spotify",
+        status: "connected",
+        tokenRef: "legacy_plaintext_token_001",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      secrets: new Map(),
+    });
+    const ctx = createSyncContext(state);
+
+    await expect(
+      syncMyIntegrationForDayImpl(ctx, {
+        provider: "spotify",
+        dayKey: "2026-03-30",
+      }),
+    ).rejects.toThrow("unsafe legacy token reference");
+
+    expect(state.upsertCalls).toBe(0);
+    expect(state.recordSyncCalls).toBe(0);
+    expect(state.markErrors).toHaveLength(1);
+    expect(state.completeRuns).toContainEqual(
+      expect.objectContaining({ status: "error" }),
+    );
+  });
+
   it("is idempotent for repeated day sync requests", async () => {
     const state = createBaseState({
       beginQueue: [

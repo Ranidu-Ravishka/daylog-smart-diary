@@ -26,7 +26,8 @@
     "test:coverage:backend": "pnpm --filter @repo/backend test:coverage:backend",
     "verify:branch-protection": "node scripts/verify-branch-protection.mjs",
     "ops:rotate-sensitive-data-keyring": "node scripts/rotate-sensitive-data-keyring.mjs",
-    "ops:run-sensitive-data-migration": "node scripts/run-sensitive-data-migration.mjs"
+    "ops:run-sensitive-data-migration": "node scripts/run-sensitive-data-migration.mjs",
+    "ops:run-integration-token-hardening": "node scripts/run-integration-token-hardening.mjs"
   },
   "devDependencies": {
     "prettier": "^3.6.2",

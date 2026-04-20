@@ -126,67 +126,50 @@ export async function syncMyIntegrationForDayImpl(
       }
 
       currentTokenRef = integration.tokenRef;
-      accessToken = integration.tokenRef;
+      if (!isOpaqueTokenRef(integration.tokenRef)) {
+        throw new Error(
+          `Provider "${provider}" has an unsafe legacy token reference. Run token hardening migration and reconnect this integration before syncing.`,
+        );
+      }
 
-      if (isOpaqueTokenRef(integration.tokenRef)) {
-        const secret = (await ctx.runQuery(
-          internal.integrations.getIntegrationAccessTokenByRefInternal,
-          {
-            tokenRef: integration.tokenRef,
-            userId: integration.userId,
-            provider,
-          },
-        )) as {
-          accessToken: string;
-          refreshToken?: string;
-          accessTokenExpiresAt?: number;
-          needsKeyRotation?: boolean;
-        } | null;
+      const secret = (await ctx.runQuery(
+        internal.integrations.getIntegrationAccessTokenByRefInternal,
+        {
+          tokenRef: integration.tokenRef,
+          userId: integration.userId,
+          provider,
+        },
+      )) as {
+        accessToken: string;
+        refreshToken?: string;
+        accessTokenExpiresAt?: number;
+        needsKeyRotation?: boolean;
+      } | null;
 
-        if (!secret?.accessToken) {
-          throw new Error(
-            `Provider "${provider}" secret not found. Reconnect integration before syncing.`,
-          );
-        }
+      if (!secret?.accessToken) {
+        throw new Error(
+          `Provider "${provider}" secret not found. Reconnect integration before syncing.`,
+        );
+      }
 
-        accessToken = secret.accessToken;
-        refreshToken = secret.refreshToken;
-        accessTokenExpiresAt = secret.accessTokenExpiresAt;
-        latestTokenValidityStatus =
-          deriveTokenValidityStatus(accessTokenExpiresAt);
+      accessToken = secret.accessToken;
+      refreshToken = secret.refreshToken;
+      accessTokenExpiresAt = secret.accessTokenExpiresAt;
+      latestTokenValidityStatus =
+        deriveTokenValidityStatus(accessTokenExpiresAt);
 
-        if (secret.needsKeyRotation) {
-          currentTokenRef = await ctx.runMutation(
-            internal.integrations.storeIntegrationSecretInternal,
-            {
-              userId: integration.userId,
-              provider,
-              accessToken,
-              refreshToken,
-              accessTokenExpiresAt,
-              existingTokenRef: currentTokenRef,
-            },
-          );
-        }
-      } else {
-        const migratedTokenRef = await ctx.runMutation(
+      if (secret.needsKeyRotation) {
+        currentTokenRef = await ctx.runMutation(
           internal.integrations.storeIntegrationSecretInternal,
           {
             userId: integration.userId,
             provider,
-            accessToken: integration.tokenRef,
+            accessToken,
+            refreshToken,
+            accessTokenExpiresAt,
+            existingTokenRef: currentTokenRef,
           },
         );
-
-        await ctx.runMutation(
-          internal.integrations.updateIntegrationTokenRefInternal,
-          {
-            integrationId: integration._id,
-            tokenRef: migratedTokenRef,
-          },
-        );
-
-        currentTokenRef = migratedTokenRef;
       }
     }
 

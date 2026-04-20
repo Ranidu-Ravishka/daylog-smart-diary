@@ -9,6 +9,7 @@ import {
   asIntegrationProvider,
   assertIntegrationProvider,
 } from "./integrationProviders";
+import { isOpaqueTokenRef, normalizeTokenRef } from "./integrations.auth";
 import {
   deleteDayCascadeData,
   deleteMemoryMediaByMemoryId,
@@ -36,7 +37,6 @@ import {
   type SummarySensitiveRecord,
 } from "./sensitiveDataFields";
 
-const OPAQUE_TOKEN_REF_PREFIX = "tokref_";
 const DELETE_BATCH_SIZE = 256;
 
 type AdminMemoryRecord = Doc<"memories"> & MemorySensitiveRecord;
@@ -1402,17 +1402,18 @@ export const adminCreateIntegration = mutation({
     const admin = await requireAdmin(ctx);
     const provider = assertIntegrationProvider(args.provider);
 
-    const nextTokenRef: string | undefined =
-      args.tokenRef && !args.tokenRef.startsWith(OPAQUE_TOKEN_REF_PREFIX)
-        ? await ctx.runMutation(
-            internal.integrations.storeIntegrationSecretInternal,
-            {
-              userId: args.userId,
-              provider,
-              accessToken: args.tokenRef,
-            },
-          )
-        : args.tokenRef;
+    const normalizedTokenRef = normalizeTokenRef(args.tokenRef);
+    let nextTokenRef: string | undefined;
+
+    if (normalizedTokenRef === null) {
+      nextTokenRef = undefined;
+    } else if (!isOpaqueTokenRef(normalizedTokenRef)) {
+      throw new Error(
+        'adminCreateIntegration.tokenRef must be an opaque tokenRef prefixed with "tokref_". Raw token values are rejected.',
+      );
+    } else {
+      nextTokenRef = normalizedTokenRef;
+    }
 
     const id: Id<"integrations"> = await ctx.db.insert("integrations", {
       userId: args.userId,
@@ -1532,18 +1533,16 @@ export const adminUpdateIntegration = mutation({
         );
       }
 
-      if (args.tokenRef && !args.tokenRef.startsWith(OPAQUE_TOKEN_REF_PREFIX)) {
-        updates.tokenRef = await ctx.runMutation(
-          internal.integrations.storeIntegrationSecretInternal,
-          {
-            userId: integration.userId,
-            provider: nextProvider,
-            accessToken: args.tokenRef,
-            existingTokenRef: integration.tokenRef,
-          },
+      const normalizedTokenRef = normalizeTokenRef(args.tokenRef);
+
+      if (normalizedTokenRef === null) {
+        updates.tokenRef = undefined;
+      } else if (!isOpaqueTokenRef(normalizedTokenRef)) {
+        throw new Error(
+          'adminUpdateIntegration.tokenRef must be an opaque tokenRef prefixed with "tokref_". Raw token values are rejected.',
         );
       } else {
-        updates.tokenRef = args.tokenRef;
+        updates.tokenRef = normalizedTokenRef;
       }
     }
 
@@ -1583,7 +1582,7 @@ export const adminDeleteIntegration = mutation({
     }
 
     const tokenRef = integration.tokenRef;
-    if (tokenRef && tokenRef.startsWith(OPAQUE_TOKEN_REF_PREFIX)) {
+    if (tokenRef && isOpaqueTokenRef(tokenRef)) {
       const secret = await ctx.db
         .query("integrationSecrets")
         .withIndex("by_tokenRef", (q) => q.eq("tokenRef", tokenRef))

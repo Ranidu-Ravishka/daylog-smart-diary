@@ -59,6 +59,52 @@ describe("admin behavior", () => {
     ).rejects.toThrow("Forbidden");
   });
 
+  it("rejects plaintext tokenRef writes for integrations", async () => {
+    const db = seededDb();
+    const ctx = adminCtx(db);
+
+    const adminCreateIntegration = handler<
+      {
+        userId: Id<"user">;
+        provider: string;
+        status: "connected" | "disconnected" | "error";
+        tokenRef?: string;
+      },
+      { _id: Id<"integrations">; tokenRef?: string } | null
+    >(adminModule.adminCreateIntegration);
+
+    const adminUpdateIntegration = handler<
+      {
+        integrationId: Id<"integrations">;
+        tokenRef?: string;
+      },
+      { _id: Id<"integrations">; tokenRef?: string } | null
+    >(adminModule.adminUpdateIntegration);
+
+    await expect(
+      adminCreateIntegration(ctx, {
+        userId: MEMBER_ID,
+        provider: "spotify",
+        status: "connected",
+        tokenRef: "legacy_plaintext_token_001",
+      }),
+    ).rejects.toThrow("opaque tokenRef");
+
+    const created = await adminCreateIntegration(ctx, {
+      userId: MEMBER_ID,
+      provider: "spotify",
+      status: "connected",
+      tokenRef: "tokref_admin_secure_001",
+    });
+
+    await expect(
+      adminUpdateIntegration(ctx, {
+        integrationId: created!._id,
+        tokenRef: "legacy_plaintext_token_002",
+      }),
+    ).rejects.toThrow("opaque tokenRef");
+  });
+
   it("covers core admin CRUD and pagination flows", async () => {
     const db = seededDb();
     const ctx = adminCtx(db);

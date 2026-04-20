@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Id } from "./_generated/dataModel";
 import {
   adminAuditLegacyIntegrationTokenRefsImpl,
+  adminAuditUnsafeIntegrationTokenRefsImpl,
   adminCountLegacyNonOpaqueIntegrationTokenRefsImpl,
   adminMigrateLegacyIntegrationTokenRefsAllImpl,
 } from "./integrations";
@@ -20,6 +21,8 @@ const LEGACY_GOOGLE_FIT_INTEGRATION_ID = "integration_legacy_google_fit_001";
 const EMPTY_TOKEN_REF_INTEGRATION_ID = "integration_empty_token_ref_001";
 const WHITESPACE_TOKEN_REF_INTEGRATION_ID =
   "integration_whitespace_token_ref_001";
+const CONNECTED_MISSING_TOKEN_REF_INTEGRATION_ID =
+  "integration_connected_missing_token_ref_001";
 const NON_STRING_TOKEN_REF_INTEGRATION_ID =
   "integration_non_string_token_ref_001";
 const ALREADY_MIGRATED_INTEGRATION_ID = "integration_opaque_001";
@@ -36,6 +39,7 @@ type IntegrationDoc = {
   provider: string;
   status: "connected" | "disconnected" | "error";
   tokenRef?: unknown;
+  lastError?: string;
 };
 
 type IntegrationSecretDoc = {
@@ -103,6 +107,14 @@ function seedMigrationDb() {
         userId: USER_ALPHA_ID,
         provider: "spotify",
         status: "disconnected",
+        tokenRef: "   ",
+      },
+      {
+        _id: CONNECTED_MISSING_TOKEN_REF_INTEGRATION_ID,
+        _creationTime: 13,
+        userId: USER_ALPHA_ID,
+        provider: "spotify",
+        status: "connected",
         tokenRef: "   ",
       },
       {
@@ -201,10 +213,10 @@ describe("integrations tokenRef migration regression suite", () => {
       maxRows: 10,
     });
 
-    expect(audit.totalRows).toBe(7);
+    expect(audit.totalRows).toBe(8);
     expect(audit.nonOpaqueCount).toBe(2);
     expect(audit.opaqueCount).toBe(1);
-    expect(audit.missingTokenRefRows).toBe(4);
+    expect(audit.missingTokenRefRows).toBe(5);
     expect(audit.rowsTruncated).toBe(false);
 
     expect(audit.rows.map((row) => row.integrationId).sort()).toEqual(
@@ -232,6 +244,7 @@ describe("integrations tokenRef migration regression suite", () => {
     );
 
     expect(migration.migratedCount).toBe(2);
+    expect(migration.invalidatedCount).toBe(1);
     expect(migration.failedCount).toBe(0);
     expect(migration.auditLogCount).toBe(2);
 
@@ -247,6 +260,10 @@ describe("integrations tokenRef migration regression suite", () => {
       db,
       ALREADY_MIGRATED_INTEGRATION_ID,
     );
+    const connectedMissingTokenRef = findIntegration(
+      db,
+      CONNECTED_MISSING_TOKEN_REF_INTEGRATION_ID,
+    );
 
     expect(typeof spotifyIntegration.tokenRef).toBe("string");
     expect(String(spotifyIntegration.tokenRef)).toMatch(/^tokref_/);
@@ -256,6 +273,11 @@ describe("integrations tokenRef migration regression suite", () => {
       PREEXISTING_GOOGLE_FIT_OPAQUE_REF,
     );
     expect(alreadyMigrated.tokenRef).toBe(EXISTING_OPAQUE_TOKEN_REF);
+    expect(connectedMissingTokenRef.status).toBe("disconnected");
+    expect(connectedMissingTokenRef.tokenRef).toBeUndefined();
+    expect(String(connectedMissingTokenRef.lastError ?? "")).toContain(
+      "Unsafe legacy integration token reference",
+    );
 
     const secrets = db.getTable(
       "integrationSecrets",
@@ -313,6 +335,7 @@ describe("integrations tokenRef migration regression suite", () => {
     );
 
     expect(rerun.migratedCount).toBe(0);
+    expect(rerun.invalidatedCount).toBe(0);
     expect(rerun.failedCount).toBe(0);
     expect(rerun.auditLogCount).toBe(0);
 
@@ -357,6 +380,16 @@ describe("integrations tokenRef migration regression suite", () => {
     const verification =
       await adminCountLegacyNonOpaqueIntegrationTokenRefsImpl(ctx as never, {});
     expect(verification.nonOpaqueCount).toBe(0);
+
+    const unsafeAudit = await adminAuditUnsafeIntegrationTokenRefsImpl(
+      ctx as never,
+      {
+        pageSize: 10,
+        maxPages: 5,
+        maxRows: 10,
+      },
+    );
+    expect(unsafeAudit.unsafeCount).toBe(0);
   });
 
   it("leaves empty tokenRef, whitespace tokenRef, and non-string tokenRef rows untouched", async () => {
