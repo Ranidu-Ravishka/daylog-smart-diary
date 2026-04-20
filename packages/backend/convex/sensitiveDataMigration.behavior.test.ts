@@ -24,6 +24,18 @@ function setKeyring(activeKeyId: string, entries: Record<string, string>) {
   process.env.SENSITIVE_DATA_ACTIVE_KEY_ID = activeKeyId;
 }
 
+function fakeEnvelope(seed: string) {
+  return {
+    version: 1,
+    algorithm: "AES-256-GCM" as const,
+    keyId: `sd-key-${seed}`,
+    keyVersion: 1,
+    ciphertext: "Y2lwaGVydGV4dA",
+    iv: "aXY",
+    createdAt: 1_747_000_000,
+  };
+}
+
 function seededDb() {
   return createInMemoryDb({
     user: [
@@ -262,5 +274,277 @@ describe("sensitive data migration", () => {
         table: "memories",
       }),
     ).rejects.toThrow("Forbidden: admin access required");
+  });
+
+  it("audits validation-reject-risk rows across all sensitive tables", async () => {
+    const keyV1 = Buffer.alloc(32, 12).toString("base64url");
+    setKeyring("sd-key-v1", { "sd-key-v1": keyV1 });
+
+    const db = createInMemoryDb({
+      user: [
+        {
+          _id: ADMIN_USER_ID,
+          _creationTime: 1,
+          clerkUserId: "clerk_admin_001",
+          email: "admin@example.com",
+          isAdmin: true,
+        },
+        {
+          _id: MEMBER_USER_ID,
+          _creationTime: 2,
+          clerkUserId: "clerk_member_001",
+          email: "member@example.com",
+          isAdmin: false,
+        },
+      ],
+      memories: [
+        {
+          _id: "memory_risk_001",
+          _creationTime: 3,
+          userId: MEMBER_USER_ID,
+          dayKey: "2026-05-01",
+          happenedAt: 1_747_000_001,
+          titleEncrypted: fakeEnvelope("mem_title"),
+          descriptionEncrypted: fakeEnvelope("mem_desc"),
+          moodEncrypted: fakeEnvelope("mem_mood"),
+          sensitiveDataMigratedAt: 1_747_000_010,
+        },
+      ],
+      days: [
+        {
+          _id: "day_risk_001",
+          _creationTime: 4,
+          userId: MEMBER_USER_ID,
+          dayKey: "2026-05-01",
+          rating: 4,
+          manualNotesEncrypted: fakeEnvelope("day_notes"),
+          peopleTagsEncrypted: fakeEnvelope("day_tags"),
+          sensitiveDataMigratedAt: 1_747_000_011,
+        },
+      ],
+      daySummaries: [
+        {
+          _id: "summary_risk_001",
+          _creationTime: 5,
+          userId: MEMBER_USER_ID,
+          dayKey: "2026-05-01",
+          generatedAt: 1_747_000_002,
+          sourcesUsed: ["memories"],
+          storyEncrypted: fakeEnvelope("sum_story"),
+          highlightsEncrypted: fakeEnvelope("sum_highlights"),
+          sensitiveDataMigratedAt: 1_747_000_012,
+        },
+      ],
+      integrationDailyData: [
+        {
+          _id: "integration_risk_001",
+          _creationTime: 6,
+          userId: MEMBER_USER_ID,
+          provider: "google_fit",
+          dayKey: "2026-05-01",
+          syncedAt: 1_747_000_003,
+          summaryEncrypted: fakeEnvelope("int_summary"),
+          signalsEncrypted: fakeEnvelope("int_signals"),
+          contextEncrypted: fakeEnvelope("int_context"),
+          sensitiveDataMigratedAt: 1_747_000_013,
+        },
+      ],
+    });
+
+    const auditTable = handler<
+      {
+        table: "memories" | "days" | "daySummaries" | "integrationDailyData";
+        batchSize?: number;
+        cursor?: string;
+      },
+      {
+        table: string;
+        scanned: number;
+        missingNonceRows: number;
+        missingNonceRejectRiskRows: number;
+        validationRejectRiskRows: number;
+        done: boolean;
+      }
+    >(migrationModule.adminAuditSensitiveDataTableStatus);
+
+    for (const table of [
+      "memories",
+      "days",
+      "daySummaries",
+      "integrationDailyData",
+    ] as const) {
+      const result = await auditTable(createAuthCtx(db, "clerk_admin_001"), {
+        table,
+        batchSize: 10,
+      });
+
+      expect(result.table).toBe(table);
+      expect(result.scanned).toBe(1);
+      expect(result.missingNonceRows).toBe(1);
+      expect(result.missingNonceRejectRiskRows).toBe(1);
+      expect(result.validationRejectRiskRows).toBe(1);
+      expect(result.done).toBe(true);
+    }
+  });
+
+  it("supports cursor-based migration pagination for string and number cursors", async () => {
+    const keyV1 = Buffer.alloc(32, 13).toString("base64url");
+    setKeyring("sd-key-v1", { "sd-key-v1": keyV1 });
+
+    const db = createInMemoryDb({
+      user: [
+        {
+          _id: ADMIN_USER_ID,
+          _creationTime: 1,
+          clerkUserId: "clerk_admin_001",
+          email: "admin@example.com",
+          isAdmin: true,
+        },
+        {
+          _id: MEMBER_USER_ID,
+          _creationTime: 2,
+          clerkUserId: "clerk_member_001",
+          email: "member@example.com",
+          isAdmin: false,
+        },
+      ],
+      days: [
+        {
+          _id: "day_page_001",
+          _creationTime: 3,
+          userId: MEMBER_USER_ID,
+          dayKey: "2026-05-01",
+          rating: 3,
+          manualNotes: ["one"],
+          peopleTags: ["A"],
+        },
+        {
+          _id: "day_page_002",
+          _creationTime: 4,
+          userId: MEMBER_USER_ID,
+          dayKey: "2026-05-02",
+          rating: 4,
+          manualNotes: ["two"],
+          peopleTags: ["B"],
+        },
+      ],
+      integrationDailyData: [
+        {
+          _id: "integration_page_001",
+          _creationTime: 5,
+          userId: MEMBER_USER_ID,
+          provider: "google_fit",
+          dayKey: "2026-05-01",
+          summary: "first",
+          signals: ["s1"],
+          syncedAt: 1_747_000_001,
+        },
+        {
+          _id: "integration_page_002",
+          _creationTime: 6,
+          userId: MEMBER_USER_ID,
+          provider: "google_fit",
+          dayKey: "2026-05-02",
+          summary: "second",
+          signals: ["s2"],
+          syncedAt: 1_747_000_002,
+        },
+      ],
+    });
+
+    const migrateBatch = handler<
+      {
+        table: "days" | "integrationDailyData";
+        batchSize?: number;
+        cursor?: string;
+        dryRun?: boolean;
+      },
+      {
+        scanned: number;
+        done: boolean;
+        nextCursor?: string;
+      }
+    >(migrationModule.adminMigrateSensitiveDataBatch);
+
+    const dayFirstPage = await migrateBatch(
+      createAuthCtx(db, "clerk_admin_001"),
+      {
+        table: "days",
+        batchSize: 1,
+        dryRun: true,
+      },
+    );
+
+    expect(dayFirstPage.scanned).toBe(1);
+    expect(dayFirstPage.done).toBe(false);
+    expect(dayFirstPage.nextCursor).toBeDefined();
+
+    const daySecondPage = await migrateBatch(
+      createAuthCtx(db, "clerk_admin_001"),
+      {
+        table: "days",
+        batchSize: 1,
+        dryRun: true,
+        cursor: dayFirstPage.nextCursor,
+      },
+    );
+
+    expect(daySecondPage.scanned).toBe(1);
+    expect(daySecondPage.done).toBe(true);
+
+    const integrationFirstPage = await migrateBatch(
+      createAuthCtx(db, "clerk_admin_001"),
+      {
+        table: "integrationDailyData",
+        batchSize: 1,
+        dryRun: true,
+      },
+    );
+
+    expect(integrationFirstPage.scanned).toBe(1);
+    expect(integrationFirstPage.done).toBe(false);
+    expect(integrationFirstPage.nextCursor).toBeDefined();
+
+    const integrationSecondPage = await migrateBatch(
+      createAuthCtx(db, "clerk_admin_001"),
+      {
+        table: "integrationDailyData",
+        batchSize: 1,
+        dryRun: true,
+        cursor: integrationFirstPage.nextCursor,
+      },
+    );
+
+    expect(integrationSecondPage.scanned).toBe(1);
+    expect(integrationSecondPage.done).toBe(true);
+  });
+
+  it("rejects invalid migration cursors", async () => {
+    const keyV1 = Buffer.alloc(32, 14).toString("base64url");
+    setKeyring("sd-key-v1", { "sd-key-v1": keyV1 });
+
+    const db = seededDb();
+    const auditTable = handler<
+      {
+        table: "memories" | "days";
+        batchSize?: number;
+        cursor?: string;
+      },
+      unknown
+    >(migrationModule.adminAuditSensitiveDataTableStatus);
+
+    await expect(
+      auditTable(createAuthCtx(db, "clerk_admin_001"), {
+        table: "memories",
+        cursor: "invalid",
+      }),
+    ).rejects.toThrow("Invalid migration cursor format");
+
+    await expect(
+      auditTable(createAuthCtx(db, "clerk_admin_001"), {
+        table: "days",
+        cursor: "::",
+      }),
+    ).rejects.toThrow("Invalid migration cursor format");
   });
 });
