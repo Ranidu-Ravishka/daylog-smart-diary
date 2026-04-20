@@ -1,0 +1,98 @@
+
+> web@0.1.0 test /Users/raniduravishka/DayLog-Test/apps/web
+> pnpm test:oauth-abuse
+
+
+> web@0.1.0 test:oauth-abuse /Users/raniduravishka/DayLog-Test/apps/web
+> vitest run --config vitest.config.ts
+
+
+[1m[46m RUN [49m[22m [36mv4.1.2 [39m[90m/Users/raniduravishka/DayLog-Test/apps/web[39m
+
+ [32m✓[39m app/api/observability/token/route.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+[90mstdout[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mrejects tampered state with 4xx and zero side effects
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"info","event":"oauth_callback_request_received","timestamp":"2026-04-20T16:45:19.163Z","userId":null,"status":"info","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","stateProvided":true,"statePrefix":"state_ta","hasCode":true,"providerError":null,"providerErrorDescription":null}}
+
+[90mstderr[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mrejects tampered state with 4xx and zero side effects
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"warn","event":"oauth_callback_state_validation_failed","timestamp":"2026-04-20T16:45:19.164Z","userId":null,"status":"warning","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","statePrefix":"state_ta","hasStateCookie":true,"stateMatched":false,"hasCode":true}}
+{"schemaVersion":1,"app":"daylog","surface":"web","level":"warn","event":"oauth_callback_rejected","timestamp":"2026-04-20T16:45:19.165Z","userId":null,"status":"warning","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","code":"validation_failed","message":"OAuth callback rejected.","returnPath":"/dashboard/settings","redirectTo":"/dashboard/settings?integrationProvider=spotify&integrationStatus=error&integrationMessage=OAuth+callback+rejected."}}
+
+[90mstdout[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mhard rejects user mismatch with no token persistence
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"info","event":"oauth_callback_request_received","timestamp":"2026-04-20T16:45:19.166Z","userId":null,"status":"info","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","stateProvided":true,"statePrefix":"state_va","hasCode":true,"providerError":null,"providerErrorDescription":null}}
+{"schemaVersion":1,"app":"daylog","surface":"web","level":"info","event":"oauth_callback_state_validated","timestamp":"2026-04-20T16:45:19.166Z","userId":null,"status":"info","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","statePrefix":"state_va","returnPath":"/dashboard/settings"}}
+
+[90mstderr[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mhard rejects user mismatch with no token persistence
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"warn","event":"oauth_callback_rejected","timestamp":"2026-04-20T16:45:19.167Z","userId":null,"status":"warning","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","code":"user_mismatch","message":"OAuth callback rejected.","returnPath":"/dashboard/settings","redirectTo":"/dashboard/settings?integrationProvider=spotify&integrationStatus=error&integrationMessage=OAuth+callback+rejected."}}
+
+[90mstdout[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mrejects replayed callback payload and prevents duplicate side effects
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"info","event":"oauth_start_request_received","timestamp":"2026-04-20T16:45:19.168Z","userId":"user_1","status":"info","errorMessage":null,"context":{"area":"oauth_start","provider":"spotify","userId":"user_1","returnPath":"/dashboard/settings","callbackUrl":"https://app.daylog.test/api/integrations/oauth/spotify/callback","appBaseUrl":"https://app.daylog.test","statePrefix":"aa1ae29a"}}
+{"schemaVersion":1,"app":"daylog","surface":"web","level":"info","event":"oauth_start_provider_redirect_issued","timestamp":"2026-04-20T16:45:19.168Z","userId":"user_1","status":"info","errorMessage":null,"context":{"area":"oauth_start","provider":"spotify","userId":"user_1","returnPath":"/dashboard/settings","providerHost":"accounts.spotify.com","callbackUrl":"https://app.daylog.test/api/integrations/oauth/spotify/callback","statePrefix":"aa1ae29a"}}
+
+[90mstdout[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mrejects replayed callback payload and prevents duplicate side effects
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"info","event":"oauth_callback_request_received","timestamp":"2026-04-20T16:45:19.168Z","userId":null,"status":"info","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","stateProvided":true,"statePrefix":"aa1ae29a","hasCode":true,"providerError":null,"providerErrorDescription":null}}
+{"schemaVersion":1,"app":"daylog","surface":"web","level":"info","event":"oauth_callback_state_validated","timestamp":"2026-04-20T16:45:19.169Z","userId":null,"status":"info","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","statePrefix":"aa1ae29a","returnPath":"/dashboard/settings"}}
+
+[90mstdout[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mrejects replayed callback payload and prevents duplicate side effects
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"info","event":"oauth_callback_token_exchange_started","timestamp":"2026-04-20T16:45:19.169Z","userId":"user_1","status":"info","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","userId":"user_1","callbackUrl":"https://app.daylog.test/api/integrations/oauth/spotify/callback","returnPath":"/dashboard/settings"}}
+
+[90mstdout[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mrejects replayed callback payload and prevents duplicate side effects
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"info","event":"oauth_callback_connect_mutation_succeeded","timestamp":"2026-04-20T16:45:19.170Z","userId":"user_1","status":"info","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","userId":"user_1","returnPath":"/dashboard/settings","grantedScopeCount":2,"hasRefreshToken":true}}
+{"schemaVersion":1,"app":"daylog","surface":"web","level":"info","event":"oauth_callback_succeeded","timestamp":"2026-04-20T16:45:19.170Z","userId":"user_1","status":"info","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","userId":"user_1","redirectTo":"/dashboard/settings","statePrefix":"aa1ae29a"}}
+
+[90mstderr[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mrejects replayed callback payload and prevents duplicate side effects
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"warn","event":"oauth_callback_state_validation_failed","timestamp":"2026-04-20T16:45:19.170Z","userId":null,"status":"warning","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","statePrefix":"aa1ae29a","hasStateCookie":false,"stateMatched":false,"hasCode":true}}
+{"schemaVersion":1,"app":"daylog","surface":"web","level":"warn","event":"oauth_callback_rejected","timestamp":"2026-04-20T16:45:19.170Z","userId":null,"status":"warning","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","code":"validation_failed","message":"OAuth callback rejected.","returnPath":"/dashboard/settings","redirectTo":"/dashboard/settings?integrationProvider=spotify&integrationStatus=error&integrationMessage=OAuth+callback+rejected."}}
+
+[90mstdout[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mrejects replayed callback payload and prevents duplicate side effects
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"info","event":"oauth_callback_request_received","timestamp":"2026-04-20T16:45:19.170Z","userId":null,"status":"info","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","stateProvided":true,"statePrefix":"aa1ae29a","hasCode":true,"providerError":null,"providerErrorDescription":null}}
+
+[90mstdout[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mrejects coming-soon providers at both OAuth entry points
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"info","event":"oauth_start_coming_soon_provider","timestamp":"2026-04-20T16:45:19.171Z","userId":"user_1","status":"info","errorMessage":null,"context":{"area":"oauth_start","provider":"notion","returnPath":"/dashboard/settings","userId":"user_1","redirectTo":"/dashboard/settings?integrationProvider=notion&integrationStatus=error&integrationMessage=This+integration+is+currently+under+development+and+will+be+available+soon."}}
+
+[90mstdout[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mrejects coming-soon providers at both OAuth entry points
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"info","event":"oauth_callback_request_received","timestamp":"2026-04-20T16:45:19.171Z","userId":null,"status":"info","errorMessage":null,"context":{"area":"oauth_callback","provider":"notion","stateProvided":true,"statePrefix":"s1","hasCode":true,"providerError":null,"providerErrorDescription":null}}
+
+[90mstderr[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mrejects coming-soon providers at both OAuth entry points
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"warn","event":"oauth_callback_coming_soon_provider","timestamp":"2026-04-20T16:45:19.171Z","userId":null,"status":"warning","errorMessage":null,"context":{"area":"oauth_callback","provider":"notion","message":"This integration is currently under development and will be available soon."}}
+
+[90mstdout[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mfails safely for malformed callback payloads with no writes
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"info","event":"oauth_callback_request_received","timestamp":"2026-04-20T16:45:19.172Z","userId":null,"status":"info","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","stateProvided":true,"statePrefix":"s1","hasCode":true,"providerError":null,"providerErrorDescription":null}}
+
+[90mstderr[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mfails safely for malformed callback payloads with no writes
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"warn","event":"oauth_callback_state_validation_failed","timestamp":"2026-04-20T16:45:19.172Z","userId":null,"status":"warning","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","statePrefix":"s1","hasStateCookie":false,"stateMatched":false,"hasCode":true}}
+{"schemaVersion":1,"app":"daylog","surface":"web","level":"warn","event":"oauth_callback_rejected","timestamp":"2026-04-20T16:45:19.172Z","userId":null,"status":"warning","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","code":"validation_failed","message":"OAuth callback rejected.","returnPath":"/dashboard/settings","redirectTo":"/dashboard/settings?integrationProvider=spotify&integrationStatus=error&integrationMessage=OAuth+callback+rejected."}}
+
+[90mstdout[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mfails safely for malformed callback payloads with no writes
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"info","event":"oauth_callback_request_received","timestamp":"2026-04-20T16:45:19.173Z","userId":null,"status":"info","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","stateProvided":true,"statePrefix":"s1","hasCode":false,"providerError":null,"providerErrorDescription":null}}
+
+[90mstderr[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mfails safely for malformed callback payloads with no writes
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"warn","event":"oauth_callback_state_validation_failed","timestamp":"2026-04-20T16:45:19.173Z","userId":null,"status":"warning","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","statePrefix":"s1","hasStateCookie":true,"stateMatched":true,"hasCode":false}}
+{"schemaVersion":1,"app":"daylog","surface":"web","level":"warn","event":"oauth_callback_rejected","timestamp":"2026-04-20T16:45:19.173Z","userId":null,"status":"warning","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","code":"validation_failed","message":"OAuth callback rejected.","returnPath":"/dashboard/settings","redirectTo":"/dashboard/settings?integrationProvider=spotify&integrationStatus=error&integrationMessage=OAuth+callback+rejected."}}
+
+[90mstdout[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mfails safely for malformed callback payloads with no writes
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"info","event":"oauth_callback_request_received","timestamp":"2026-04-20T16:45:19.173Z","userId":null,"status":"info","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","stateProvided":false,"statePrefix":null,"hasCode":true,"providerError":null,"providerErrorDescription":null}}
+
+[90mstderr[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mfails safely for malformed callback payloads with no writes
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"warn","event":"oauth_callback_state_validation_failed","timestamp":"2026-04-20T16:45:19.173Z","userId":null,"status":"warning","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","statePrefix":null,"hasStateCookie":true,"stateMatched":false,"hasCode":true}}
+{"schemaVersion":1,"app":"daylog","surface":"web","level":"warn","event":"oauth_callback_rejected","timestamp":"2026-04-20T16:45:19.173Z","userId":null,"status":"warning","errorMessage":null,"context":{"area":"oauth_callback","provider":"spotify","code":"validation_failed","message":"OAuth callback rejected.","returnPath":"/dashboard/settings","redirectTo":"/dashboard/settings?integrationProvider=spotify&integrationStatus=error&integrationMessage=OAuth+callback+rejected."}}
+
+[90mstderr[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mredirects to mobile completion path when OAuth credentials are missing
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"warn","event":"oauth_start_missing_provider_credentials","timestamp":"2026-04-20T16:45:19.173Z","userId":"user_1","status":"warning","errorMessage":null,"context":{"area":"oauth_start","provider":"spotify","returnPath":"/integrations/oauth/complete?mode=mobile","userId":"user_1","hasClientId":false,"hasClientSecret":false,"redirectTo":"/integrations/oauth/complete?mode=mobile&integrationProvider=spotify&integrationStatus=error&integrationMessage=OAuth+is+not+configured+for+this+provider."}}
+
+[90mstderr[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mrejects unsupported providers at both OAuth entry points
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"warn","event":"oauth_start_unsupported_provider","timestamp":"2026-04-20T16:45:19.174Z","userId":"user_1","status":"warning","errorMessage":null,"context":{"area":"oauth_start","provider":"evil_provider","returnPath":"/dashboard/settings","userId":"user_1","redirectTo":"/dashboard/settings?integrationProvider=evil_provider&integrationStatus=error&integrationMessage=Unsupported+OAuth+provider."}}
+
+[90mstdout[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mrejects unsupported providers at both OAuth entry points
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"info","event":"oauth_callback_request_received","timestamp":"2026-04-20T16:45:19.174Z","userId":null,"status":"info","errorMessage":null,"context":{"area":"oauth_callback","provider":"evil_provider","stateProvided":true,"statePrefix":"s1","hasCode":true,"providerError":null,"providerErrorDescription":null}}
+
+[90mstderr[2m | app/api/integrations/oauth/oauth-abuse.test.ts[2m > [22m[2moauth abuse protection[2m > [22m[2mrejects unsupported providers at both OAuth entry points
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"web","level":"warn","event":"oauth_callback_unsupported_provider","timestamp":"2026-04-20T16:45:19.174Z","userId":null,"status":"warning","errorMessage":null,"context":{"area":"oauth_callback","provider":"evil_provider"}}
+
+ [32m✓[39m app/api/integrations/oauth/oauth-abuse.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 375[2mms[22m[39m
+     [33m[2m✓[22m[39m rejects tampered state with 4xx and zero side effects [33m 366[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m2 passed[39m[22m[90m (2)[39m
+[2m      Tests [22m [1m[32m11 passed[39m[22m[90m (11)[39m
+[2m   Start at [22m 22:15:18
+[2m   Duration [22m 551ms[2m (transform 120ms, setup 0ms, import 175ms, tests 395ms, environment 0ms)[22m
+

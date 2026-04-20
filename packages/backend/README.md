@@ -52,6 +52,11 @@ Integration token encryption (production critical):
 - `INTEGRATION_SECRETS_KEYRING_JSON`
 - `INTEGRATION_SECRETS_ACTIVE_KEY_ID`
 
+Sensitive-data encryption at rest (production critical):
+
+- `SENSITIVE_DATA_KEYRING_JSON`
+- `SENSITIVE_DATA_ACTIVE_KEY_ID`
+
 Optional operational env:
 
 - `ADMIN_BOOTSTRAP_CLERK_USER_IDS`
@@ -78,6 +83,25 @@ Examples:
   - `summaries:getMyExportJobDownloadUrl`
 - Integration secret encryption audit:
   - `integrations:adminAuditIntegrationSecretsEncryptionStatus`
+- Sensitive-data migration:
+  - `sensitiveDataMigration:adminMigrateAllSensitiveData`
+- Sensitive-data audit:
+  - `sensitiveDataMigration:adminAuditSensitiveDataTableStatus`
+
+## Sensitive-Data Rollout Commands
+
+From repository root:
+
+```bash
+pnpm ops:rotate-sensitive-data-keyring -- --target <target>
+pnpm ops:run-sensitive-data-migration -- --target <target> --mode dry-run
+pnpm ops:run-sensitive-data-migration -- --target <target> --mode full
+```
+
+Key policy:
+
+- Use unique key IDs and keep legacy key IDs in keyring during rotations.
+- Set `SENSITIVE_DATA_ACTIVE_KEY_ID` to the latest key ID for new writes.
 
 ## Troubleshooting
 

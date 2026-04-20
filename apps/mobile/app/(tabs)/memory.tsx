@@ -719,7 +719,7 @@ const DailyDetailView = () => {
           <View style={styles.section}>
             <SectionHeader title="Today's Memories" />
             <AppCard padded={false}>
-              {resolvedMemories.map((mem: MemoryDoc, idx: number) => (
+              {resolvedMemories.map((mem, idx) => (
                 <View
                   key={mem._id}
                   style={[

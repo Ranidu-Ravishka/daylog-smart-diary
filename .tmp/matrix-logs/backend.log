@@ -1,0 +1,574 @@
+
+> daylog-test@ test:coverage:backend /Users/raniduravishka/DayLog-Test
+> pnpm --filter @repo/backend test:coverage:backend
+
+
+> @repo/backend@0.0.0 test:coverage:backend /Users/raniduravishka/DayLog-Test/packages/backend
+> vitest run --coverage
+
+
+[1m[46m RUN [49m[22m [36mv4.1.2 [39m[90m/Users/raniduravishka/DayLog-Test/packages/backend[39m
+      [2mCoverage enabled with [22m[33mv8[39m
+
+ [32m✓[39m convex/integrationSecretsCrypto.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+[90mstdout[2m | convex/webhooks.behavior.test.ts[2m > [22m[2mwebhooks behavior[2m > [22m[2mrejects non-POST and invalid signatures
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"webhook.started","timestamp":"2026-04-20T16:45:22.029Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","path":"/clerk/webhook"}}
+
+[90mstderr[2m | convex/webhooks.behavior.test.ts[2m > [22m[2mwebhooks behavior[2m > [22m[2mrejects non-POST and invalid signatures
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"webhook.signature_verification_failed","timestamp":"2026-04-20T16:45:22.033Z","userId":null,"status":"failed","errorMessage":null,"context":{"status":"failed","path":"/clerk/webhook"}}
+
+[90mstdout[2m | convex/webhooks.behavior.test.ts[2m > [22m[2mwebhooks behavior[2m > [22m[2mhandles created and deleted events when signature verification passes
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"webhook.started","timestamp":"2026-04-20T16:45:22.034Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","path":"/clerk/webhook"}}
+
+[90mstdout[2m | convex/webhooks.behavior.test.ts[2m > [22m[2mwebhooks behavior[2m > [22m[2mhandles created and deleted events when signature verification passes
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"webhook.succeeded","timestamp":"2026-04-20T16:45:22.034Z","userId":null,"status":"succeeded","errorMessage":null,"context":{"status":"succeeded","path":"/clerk/webhook","eventType":"user.created"}}
+
+[90mstdout[2m | convex/webhooks.behavior.test.ts[2m > [22m[2mwebhooks behavior[2m > [22m[2mhandles created and deleted events when signature verification passes
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"webhook.started","timestamp":"2026-04-20T16:45:22.035Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","path":"/clerk/webhook"}}
+
+[90mstdout[2m | convex/webhooks.behavior.test.ts[2m > [22m[2mwebhooks behavior[2m > [22m[2mhandles created and deleted events when signature verification passes
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"webhook.succeeded","timestamp":"2026-04-20T16:45:22.035Z","userId":null,"status":"succeeded","errorMessage":null,"context":{"status":"succeeded","path":"/clerk/webhook","eventType":"user.deleted"}}
+
+[90mstdout[2m | convex/webhooks.behavior.test.ts[2m > [22m[2mwebhooks behavior[2m > [22m[2mreturns 500 when downstream sync mutation fails
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"webhook.started","timestamp":"2026-04-20T16:45:22.037Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","path":"/clerk/webhook"}}
+
+[90mstderr[2m | convex/webhooks.behavior.test.ts[2m > [22m[2mwebhooks behavior[2m > [22m[2mreturns 500 when downstream sync mutation fails
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"error","event":"webhook.user_sync_failed","timestamp":"2026-04-20T16:45:22.040Z","userId":"clerk_user_003","status":"failed","errorMessage":"sync failed","context":{"status":"failed","eventType":"user.created","clerkUserId":"clerk_user_003","userId":"clerk_user_003"},"error":{"name":"Error","message":"sync failed","stack":"Error: sync failed\n    at Object.<anonymous> (/Users/raniduravishka/DayLog-Test/packages/backend/convex/webhooks.behavior.test.ts:147:15)\n    at Object.Mock [as runMutation] (file:///Users/raniduravishka/DayLog-Test/node_modules/.pnpm/@vitest+spy@4.1.2/node_modules/@vitest/spy/dist/index.js:332:34)\n    at /Users/raniduravishka/DayLog-Test/packages/backend/convex/webhooks.ts:137:19\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at /Users/raniduravishka/DayLog-Test/packages/backend/convex/webhooks.behavior.test.ts:156:22\n    at file:///Users/raniduravishka/DayLog-Test/node_modules/.pnpm/@vitest+runner@4.1.2/node_modules/@vitest/runner/dist/chunk-artifact.js:1893:20"}}
+
+[90mstdout[2m | convex/webhooks.behavior.test.ts[2m > [22m[2mwebhooks behavior[2m > [22m[2mreturns 500 when user.deleted cleanup fails downstream
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"webhook.started","timestamp":"2026-04-20T16:45:22.041Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","path":"/clerk/webhook"}}
+
+[90mstderr[2m | convex/webhooks.behavior.test.ts[2m > [22m[2mwebhooks behavior[2m > [22m[2mreturns 500 when user.deleted cleanup fails downstream
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"error","event":"webhook.user_delete_failed","timestamp":"2026-04-20T16:45:22.041Z","userId":"clerk_user_004","status":"failed","errorMessage":"deletion cleanup unavailable","context":{"status":"failed","eventType":"user.deleted","clerkUserId":"clerk_user_004","userId":"clerk_user_004"},"error":{"name":"Error","message":"deletion cleanup unavailable","stack":"Error: deletion cleanup unavailable\n    at Object.<anonymous> (/Users/raniduravishka/DayLog-Test/packages/backend/convex/webhooks.behavior.test.ts:186:15)\n    at Object.Mock [as runMutation] (file:///Users/raniduravishka/DayLog-Test/node_modules/.pnpm/@vitest+spy@4.1.2/node_modules/@vitest/spy/dist/index.js:332:34)\n    at /Users/raniduravishka/DayLog-Test/packages/backend/convex/webhooks.ts:179:17\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at /Users/raniduravishka/DayLog-Test/packages/backend/convex/webhooks.behavior.test.ts:195:22\n    at file:///Users/raniduravishka/DayLog-Test/node_modules/.pnpm/@vitest+runner@4.1.2/node_modules/@vitest/runner/dist/chunk-artifact.js:1893:20"}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user.started","timestamp":"2026-04-20T16:45:22.061Z","userId":"clerk_target_001","status":"started","errorMessage":null,"context":{"status":"started","clerkUserId":"clerk_target_001"}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user.enqueued","timestamp":"2026-04-20T16:45:22.063Z","userId":"user_target_001","status":"queued","errorMessage":null,"context":{"status":"queued","userId":"user_target_001","clerkUserId":"clerk_target_001","jobId":"userDeletionJobs_00001","stage":"memoryMedia","created":true}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.started","timestamp":"2026-04-20T16:45:22.063Z","userId":"user_target_001","status":"started","errorMessage":null,"context":{"status":"started","jobId":"userDeletionJobs_00001","userId":"user_target_001","stage":"memoryMedia","currentStatus":"requested","processedBatches":0,"checkpoints":0}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.stage_advanced","timestamp":"2026-04-20T16:45:22.064Z","userId":"user_target_001","status":"processing","errorMessage":null,"context":{"status":"processing","jobId":"userDeletionJobs_00001","userId":"user_target_001","previousStage":"memoryMedia","nextStage":"memories","processedBatches":1,"checkpoints":1}}
+
+ [32m✓[39m convex/webhooks.behavior.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 136[2mms[22m[39m
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.started","timestamp":"2026-04-20T16:45:22.064Z","userId":"user_target_001","status":"started","errorMessage":null,"context":{"status":"started","jobId":"userDeletionJobs_00001","userId":"user_target_001","stage":"memories","currentStatus":"processing","processedBatches":1,"checkpoints":1}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.stage_advanced","timestamp":"2026-04-20T16:45:22.064Z","userId":"user_target_001","status":"processing","errorMessage":null,"context":{"status":"processing","jobId":"userDeletionJobs_00001","userId":"user_target_001","previousStage":"memories","nextStage":"daySummaries","processedBatches":2,"checkpoints":2}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.started","timestamp":"2026-04-20T16:45:22.064Z","userId":"user_target_001","status":"started","errorMessage":null,"context":{"status":"started","jobId":"userDeletionJobs_00001","userId":"user_target_001","stage":"daySummaries","currentStatus":"processing","processedBatches":2,"checkpoints":2}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.stage_advanced","timestamp":"2026-04-20T16:45:22.064Z","userId":"user_target_001","status":"processing","errorMessage":null,"context":{"status":"processing","jobId":"userDeletionJobs_00001","userId":"user_target_001","previousStage":"daySummaries","nextStage":"days","processedBatches":3,"checkpoints":3}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.started","timestamp":"2026-04-20T16:45:22.064Z","userId":"user_target_001","status":"started","errorMessage":null,"context":{"status":"started","jobId":"userDeletionJobs_00001","userId":"user_target_001","stage":"days","currentStatus":"processing","processedBatches":3,"checkpoints":3}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.stage_advanced","timestamp":"2026-04-20T16:45:22.065Z","userId":"user_target_001","status":"processing","errorMessage":null,"context":{"status":"processing","jobId":"userDeletionJobs_00001","userId":"user_target_001","previousStage":"days","nextStage":"integrations","processedBatches":4,"checkpoints":4}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.started","timestamp":"2026-04-20T16:45:22.065Z","userId":"user_target_001","status":"started","errorMessage":null,"context":{"status":"started","jobId":"userDeletionJobs_00001","userId":"user_target_001","stage":"integrations","currentStatus":"processing","processedBatches":4,"checkpoints":4}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.stage_advanced","timestamp":"2026-04-20T16:45:22.065Z","userId":"user_target_001","status":"processing","errorMessage":null,"context":{"status":"processing","jobId":"userDeletionJobs_00001","userId":"user_target_001","previousStage":"integrations","nextStage":"integrationDailyData","processedBatches":5,"checkpoints":5}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.started","timestamp":"2026-04-20T16:45:22.065Z","userId":"user_target_001","status":"started","errorMessage":null,"context":{"status":"started","jobId":"userDeletionJobs_00001","userId":"user_target_001","stage":"integrationDailyData","currentStatus":"processing","processedBatches":5,"checkpoints":5}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.stage_advanced","timestamp":"2026-04-20T16:45:22.065Z","userId":"user_target_001","status":"processing","errorMessage":null,"context":{"status":"processing","jobId":"userDeletionJobs_00001","userId":"user_target_001","previousStage":"integrationDailyData","nextStage":"integrationSecrets","processedBatches":6,"checkpoints":6}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.started","timestamp":"2026-04-20T16:45:22.065Z","userId":"user_target_001","status":"started","errorMessage":null,"context":{"status":"started","jobId":"userDeletionJobs_00001","userId":"user_target_001","stage":"integrationSecrets","currentStatus":"processing","processedBatches":6,"checkpoints":6}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.stage_advanced","timestamp":"2026-04-20T16:45:22.065Z","userId":"user_target_001","status":"processing","errorMessage":null,"context":{"status":"processing","jobId":"userDeletionJobs_00001","userId":"user_target_001","previousStage":"integrationSecrets","nextStage":"integrationSyncRuns","processedBatches":7,"checkpoints":7}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.started","timestamp":"2026-04-20T16:45:22.065Z","userId":"user_target_001","status":"started","errorMessage":null,"context":{"status":"started","jobId":"userDeletionJobs_00001","userId":"user_target_001","stage":"integrationSyncRuns","currentStatus":"processing","processedBatches":7,"checkpoints":7}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.stage_advanced","timestamp":"2026-04-20T16:45:22.065Z","userId":"user_target_001","status":"processing","errorMessage":null,"context":{"status":"processing","jobId":"userDeletionJobs_00001","userId":"user_target_001","previousStage":"integrationSyncRuns","nextStage":"exportJobs","processedBatches":8,"checkpoints":8}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.started","timestamp":"2026-04-20T16:45:22.065Z","userId":"user_target_001","status":"started","errorMessage":null,"context":{"status":"started","jobId":"userDeletionJobs_00001","userId":"user_target_001","stage":"exportJobs","currentStatus":"processing","processedBatches":8,"checkpoints":8}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.stage_advanced","timestamp":"2026-04-20T16:45:22.065Z","userId":"user_target_001","status":"processing","errorMessage":null,"context":{"status":"processing","jobId":"userDeletionJobs_00001","userId":"user_target_001","previousStage":"exportJobs","nextStage":"restoreJobs","processedBatches":9,"checkpoints":9}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.started","timestamp":"2026-04-20T16:45:22.065Z","userId":"user_target_001","status":"started","errorMessage":null,"context":{"status":"started","jobId":"userDeletionJobs_00001","userId":"user_target_001","stage":"restoreJobs","currentStatus":"processing","processedBatches":9,"checkpoints":9}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.stage_advanced","timestamp":"2026-04-20T16:45:22.065Z","userId":"user_target_001","status":"processing","errorMessage":null,"context":{"status":"processing","jobId":"userDeletionJobs_00001","userId":"user_target_001","previousStage":"restoreJobs","nextStage":"summaryQualityEvaluations","processedBatches":10,"checkpoints":10}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.started","timestamp":"2026-04-20T16:45:22.065Z","userId":"user_target_001","status":"started","errorMessage":null,"context":{"status":"started","jobId":"userDeletionJobs_00001","userId":"user_target_001","stage":"summaryQualityEvaluations","currentStatus":"processing","processedBatches":10,"checkpoints":10}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.stage_advanced","timestamp":"2026-04-20T16:45:22.066Z","userId":"user_target_001","status":"processing","errorMessage":null,"context":{"status":"processing","jobId":"userDeletionJobs_00001","userId":"user_target_001","previousStage":"summaryQualityEvaluations","nextStage":"summaryGenerationEvents","processedBatches":11,"checkpoints":11}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.started","timestamp":"2026-04-20T16:45:22.066Z","userId":"user_target_001","status":"started","errorMessage":null,"context":{"status":"started","jobId":"userDeletionJobs_00001","userId":"user_target_001","stage":"summaryGenerationEvents","currentStatus":"processing","processedBatches":11,"checkpoints":11}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.stage_advanced","timestamp":"2026-04-20T16:45:22.066Z","userId":"user_target_001","status":"processing","errorMessage":null,"context":{"status":"processing","jobId":"userDeletionJobs_00001","userId":"user_target_001","previousStage":"summaryGenerationEvents","nextStage":"integrationHealthEvents","processedBatches":12,"checkpoints":12}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.started","timestamp":"2026-04-20T16:45:22.066Z","userId":"user_target_001","status":"started","errorMessage":null,"context":{"status":"started","jobId":"userDeletionJobs_00001","userId":"user_target_001","stage":"integrationHealthEvents","currentStatus":"processing","processedBatches":12,"checkpoints":12}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.stage_advanced","timestamp":"2026-04-20T16:45:22.066Z","userId":"user_target_001","status":"processing","errorMessage":null,"context":{"status":"processing","jobId":"userDeletionJobs_00001","userId":"user_target_001","previousStage":"integrationHealthEvents","nextStage":"userPreferences","processedBatches":13,"checkpoints":13}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.started","timestamp":"2026-04-20T16:45:22.066Z","userId":"user_target_001","status":"started","errorMessage":null,"context":{"status":"started","jobId":"userDeletionJobs_00001","userId":"user_target_001","stage":"userPreferences","currentStatus":"processing","processedBatches":13,"checkpoints":13}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.stage_advanced","timestamp":"2026-04-20T16:45:22.066Z","userId":"user_target_001","status":"processing","errorMessage":null,"context":{"status":"processing","jobId":"userDeletionJobs_00001","userId":"user_target_001","previousStage":"userPreferences","nextStage":"auditLogs","processedBatches":14,"checkpoints":14}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.started","timestamp":"2026-04-20T16:45:22.066Z","userId":"user_target_001","status":"started","errorMessage":null,"context":{"status":"started","jobId":"userDeletionJobs_00001","userId":"user_target_001","stage":"auditLogs","currentStatus":"processing","processedBatches":14,"checkpoints":14}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.stage_advanced","timestamp":"2026-04-20T16:45:22.066Z","userId":"user_target_001","status":"processing","errorMessage":null,"context":{"status":"processing","jobId":"userDeletionJobs_00001","userId":"user_target_001","previousStage":"auditLogs","nextStage":"platformAuditEvents","processedBatches":15,"checkpoints":15}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.started","timestamp":"2026-04-20T16:45:22.066Z","userId":"user_target_001","status":"started","errorMessage":null,"context":{"status":"started","jobId":"userDeletionJobs_00001","userId":"user_target_001","stage":"platformAuditEvents","currentStatus":"processing","processedBatches":15,"checkpoints":15}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.stage_advanced","timestamp":"2026-04-20T16:45:22.066Z","userId":"user_target_001","status":"processing","errorMessage":null,"context":{"status":"processing","jobId":"userDeletionJobs_00001","userId":"user_target_001","previousStage":"platformAuditEvents","nextStage":"summaryGenerationQuotas","processedBatches":16,"checkpoints":16}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.started","timestamp":"2026-04-20T16:45:22.066Z","userId":"user_target_001","status":"started","errorMessage":null,"context":{"status":"started","jobId":"userDeletionJobs_00001","userId":"user_target_001","stage":"summaryGenerationQuotas","currentStatus":"processing","processedBatches":16,"checkpoints":16}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job.completed","timestamp":"2026-04-20T16:45:22.066Z","userId":"user_target_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","jobId":"userDeletionJobs_00001","userId":"user_target_001","stage":"summaryGenerationQuotas","processedBatches":17,"checkpoints":17,"durationMs":3}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.started","timestamp":"2026-04-20T16:45:22.067Z","userId":"user_target_001","status":"started","errorMessage":null,"context":{"status":"started","jobId":"userDeletionJobs_00001","userId":"user_target_001","stage":"summaryGenerationQuotas","currentStatus":"completed","processedBatches":17,"checkpoints":17}}
+{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.already_completed","timestamp":"2026-04-20T16:45:22.067Z","userId":"user_target_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","jobId":"userDeletionJobs_00001","userId":"user_target_001","stage":"summaryGenerationQuotas"}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user.started","timestamp":"2026-04-20T16:45:22.067Z","userId":"clerk_target_001","status":"started","errorMessage":null,"context":{"status":"started","clerkUserId":"clerk_target_001"}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mdeletes user cascade data by Clerk id and remains idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user.skipped_missing_user","timestamp":"2026-04-20T16:45:22.067Z","userId":"clerk_target_001","status":"skipped","errorMessage":null,"context":{"status":"skipped","clerkUserId":"clerk_target_001"}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mrequests account deletion via backend job and exposes polling status
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user.request.enqueued","timestamp":"2026-04-20T16:45:22.068Z","userId":"user_member_001","status":"queued","errorMessage":null,"context":{"status":"queued","userId":"user_member_001","clerkUserId":"clerk_member_001","jobId":"userDeletionJobs_00001","stage":"memoryMedia","created":true}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mretries failed account deletion jobs on request
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user.request.retried_failed_job","timestamp":"2026-04-20T16:45:22.069Z","userId":"user_retry_target_001","status":"queued","errorMessage":null,"context":{"status":"queued","userId":"user_retry_target_001","clerkUserId":"clerk_retry_target_001","jobId":"deletion_job_retry_001","stage":"memories"}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mmarks deletion jobs as failed when a step throws
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.started","timestamp":"2026-04-20T16:45:22.070Z","userId":"user_fail_target_001","status":"started","errorMessage":null,"context":{"status":"started","jobId":"deletion_job_fail_001","userId":"user_fail_target_001","stage":"unsupported_stage","currentStatus":"requested","processedBatches":0,"checkpoints":0}}
+
+[90mstderr[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mmarks deletion jobs as failed when a step throws
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"error","event":"deletion.user_job.failed","timestamp":"2026-04-20T16:45:22.080Z","userId":"user_fail_target_001","status":"failed","errorMessage":"Unsupported user deletion stage","context":{"status":"failed","jobId":"deletion_job_fail_001","userId":"user_fail_target_001","stage":"unsupported_stage","processedBatches":0,"checkpoints":0,"errorMessage":"Unsupported user deletion stage"},"error":{"name":"Error","message":"Unsupported user deletion stage","stack":"Error: Unsupported user deletion stage\n    at runUserCascadeDeletionStageBatch (/Users/raniduravishka/DayLog-Test/packages/backend/convex/cascadeCleanup.ts:864:13)\n    at handler (/Users/raniduravishka/DayLog-Test/packages/backend/convex/users.ts:500:27)\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at /Users/raniduravishka/DayLog-Test/packages/backend/convex/users.behavior.test.ts:829:23"}}
+
+[90mstdout[2m | convex/users.behavior.test.ts[2m > [22m[2musers behavior[2m > [22m[2mmarks deletion jobs as failed when a step throws
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.started","timestamp":"2026-04-20T16:45:22.081Z","userId":"user_fail_target_001","status":"started","errorMessage":null,"context":{"status":"started","jobId":"deletion_job_fail_001","userId":"user_fail_target_001","stage":"unsupported_stage","currentStatus":"failed","processedBatches":0,"checkpoints":0}}
+{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.user_job_step.already_failed","timestamp":"2026-04-20T16:45:22.081Z","userId":"user_fail_target_001","status":"failed","errorMessage":"Unsupported user deletion stage","context":{"status":"failed","jobId":"deletion_job_fail_001","userId":"user_fail_target_001","stage":"unsupported_stage","errorMessage":"Unsupported user deletion stage"}}
+
+[90mstdout[2m | convex/summaryGeneration.behavior.test.ts[2m > [22m[2msummary generation behavior[2m > [22m[2mruns full generateSummaryForDay action and merges integration context
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"summary_generation.started","timestamp":"2026-04-20T16:45:22.087Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","dayKey":"2026-04-02"}}
+
+[90mstdout[2m | convex/summaryGeneration.behavior.test.ts[2m > [22m[2msummary generation behavior[2m > [22m[2mruns full generateSummaryForDay action and merges integration context
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"summary_generation.succeeded","timestamp":"2026-04-20T16:45:22.089Z","userId":"user_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","dayKey":"2026-04-02","userId":"user_001","summaryId":"summary_001","durationMs":3}}
+
+[90mstdout[2m | convex/summaryGeneration.behavior.test.ts[2m > [22m[2msummary generation behavior[2m > [22m[2mgenerates a summary from integration-only context
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"summary_generation.started","timestamp":"2026-04-20T16:45:22.090Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","dayKey":"2026-04-03"}}
+
+[90mstdout[2m | convex/summaryGeneration.behavior.test.ts[2m > [22m[2msummary generation behavior[2m > [22m[2mgenerates a summary from integration-only context
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"summary_generation.succeeded","timestamp":"2026-04-20T16:45:22.090Z","userId":"user_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","dayKey":"2026-04-03","userId":"user_001","summaryId":"summary_002","durationMs":0}}
+
+[90mstdout[2m | convex/summaryGeneration.behavior.test.ts[2m > [22m[2msummary generation behavior[2m > [22m[2mcaps summary memory payload size before model generation
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"summary_generation.started","timestamp":"2026-04-20T16:45:22.091Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","dayKey":"2026-04-04"}}
+
+[90mstderr[2m | convex/summaryGeneration.behavior.test.ts[2m > [22m[2msummary generation behavior[2m > [22m[2mcaps summary memory payload size before model generation
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"summary_generation.memory_input_truncated","timestamp":"2026-04-20T16:45:22.092Z","userId":null,"status":"degraded","errorMessage":null,"context":{"status":"degraded","dayKey":"2026-04-04","fetchedMemoryCount":10,"includedMemoryCount":2,"maxMemoryInputBytes":64000}}
+
+[90mstdout[2m | convex/summaryGeneration.behavior.test.ts[2m > [22m[2msummary generation behavior[2m > [22m[2mcaps summary memory payload size before model generation
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"summary_generation.succeeded","timestamp":"2026-04-20T16:45:22.092Z","userId":"user_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","dayKey":"2026-04-04","userId":"user_001","summaryId":"summary_003","durationMs":1}}
+
+ [32m✓[39m convex/users.behavior.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 183[2mms[22m[39m
+[90mstdout[2m | convex/summaryGeneration.behavior.test.ts[2m > [22m[2msummary generation behavior[2m > [22m[2mrejects generation when no data is available and logs model failures
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"summary_generation.started","timestamp":"2026-04-20T16:45:22.094Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","dayKey":"2026-04-02"}}
+
+[90mstderr[2m | convex/summaryGeneration.behavior.test.ts[2m > [22m[2msummary generation behavior[2m > [22m[2mrejects generation when no data is available and logs model failures
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"summary_generation.skipped_no_input","timestamp":"2026-04-20T16:45:22.095Z","userId":null,"status":"skipped","errorMessage":null,"context":{"status":"skipped","dayKey":"2026-04-02"}}
+
+[90mstdout[2m | convex/summaryGeneration.behavior.test.ts[2m > [22m[2msummary generation behavior[2m > [22m[2mrejects generation when no data is available and logs model failures
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"summary_generation.started","timestamp":"2026-04-20T16:45:22.095Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","dayKey":"2026-04-02"}}
+
+[90mstderr[2m | convex/summaryGeneration.behavior.test.ts[2m > [22m[2msummary generation behavior[2m > [22m[2mrejects generation when no data is available and logs model failures
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"error","event":"summary_generation.failed","timestamp":"2026-04-20T16:45:22.099Z","userId":"user_001","status":"failed","errorMessage":"OpenAI request failed (400)","context":{"status":"failed","dayKey":"2026-04-02","userId":"user_001","durationMs":1},"error":{"name":"Error","message":"OpenAI request failed (400)","stack":"Error: OpenAI request failed (400)\n    at generateSummaryWithOpenAi (/Users/raniduravishka/DayLog-Test/packages/backend/convex/summaryGeneration.ts:380:13)\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at handler (/Users/raniduravishka/DayLog-Test/packages/backend/convex/summaryGeneration.ts:543:19)\n    at /Users/raniduravishka/DayLog-Test/packages/backend/convex/summaryGeneration.behavior.test.ts:459:5\n    at file:///Users/raniduravishka/DayLog-Test/node_modules/.pnpm/@vitest+runner@4.1.2/node_modules/@vitest/runner/dist/chunk-artifact.js:1893:20"}}
+
+[90mstderr[2m | convex/summaryGeneration.behavior.test.ts[2m > [22m[2msummary generation behavior[2m > [22m[2mreturns unavailable when ai summary feature flag is disabled
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"summary_generation.skipped_disabled","timestamp":"2026-04-20T16:45:22.099Z","userId":null,"status":"skipped","errorMessage":null,"context":{"status":"skipped","dayKey":"2026-04-02"}}
+
+ [32m✓[39m convex/configModules.behavior.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 298[2mms[22m[39m
+ [32m✓[39m convex/summaryGeneration.behavior.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 298[2mms[22m[39m
+[90mstdout[2m | convex/summaries.behavior.test.ts[2m > [22m[2msummaries behavior[2m > [22m[2msupports get/upsert/list/delete flows with ownership checks
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.summary.started","timestamp":"2026-04-20T16:45:22.122Z","userId":"user_member_001","status":"started","errorMessage":null,"context":{"status":"started","userId":"user_member_001","summaryId":"daySummaries_00001"}}
+
+[90mstdout[2m | convex/summaries.behavior.test.ts[2m > [22m[2msummaries behavior[2m > [22m[2msupports get/upsert/list/delete flows with ownership checks
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.summary.succeeded","timestamp":"2026-04-20T16:45:22.137Z","userId":"user_member_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","userId":"user_member_001","summaryId":"daySummaries_00001","dayKey":"2026-04-02","durationMs":16}}
+
+[90mstdout[2m | convex/integrations.behavior.test.ts[2m > [22m[2mintegration sync behavior[2m > [22m[2mis idempotent for repeated day sync requests
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"integration_sync.started","timestamp":"2026-04-20T16:45:22.213Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","provider":"spotify","syncMode":"provider_api","dayKey":"2026-03-30","timeZone":"Asia/Colombo"}}
+
+[90mstdout[2m | convex/integrations.behavior.test.ts[2m > [22m[2mintegration sync behavior[2m > [22m[2mis idempotent for repeated day sync requests
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"integration_sync.succeeded","timestamp":"2026-04-20T16:45:22.219Z","userId":"user_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","provider":"spotify","dayKey":"2026-03-30","userId":"user_001","durationMs":5,"tokenValidityStatus":"expiring_soon"}}
+
+[90mstdout[2m | convex/integrations.behavior.test.ts[2m > [22m[2mintegration sync behavior[2m > [22m[2mis idempotent for repeated day sync requests
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"integration_sync.started","timestamp":"2026-04-20T16:45:22.220Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","provider":"spotify","syncMode":"provider_api","dayKey":"2026-03-30","timeZone":"Asia/Colombo"}}
+
+[90mstdout[2m | convex/integrations.behavior.test.ts[2m > [22m[2mintegration sync behavior[2m > [22m[2mis idempotent for repeated day sync requests
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"integration_sync.skipped","timestamp":"2026-04-20T16:45:22.221Z","userId":"user_001","status":"skipped","errorMessage":null,"context":{"status":"skipped","provider":"spotify","dayKey":"2026-03-30","userId":"user_001","reason":"already_synced"}}
+
+[90mstdout[2m | convex/integrations.behavior.test.ts[2m > [22m[2mintegration sync behavior[2m > [22m[2mretries sync once after 401 by refreshing token and completes successfully
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"integration_sync.started","timestamp":"2026-04-20T16:45:22.223Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","provider":"spotify","syncMode":"provider_api","dayKey":"2026-03-30","timeZone":"Asia/Colombo"}}
+
+ [32m✓[39m convex/summaries.behavior.test.ts [2m([22m[2m28 tests[22m[2m)[22m[32m 115[2mms[22m[39m
+[90mstdout[2m | convex/integrations.behavior.test.ts[2m > [22m[2mintegration sync behavior[2m > [22m[2mretries sync once after 401 by refreshing token and completes successfully
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"integration_sync.succeeded","timestamp":"2026-04-20T16:45:22.226Z","userId":"user_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","provider":"spotify","dayKey":"2026-03-30","userId":"user_001","durationMs":0,"tokenValidityStatus":"expiring_soon"}}
+
+[90mstdout[2m | convex/integrations.behavior.test.ts[2m > [22m[2mintegration sync behavior[2m > [22m[2mrefreshes expired token before syncing and persists the refreshed secret
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"integration_sync.started","timestamp":"2026-04-20T16:45:22.231Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","provider":"spotify","syncMode":"provider_api","dayKey":"2026-03-30","timeZone":"Asia/Colombo"}}
+
+[90mstdout[2m | convex/integrations.behavior.test.ts[2m > [22m[2mintegration sync behavior[2m > [22m[2mrefreshes expired token before syncing and persists the refreshed secret
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"integration_sync.succeeded","timestamp":"2026-04-20T16:45:22.232Z","userId":"user_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","provider":"spotify","dayKey":"2026-03-30","userId":"user_001","durationMs":0,"tokenValidityStatus":"expiring_soon"}}
+
+[90mstdout[2m | convex/integrations.behavior.test.ts[2m > [22m[2mintegration sync behavior[2m > [22m[2mmarks integration error and does not write day data when token refresh fails
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"integration_sync.started","timestamp":"2026-04-20T16:45:22.235Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","provider":"spotify","syncMode":"provider_api","dayKey":"2026-03-30","timeZone":"Asia/Colombo"}}
+
+ [32m✓[39m convex/summary.behavior.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 61[2mms[22m[39m
+[90mstderr[2m | convex/integrations.behavior.test.ts[2m > [22m[2mintegration sync behavior[2m > [22m[2mmarks integration error and does not write day data when token refresh fails
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"error","event":"integration_sync.failed","timestamp":"2026-04-20T16:45:22.241Z","userId":"user_001","status":"failed","errorMessage":"Token refresh failed (400) for provider \"spotify\".","context":{"status":"failed","provider":"spotify","dayKey":"2026-03-30","userId":"user_001","durationMs":0,"tokenValidityStatus":"expired"},"error":{"name":"ProviderTokenRefreshError","message":"Token refresh failed (400) for provider \"spotify\".","stack":"ProviderTokenRefreshError: Token refresh failed (400) for provider \"spotify\".\n    at refreshOAuthAccessToken (/Users/raniduravishka/DayLog-Test/packages/backend/convex/integrations.auth.ts:152:11)\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at refreshOAuthAccessTokenWithRetry (/Users/raniduravishka/DayLog-Test/packages/backend/convex/integrations.auth.ts:254:14)\n    at syncMyIntegrationForDayImpl (/Users/raniduravishka/DayLog-Test/packages/backend/convex/integrations.sync.ts:204:25)\n    at /Users/raniduravishka/DayLog-Test/packages/backend/convex/integrations.behavior.test.ts:467:5\n    at file:///Users/raniduravishka/DayLog-Test/node_modules/.pnpm/@vitest+runner@4.1.2/node_modules/@vitest/runner/dist/chunk-artifact.js:1893:20"}}
+
+ [32m✓[39m convex/integrations.behavior.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 70[2mms[22m[39m
+ [32m✓[39m convex/admin.behavior.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 24[2mms[22m[39m
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2mreturns capped day memories in happenedAt-desc order for summary generation
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.started","timestamp":"2026-04-20T16:45:22.433Z","userId":"user_member_001","status":"started","errorMessage":null,"context":{"status":"started","userId":"user_member_001","dayKey":"2026-04-02","hasClientRequestId":false}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2mreturns capped day memories in happenedAt-desc order for summary generation
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.succeeded","timestamp":"2026-04-20T16:45:22.438Z","userId":"user_member_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","userId":"user_member_001","dayKey":"2026-04-02","memoryId":"memories_00001","mode":"create","durationMs":5}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2mreturns capped day memories in happenedAt-desc order for summary generation
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.started","timestamp":"2026-04-20T16:45:22.439Z","userId":"user_member_001","status":"started","errorMessage":null,"context":{"status":"started","userId":"user_member_001","dayKey":"2026-04-02","hasClientRequestId":false}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2mreturns capped day memories in happenedAt-desc order for summary generation
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.succeeded","timestamp":"2026-04-20T16:45:22.440Z","userId":"user_member_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","userId":"user_member_001","dayKey":"2026-04-02","memoryId":"memories_00003","mode":"create","durationMs":1}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2mreturns capped day memories in happenedAt-desc order for summary generation
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.started","timestamp":"2026-04-20T16:45:22.440Z","userId":"user_member_001","status":"started","errorMessage":null,"context":{"status":"started","userId":"user_member_001","dayKey":"2026-04-02","hasClientRequestId":false}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2mreturns capped day memories in happenedAt-desc order for summary generation
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.succeeded","timestamp":"2026-04-20T16:45:22.441Z","userId":"user_member_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","userId":"user_member_001","dayKey":"2026-04-02","memoryId":"memories_00004","mode":"create","durationMs":1}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2msupports memory and media lifecycle with ownership checks
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.started","timestamp":"2026-04-20T16:45:22.443Z","userId":"user_member_001","status":"started","errorMessage":null,"context":{"status":"started","userId":"user_member_001","dayKey":"2026-04-02","hasClientRequestId":false}}
+
+[90mstderr[2m | convex/observabilityIngestion.security.test.ts[2m > [22m[2mobservability ingest security[2m > [22m[2mrejects invalid origin before attempting mutation
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"observability_info_event_origin_rejected","timestamp":"2026-04-20T16:45:22.443Z","userId":null,"status":"warning","errorMessage":null,"context":{"reason":"origin not allowed: https://malicious.example","method":"POST","origin":"https://malicious.example"}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2msupports memory and media lifecycle with ownership checks
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.succeeded","timestamp":"2026-04-20T16:45:22.444Z","userId":"user_member_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","userId":"user_member_001","dayKey":"2026-04-02","memoryId":"memories_00001","mode":"create","durationMs":1}}
+
+[90mstderr[2m | convex/observabilityIngestion.security.test.ts[2m > [22m[2mobservability ingest security[2m > [22m[2mrejects missing bearer token before attempting mutation
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"observability_info_event_auth_rejected","timestamp":"2026-04-20T16:45:22.447Z","userId":null,"status":"warning","errorMessage":null,"context":{"reason":"missing bearer token","method":"POST","origin":"https://app.daylog.test"}}
+
+[90mstderr[2m | convex/observabilityIngestion.security.test.ts[2m > [22m[2mobservability ingest security[2m > [22m[2mrejects replayed token nonce and prevents duplicate inserts
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"observability_info_event_replay_rejected","timestamp":"2026-04-20T16:45:22.451Z","userId":null,"status":"warning","errorMessage":null,"context":{"reason":"replay","method":"POST","origin":"https://app.daylog.test"}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2msupports memory and media lifecycle with ownership checks
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.started","timestamp":"2026-04-20T16:45:22.452Z","userId":"user_other_001","status":"started","errorMessage":null,"context":{"status":"started","userId":"user_other_001","dayKey":"2026-04-02","hasClientRequestId":false}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2msupports memory and media lifecycle with ownership checks
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.succeeded","timestamp":"2026-04-20T16:45:22.452Z","userId":"user_other_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","userId":"user_other_001","dayKey":"2026-04-02","memoryId":"memories_00005","mode":"create","durationMs":0}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2msupports memory and media lifecycle with ownership checks
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.memory_media.started","timestamp":"2026-04-20T16:45:22.454Z","userId":"user_member_001","status":"started","errorMessage":null,"context":{"status":"started","userId":"user_member_001","mediaId":"memoryMedia_00004"}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2msupports memory and media lifecycle with ownership checks
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.memory_media.succeeded","timestamp":"2026-04-20T16:45:22.454Z","userId":"user_member_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","userId":"user_member_001","mediaId":"memoryMedia_00004","memoryId":"memories_00001","durationMs":0}}
+
+[90mstderr[2m | convex/observabilityIngestion.security.test.ts[2m > [22m[2mobservability ingest security[2m > [22m[2mreturns 429 and skips event insert when rate limit is exceeded
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"observability_info_event_rate_limited","timestamp":"2026-04-20T16:45:22.454Z","userId":null,"status":"blocked","errorMessage":null,"context":{"status":"blocked","blockedScopes":["ip"],"retryAfterSeconds":2,"ipKeyHash":"08a3d11e","userKeyHash":"014a00d0","burstAttempt":true,"method":"POST","origin":"https://app.daylog.test"}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2msupports memory and media lifecycle with ownership checks
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.memory.started","timestamp":"2026-04-20T16:45:22.454Z","userId":"user_member_001","status":"started","errorMessage":null,"context":{"status":"started","userId":"user_member_001","memoryId":"memories_00001"}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2msupports memory and media lifecycle with ownership checks
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.memory.succeeded","timestamp":"2026-04-20T16:45:22.454Z","userId":"user_member_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","userId":"user_member_001","memoryId":"memories_00001","deletedMediaCount":1,"durationMs":0}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2mrejects invalid optional dayKey on memory update
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.started","timestamp":"2026-04-20T16:45:22.455Z","userId":"user_member_001","status":"started","errorMessage":null,"context":{"status":"started","userId":"user_member_001","dayKey":"2026-04-02","hasClientRequestId":false}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2mrejects invalid optional dayKey on memory update
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.succeeded","timestamp":"2026-04-20T16:45:22.455Z","userId":"user_member_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","userId":"user_member_001","dayKey":"2026-04-02","memoryId":"memories_00001","mode":"create","durationMs":0}}
+
+[90mstderr[2m | convex/observabilityIngestion.security.test.ts[2m > [22m[2mobservability ingest security[2m > [22m[2mrejects oversized payloads before attempting insert mutation
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"observability_info_event_payload_too_large","timestamp":"2026-04-20T16:45:22.455Z","userId":null,"status":"warning","errorMessage":null,"context":{"length":25195,"maxBytes":24000,"source":"body"}}
+
+[90mstderr[2m | convex/observabilityIngestion.security.test.ts[2m > [22m[2mobservability ingest security[2m > [22m[2mapplies CORS policy to preflight OPTIONS
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"observability_info_event_origin_rejected","timestamp":"2026-04-20T16:45:22.458Z","userId":null,"status":"warning","errorMessage":null,"context":{"reason":"origin not allowed: https://malicious.example","method":"OPTIONS","origin":"https://malicious.example"}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2menforces memory text limits by plan tier
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.started","timestamp":"2026-04-20T16:45:22.455Z","userId":"user_member_001","status":"started","errorMessage":null,"context":{"status":"started","userId":"user_member_001","dayKey":"2026-04-02","hasClientRequestId":false}}
+
+[90mstderr[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2menforces memory text limits by plan tier
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"error","event":"memory_creation.failed","timestamp":"2026-04-20T16:45:22.458Z","userId":"user_member_001","status":"failed","errorMessage":"Plan limit reached: title supports up to 120 characters on free plan.","context":{"status":"failed","userId":"user_member_001","dayKey":"2026-04-02","hasClientRequestId":false,"durationMs":0},"error":{"name":"Error","message":"Plan limit reached: title supports up to 120 characters on free plan.","stack":"Error: Plan limit reached: title supports up to 120 characters on free plan.\n    at assertMemoryTextLimits (/Users/raniduravishka/DayLog-Test/packages/backend/convex/memories.ts:64:11)\n    at handler (/Users/raniduravishka/DayLog-Test/packages/backend/convex/memories.ts:283:7)\n    at /Users/raniduravishka/DayLog-Test/packages/backend/convex/memories.behavior.test.ts:389:5\n    at file:///Users/raniduravishka/DayLog-Test/node_modules/.pnpm/@vitest+runner@4.1.2/node_modules/@vitest/runner/dist/chunk-artifact.js:1893:20"}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2menforces media count and file-size limits by plan tier
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.started","timestamp":"2026-04-20T16:45:22.459Z","userId":"user_member_001","status":"started","errorMessage":null,"context":{"status":"started","userId":"user_member_001","dayKey":"2026-04-02","hasClientRequestId":false}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2menforces media count and file-size limits by plan tier
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.succeeded","timestamp":"2026-04-20T16:45:22.462Z","userId":"user_member_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","userId":"user_member_001","dayKey":"2026-04-02","memoryId":"memories_00001","mode":"create","durationMs":3}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2menforces media count and file-size limits by plan tier
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.started","timestamp":"2026-04-20T16:45:22.462Z","userId":"user_member_001","status":"started","errorMessage":null,"context":{"status":"started","userId":"user_member_001","dayKey":"2026-04-02","hasClientRequestId":false}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2menforces media count and file-size limits by plan tier
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.succeeded","timestamp":"2026-04-20T16:45:22.462Z","userId":"user_member_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","userId":"user_member_001","dayKey":"2026-04-02","memoryId":"memories_00001","mode":"create","durationMs":0}}
+
+ [32m✓[39m convex/providerAdapters.behavior.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 45[2mms[22m[39m
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2mtreats createMemory as idempotent with clientRequestId
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.started","timestamp":"2026-04-20T16:45:22.464Z","userId":"user_member_001","status":"started","errorMessage":null,"context":{"status":"started","userId":"user_member_001","dayKey":"2026-04-02","hasClientRequestId":true}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2mtreats createMemory as idempotent with clientRequestId
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.succeeded","timestamp":"2026-04-20T16:45:22.468Z","userId":"user_member_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","userId":"user_member_001","dayKey":"2026-04-02","memoryId":"memories_00001","mode":"create","durationMs":4}}
+
+ [32m✓[39m convex/observabilityIngestion.security.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 48[2mms[22m[39m
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2mtreats createMemory as idempotent with clientRequestId
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.started","timestamp":"2026-04-20T16:45:22.474Z","userId":"user_member_001","status":"started","errorMessage":null,"context":{"status":"started","userId":"user_member_001","dayKey":"2026-04-02","hasClientRequestId":true}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2mtreats createMemory as idempotent with clientRequestId
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.succeeded","timestamp":"2026-04-20T16:45:22.475Z","userId":"user_member_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","userId":"user_member_001","dayKey":"2026-04-02","memoryId":"memories_00001","mode":"idempotent","durationMs":1}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2mtreats createMemory as idempotent with clientRequestId
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.started","timestamp":"2026-04-20T16:45:22.476Z","userId":"user_member_001","status":"started","errorMessage":null,"context":{"status":"started","userId":"user_member_001","dayKey":"2026-04-02","hasClientRequestId":true}}
+
+[90mstderr[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2mtreats createMemory as idempotent with clientRequestId
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"error","event":"memory_creation.failed","timestamp":"2026-04-20T16:45:22.477Z","userId":"user_member_001","status":"failed","errorMessage":"Conflict: clientRequestId already used for a different memory payload.","context":{"status":"failed","userId":"user_member_001","dayKey":"2026-04-02","hasClientRequestId":true,"durationMs":1},"error":{"name":"Error","message":"Conflict: clientRequestId already used for a different memory payload.","stack":"Error: Conflict: clientRequestId already used for a different memory payload.\n    at handler (/Users/raniduravishka/DayLog-Test/packages/backend/convex/memories.ts:314:19)\n    at /Users/raniduravishka/DayLog-Test/packages/backend/convex/memories.behavior.test.ts:537:5\n    at file:///Users/raniduravishka/DayLog-Test/node_modules/.pnpm/@vitest+runner@4.1.2/node_modules/@vitest/runner/dist/chunk-artifact.js:1893:20"}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2msupports idempotent media attachment by memory clientRequestId
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.started","timestamp":"2026-04-20T16:45:22.478Z","userId":"user_member_001","status":"started","errorMessage":null,"context":{"status":"started","userId":"user_member_001","dayKey":"2026-04-02","hasClientRequestId":true}}
+
+[90mstdout[2m | convex/memories.behavior.test.ts[2m > [22m[2mmemories behavior[2m > [22m[2msupports idempotent media attachment by memory clientRequestId
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"memory_creation.succeeded","timestamp":"2026-04-20T16:45:22.479Z","userId":"user_member_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","userId":"user_member_001","dayKey":"2026-04-02","memoryId":"memories_00001","mode":"create","durationMs":1}}
+
+ [32m✓[39m convex/integrations.tokenRef.migration.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 28[2mms[22m[39m
+ [32m✓[39m convex/memories.behavior.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 53[2mms[22m[39m
+ [32m✓[39m convex/auditLogs.behavior.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+ [32m✓[39m convex/sensitiveDataMigration.behavior.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 47[2mms[22m[39m
+ [32m✓[39m convex/observabilityIngestRateLimiter.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 21[2mms[22m[39m
+ [32m✓[39m convex/sensitiveDataCrypto.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m convex/integrationHealth.behavior.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+[90mstdout[2m | convex/days.behavior.test.ts[2m > [22m[2mdays behavior[2m > [22m[2menforces ownership for getDayById and deletes cascaded day data
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.day.started","timestamp":"2026-04-20T16:45:22.743Z","userId":"user_member_001","status":"started","errorMessage":null,"context":{"status":"started","userId":"user_member_001","dayId":"days_00001"}}
+
+[90mstdout[2m | convex/days.behavior.test.ts[2m > [22m[2mdays behavior[2m > [22m[2menforces ownership for getDayById and deletes cascaded day data
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"deletion.day.succeeded","timestamp":"2026-04-20T16:45:22.745Z","userId":"user_member_001","status":"succeeded","errorMessage":null,"context":{"status":"succeeded","userId":"user_member_001","dayId":"days_00001","dayKey":"2026-04-05","deletedMemories":1,"deletedSummaries":1,"durationMs":2}}
+
+ [32m✓[39m convex/days.behavior.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 27[2mms[22m[39m
+ [32m✓[39m convex/observabilityIngestion.behavior.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+ [32m✓[39m convex/retention.behavior.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2msoft-cleans unsupported providers, removes secrets/sync metadata, and is idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.started","timestamp":"2026-04-20T16:45:22.813Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","attemptId":"manual_1776703522813_wsb8px","trigger":"manual","force":false,"batchSizePerProvider":1,"maxPasses":1,"hasCursorSlack":false,"hasCursorStrava":false,"hasCursorTodoist":false}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2msoft-cleans unsupported providers, removes secrets/sync metadata, and is idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.821Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"manual_1776703522813_wsb8px","provider":"slack","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":false}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2msoft-cleans unsupported providers, removes secrets/sync metadata, and is idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.821Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"manual_1776703522813_wsb8px","provider":"strava","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":false}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2msoft-cleans unsupported providers, removes secrets/sync metadata, and is idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.821Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"manual_1776703522813_wsb8px","provider":"todoist","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":false}}
+{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.completed","timestamp":"2026-04-20T16:45:22.821Z","userId":null,"status":"succeeded","errorMessage":null,"context":{"status":"succeeded","trigger":"manual","force":false,"attemptId":"manual_1776703522813_wsb8px","batchSizePerProvider":1,"maxPasses":1,"maxRowsPerProvider":1,"isDone":true,"scannedRows":3,"matchedRows":2,"softDeletedRows":2,"hardDeletedRows":0,"deletedSecretRows":2,"deletedSyncRunRows":2,"failedRows":0,"affectedUsers":1,"rowsByProvider":{"slack":1,"strava":1,"todoist":0},"failedRowsByProvider":{"slack":0,"strava":0,"todoist":0},"pagesProcessedByProvider":{"slack":1,"strava":1,"todoist":1},"nextCursorByProvider":{"slack":null,"strava":null,"todoist":null},"affectedUserIds":["user_member_legacy_cleanup_001"]}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2msoft-cleans unsupported providers, removes secrets/sync metadata, and is idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.started","timestamp":"2026-04-20T16:45:22.822Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","attemptId":"manual_1776703522822_7q48hv","trigger":"manual","force":false,"batchSizePerProvider":1,"maxPasses":1,"hasCursorSlack":false,"hasCursorStrava":false,"hasCursorTodoist":false}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2msoft-cleans unsupported providers, removes secrets/sync metadata, and is idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.826Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"manual_1776703522822_7q48hv","provider":"slack","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":false}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2msoft-cleans unsupported providers, removes secrets/sync metadata, and is idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.827Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"manual_1776703522822_7q48hv","provider":"strava","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":false}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2msoft-cleans unsupported providers, removes secrets/sync metadata, and is idempotent
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.830Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"manual_1776703522822_7q48hv","provider":"todoist","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":false}}
+{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.completed","timestamp":"2026-04-20T16:45:22.831Z","userId":null,"status":"succeeded","errorMessage":null,"context":{"status":"succeeded","trigger":"manual","force":false,"attemptId":"manual_1776703522822_7q48hv","batchSizePerProvider":1,"maxPasses":1,"maxRowsPerProvider":1,"isDone":true,"scannedRows":3,"matchedRows":0,"softDeletedRows":0,"hardDeletedRows":0,"deletedSecretRows":0,"deletedSyncRunRows":0,"failedRows":0,"affectedUsers":0,"rowsByProvider":{"slack":0,"strava":0,"todoist":0},"failedRowsByProvider":{"slack":0,"strava":0,"todoist":0},"pagesProcessedByProvider":{"slack":1,"strava":1,"todoist":1},"nextCursorByProvider":{"slack":null,"strava":null,"todoist":null},"affectedUserIds":[]}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2mhard deletes unsupported integrations when force=true
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.started","timestamp":"2026-04-20T16:45:22.832Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","attemptId":"manual_1776703522832_c6j6bk","trigger":"manual","force":true,"batchSizePerProvider":5,"maxPasses":1,"hasCursorSlack":false,"hasCursorStrava":false,"hasCursorTodoist":false}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2mhard deletes unsupported integrations when force=true
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.832Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"manual_1776703522832_c6j6bk","provider":"slack","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":false}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2mhard deletes unsupported integrations when force=true
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.832Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"manual_1776703522832_c6j6bk","provider":"strava","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":false}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2mhard deletes unsupported integrations when force=true
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.832Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"manual_1776703522832_c6j6bk","provider":"todoist","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":false}}
+{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.completed","timestamp":"2026-04-20T16:45:22.832Z","userId":null,"status":"succeeded","errorMessage":null,"context":{"status":"succeeded","trigger":"manual","force":true,"attemptId":"manual_1776703522832_c6j6bk","batchSizePerProvider":5,"maxPasses":1,"maxRowsPerProvider":5,"isDone":true,"scannedRows":3,"matchedRows":3,"softDeletedRows":0,"hardDeletedRows":3,"deletedSecretRows":2,"deletedSyncRunRows":2,"failedRows":0,"affectedUsers":1,"rowsByProvider":{"slack":1,"strava":1,"todoist":1},"failedRowsByProvider":{"slack":0,"strava":0,"todoist":0},"pagesProcessedByProvider":{"slack":1,"strava":1,"todoist":1},"nextCursorByProvider":{"slack":null,"strava":null,"todoist":null},"affectedUserIds":["user_member_legacy_cleanup_001"]}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2msupports cursor-based continuation for large provider batches
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.started","timestamp":"2026-04-20T16:45:22.833Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","attemptId":"manual_1776703522833_hnfudy","trigger":"manual","force":false,"batchSizePerProvider":1,"maxPasses":1,"hasCursorSlack":false,"hasCursorStrava":false,"hasCursorTodoist":false}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2msupports cursor-based continuation for large provider batches
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.833Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"manual_1776703522833_hnfudy","provider":"slack","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":true}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2msupports cursor-based continuation for large provider batches
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.833Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"manual_1776703522833_hnfudy","provider":"strava","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":false}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2msupports cursor-based continuation for large provider batches
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.833Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"manual_1776703522833_hnfudy","provider":"todoist","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":false}}
+{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.completed","timestamp":"2026-04-20T16:45:22.833Z","userId":null,"status":"succeeded","errorMessage":null,"context":{"status":"succeeded","trigger":"manual","force":false,"attemptId":"manual_1776703522833_hnfudy","batchSizePerProvider":1,"maxPasses":1,"maxRowsPerProvider":1,"isDone":false,"scannedRows":3,"matchedRows":2,"softDeletedRows":2,"hardDeletedRows":0,"deletedSecretRows":2,"deletedSyncRunRows":2,"failedRows":0,"affectedUsers":1,"rowsByProvider":{"slack":1,"strava":1,"todoist":0},"failedRowsByProvider":{"slack":0,"strava":0,"todoist":0},"pagesProcessedByProvider":{"slack":1,"strava":1,"todoist":1},"nextCursorByProvider":{"slack":"offset:1","strava":null,"todoist":null},"affectedUserIds":["user_member_legacy_cleanup_001"]}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2msupports cursor-based continuation for large provider batches
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.started","timestamp":"2026-04-20T16:45:22.833Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","attemptId":"manual_1776703522833_e2zo97","trigger":"manual","force":false,"batchSizePerProvider":1,"maxPasses":1,"hasCursorSlack":true,"hasCursorStrava":false,"hasCursorTodoist":false}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2msupports cursor-based continuation for large provider batches
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.833Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"manual_1776703522833_e2zo97","provider":"slack","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":false}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2msupports cursor-based continuation for large provider batches
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.833Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"manual_1776703522833_e2zo97","provider":"strava","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":false}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2msupports cursor-based continuation for large provider batches
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.833Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"manual_1776703522833_e2zo97","provider":"todoist","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":false}}
+{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.completed","timestamp":"2026-04-20T16:45:22.833Z","userId":null,"status":"succeeded","errorMessage":null,"context":{"status":"succeeded","trigger":"manual","force":false,"attemptId":"manual_1776703522833_e2zo97","batchSizePerProvider":1,"maxPasses":1,"maxRowsPerProvider":1,"isDone":true,"scannedRows":3,"matchedRows":1,"softDeletedRows":1,"hardDeletedRows":0,"deletedSecretRows":0,"deletedSyncRunRows":0,"failedRows":0,"affectedUsers":1,"rowsByProvider":{"slack":1,"strava":0,"todoist":0},"failedRowsByProvider":{"slack":0,"strava":0,"todoist":0},"pagesProcessedByProvider":{"slack":1,"strava":1,"todoist":1},"nextCursorByProvider":{"slack":null,"strava":null,"todoist":null},"affectedUserIds":["user_member_legacy_cleanup_001"]}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2mresumes scheduled cleanup from persisted cursor state
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.started","timestamp":"2026-04-20T16:45:22.833Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","attemptId":"cron_1776703522833_5efjdd","trigger":"cron","force":false,"batchSizePerProvider":1,"maxPasses":1,"hasCursorSlack":false,"hasCursorStrava":false,"hasCursorTodoist":false}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2mresumes scheduled cleanup from persisted cursor state
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.833Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"cron_1776703522833_5efjdd","provider":"slack","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":true}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2mresumes scheduled cleanup from persisted cursor state
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.833Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"cron_1776703522833_5efjdd","provider":"strava","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":false}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2mresumes scheduled cleanup from persisted cursor state
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.833Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"cron_1776703522833_5efjdd","provider":"todoist","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":false}}
+{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.completed","timestamp":"2026-04-20T16:45:22.834Z","userId":null,"status":"succeeded","errorMessage":null,"context":{"status":"succeeded","trigger":"cron","force":false,"attemptId":"cron_1776703522833_5efjdd","batchSizePerProvider":1,"maxPasses":1,"maxRowsPerProvider":1,"isDone":false,"scannedRows":3,"matchedRows":2,"softDeletedRows":2,"hardDeletedRows":0,"deletedSecretRows":2,"deletedSyncRunRows":2,"failedRows":0,"affectedUsers":1,"rowsByProvider":{"slack":1,"strava":1,"todoist":0},"failedRowsByProvider":{"slack":0,"strava":0,"todoist":0},"pagesProcessedByProvider":{"slack":1,"strava":1,"todoist":1},"nextCursorByProvider":{"slack":"offset:1","strava":null,"todoist":null},"affectedUserIds":["user_member_legacy_cleanup_001"]}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2mresumes scheduled cleanup from persisted cursor state
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.cursor_state_applied","timestamp":"2026-04-20T16:45:22.834Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"cron_1776703522833_5efjdd","resumedFromStoredCursor":false,"usedExplicitCursor":false,"hasNextCursorSlack":true,"hasNextCursorStrava":false,"hasNextCursorTodoist":false,"isDone":false}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2mresumes scheduled cleanup from persisted cursor state
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.started","timestamp":"2026-04-20T16:45:22.834Z","userId":null,"status":"started","errorMessage":null,"context":{"status":"started","attemptId":"cron_1776703522834_5ip3dm","trigger":"cron","force":false,"batchSizePerProvider":1,"maxPasses":1,"hasCursorSlack":true,"hasCursorStrava":false,"hasCursorTodoist":false}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2mresumes scheduled cleanup from persisted cursor state
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.834Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"cron_1776703522834_5ip3dm","provider":"slack","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":false}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2mresumes scheduled cleanup from persisted cursor state
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.834Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"cron_1776703522834_5ip3dm","provider":"strava","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":false}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2mresumes scheduled cleanup from persisted cursor state
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.provider_page","timestamp":"2026-04-20T16:45:22.834Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"cron_1776703522834_5ip3dm","provider":"todoist","pageSize":1,"pagePass":1,"pageHadFailure":false,"cursorAdvanced":true,"hasNextCursor":false}}
+{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.completed","timestamp":"2026-04-20T16:45:22.834Z","userId":null,"status":"succeeded","errorMessage":null,"context":{"status":"succeeded","trigger":"cron","force":false,"attemptId":"cron_1776703522834_5ip3dm","batchSizePerProvider":1,"maxPasses":1,"maxRowsPerProvider":1,"isDone":true,"scannedRows":3,"matchedRows":1,"softDeletedRows":1,"hardDeletedRows":0,"deletedSecretRows":0,"deletedSyncRunRows":0,"failedRows":0,"affectedUsers":1,"rowsByProvider":{"slack":1,"strava":0,"todoist":0},"failedRowsByProvider":{"slack":0,"strava":0,"todoist":0},"pagesProcessedByProvider":{"slack":1,"strava":1,"todoist":1},"nextCursorByProvider":{"slack":null,"strava":null,"todoist":null},"affectedUserIds":["user_member_legacy_cleanup_001"]}}
+
+[90mstdout[2m | convex/integrations.legacyUnsupportedCleanup.test.ts[2m > [22m[2mlegacy unsupported integrations cleanup[2m > [22m[2mresumes scheduled cleanup from persisted cursor state
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"info","event":"legacy_unsupported_integrations_cleanup.cursor_state_applied","timestamp":"2026-04-20T16:45:22.834Z","userId":null,"status":"info","errorMessage":null,"context":{"status":"info","attemptId":"cron_1776703522834_5ip3dm","resumedFromStoredCursor":true,"usedExplicitCursor":false,"hasNextCursorSlack":false,"hasNextCursorStrava":false,"hasNextCursorTodoist":false,"isDone":true}}
+
+ [32m✓[39m convex/integrations.legacyUnsupportedCleanup.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 28[2mms[22m[39m
+ [32m✓[39m convex/authConfig.behavior.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m convex/integrationProviders.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m convex/integrations.secret-hardening.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m convex/content.behavior.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m convex/featureFlags.behavior.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m convex/userPreferences.behavior.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m convex/summaryQuality.behavior.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+[90mstderr[2m | convex/runtimeConfig.behavior.test.ts[2m > [22m[2mruntime config behavior[2m > [22m[2mhandles summary daily generation limit defaults and validation
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"runtime_config_missing_daily_generation_limit","timestamp":"2026-04-20T16:45:23.096Z","userId":null,"status":"warning","errorMessage":null,"context":{"envName":"SUMMARY_DAILY_GENERATION_LIMIT","fallback":5}}
+{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"runtime_config_invalid_daily_generation_limit","timestamp":"2026-04-20T16:45:23.101Z","userId":null,"status":"warning","errorMessage":null,"context":{"envName":"SUMMARY_DAILY_GENERATION_LIMIT","raw":"0","fallback":5,"min":1,"max":1000}}
+
+[90mstderr[2m | convex/runtimeConfig.behavior.test.ts[2m > [22m[2mruntime config behavior[2m > [22m[2mparses retention defaults with bounds and fallbacks
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"runtime_config_invalid_integer","timestamp":"2026-04-20T16:45:23.102Z","userId":null,"status":"warning","errorMessage":null,"context":{"envName":"RETENTION_DAY_SUMMARIES_DAYS","raw":"invalid","fallback":90,"min":1,"max":3650}}
+{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"runtime_config_invalid_integer","timestamp":"2026-04-20T16:45:23.102Z","userId":null,"status":"warning","errorMessage":null,"context":{"envName":"RETENTION_LOCATION_SIGNALS_DAYS","raw":"-1","fallback":30,"min":1,"max":3650}}
+{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"runtime_config_invalid_integer","timestamp":"2026-04-20T16:45:23.103Z","userId":null,"status":"warning","errorMessage":null,"context":{"envName":"RETENTION_DAY_SUMMARIES_DAYS","raw":"invalid","fallback":90,"min":1,"max":3650}}
+{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"runtime_config_invalid_integer","timestamp":"2026-04-20T16:45:23.103Z","userId":null,"status":"warning","errorMessage":null,"context":{"envName":"RETENTION_LOCATION_SIGNALS_DAYS","raw":"-1","fallback":30,"min":1,"max":3650}}
+{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"runtime_config_invalid_integer","timestamp":"2026-04-20T16:45:23.103Z","userId":null,"status":"warning","errorMessage":null,"context":{"envName":"RETENTION_DAY_SUMMARIES_DAYS","raw":"invalid","fallback":90,"min":1,"max":3650}}
+{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"runtime_config_invalid_integer","timestamp":"2026-04-20T16:45:23.104Z","userId":null,"status":"warning","errorMessage":null,"context":{"envName":"RETENTION_LOCATION_SIGNALS_DAYS","raw":"-1","fallback":30,"min":1,"max":3650}}
+
+[90mstderr[2m | convex/runtimeConfig.behavior.test.ts[2m > [22m[2mruntime config behavior[2m > [22m[2menforces numeric bounds for batch size and quality threshold
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"runtime_config_invalid_integer","timestamp":"2026-04-20T16:45:23.104Z","userId":null,"status":"warning","errorMessage":null,"context":{"envName":"RETENTION_DELETE_BATCH_SIZE","raw":"9999","fallback":200,"min":50,"max":5000}}
+{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"runtime_config_invalid_number","timestamp":"2026-04-20T16:45:23.105Z","userId":null,"status":"warning","errorMessage":null,"context":{"envName":"SUMMARY_LOW_QUALITY_THRESHOLD","raw":"2","fallback":0.55,"min":0,"max":1}}
+
+[90mstderr[2m | convex/runtimeConfig.behavior.test.ts[2m > [22m[2mruntime config behavior[2m > [22m[2mparses background tracking feature flag and bounds
+[22m[39m{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"runtime_config_invalid_boolean","timestamp":"2026-04-20T16:45:23.106Z","userId":null,"status":"warning","errorMessage":null,"context":{"envName":"ENABLE_BACKGROUND_LOCATION_TRACKING","raw":"invalid","fallback":false}}
+{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"runtime_config_invalid_integer","timestamp":"2026-04-20T16:45:23.106Z","userId":null,"status":"warning","errorMessage":null,"context":{"envName":"BACKGROUND_LOCATION_BATCH_MAX_POINTS","raw":"1000","fallback":32,"min":8,"max":500}}
+{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"runtime_config_invalid_integer","timestamp":"2026-04-20T16:45:23.106Z","userId":null,"status":"warning","errorMessage":null,"context":{"envName":"BG_LOC_MAX_UPDATES_PER_HOUR","raw":"10","fallback":120,"min":20,"max":2000}}
+{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"runtime_config_invalid_integer","timestamp":"2026-04-20T16:45:23.106Z","userId":null,"status":"warning","errorMessage":null,"context":{"envName":"BG_LOC_BATCH_FLUSH_INTERVAL_MIN","raw":"1","fallback":15,"min":5,"max":240}}
+{"schemaVersion":1,"app":"daylog","surface":"backend","level":"warn","event":"runtime_config_invalid_integer","timestamp":"2026-04-20T16:45:23.106Z","userId":null,"status":"warning","errorMessage":null,"context":{"envName":"BG_LOC_MAX_BATTERY_DRAIN_PCT_PER_HR","raw":"100","fallback":12,"min":1,"max":60}}
+
+ [32m✓[39m convex/runtimeConfig.behavior.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m convex/cascadeCleanup.behavior.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m convex/validators.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m convex/providerAdapters.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m convex/inMemoryHarness.behavior.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m convex/retentionAdminAggregation.behavior.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m convex/integrations.contextAggregate.behavior.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m convex/auth.behavior.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m convex/summaryQuality.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m38 passed[39m[22m[90m (38)[39m
+[2m      Tests [22m [1m[32m197 passed[39m[22m[90m (197)[39m
+[2m   Start at [22m 22:15:21
+[2m   Duration [22m 2.02s[2m (transform 1.86s, setup 0ms, import 3.32s, tests 1.68s, environment 3ms)[22m
+
+[34m % [39m[2mCoverage report from [22m[33mv8[39m
+-------------------|---------|----------|---------|---------|-------------------
+File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+-------------------|---------|----------|---------|---------|-------------------
+All files          |   80.99 |    65.01 |   86.29 |   82.32 |                   
+ admin.ts          |   81.59 |    58.96 |   82.35 |   86.41 | ...1775,1792,1796 
+ auth.config.ts    |      70 |       50 |     100 |      70 | 7,15-20           
+ authz.ts          |   95.83 |    92.85 |     100 |   95.65 | 87                
+ cascadeCleanup.ts |   99.11 |    67.18 |     100 |   99.11 | 182,901           
+ content.ts        |   88.37 |       75 |     100 |   92.68 | 10,101,125        
+ crons.ts          |     100 |      100 |     100 |     100 |                   
+ ...oardMetrics.ts |   87.75 |    73.07 |    92.3 |    87.5 | ...40,172,183-189 
+ days.ts           |   91.86 |    57.14 |     100 |   91.52 | ...36,361,391-397 
+ env.ts            |   69.86 |    58.33 |   93.33 |   70.58 | ...21,145-148,176 
+ featureFlags.ts   |    77.3 |    74.03 |    91.3 |   80.46 | ...88,428,441-444 
+ http.ts           |     100 |      100 |     100 |     100 |                   
+ ...ationHealth.ts |   88.69 |    77.92 |    91.3 |   93.26 | ...04,259,309-311 
+ ...tionPlugins.ts |   77.77 |    66.66 |   83.33 |   77.77 | 160,167-168,182   
+ ...onProviders.ts |     100 |    91.66 |     100 |     100 | 59                
+ ...cretsCrypto.ts |   81.61 |    63.88 |     100 |    81.2 | ...22,447,463-467 
+ ...ations.auth.ts |   76.23 |    62.96 |      75 |   78.49 | ...64,362,402-410 
+ ...s.dailyData.ts |   55.97 |    42.04 |      52 |   59.44 | ...31,141-319,401 
+ ...ions.health.ts |     100 |       50 |     100 |     100 | 7                 
+ ...s.providers.ts |   56.36 |    28.88 |      50 |   59.18 | ...26,132,158-181 
+ ...ations.sync.ts |   83.75 |    68.18 |     100 |   83.75 | ...34,236,257,261 
+ integrations.ts   |   55.96 |    46.18 |      51 |   56.86 | ...2477,2496-2543 
+ memories.ts       |   90.51 |    73.17 |   98.03 |   90.43 | ...82,829,876-882 
+ observability.ts  |   53.77 |    46.42 |      70 |   55.88 | ...16-317,325,377 
+ ...RateLimiter.ts |   41.73 |    19.17 |   35.48 |    41.8 | ...05-374,389-468 
+ ...tyIngestion.ts |   78.03 |    67.68 |   86.11 |   78.57 | ...85,895,935-940 
+ ...ionSecurity.ts |   79.18 |    62.77 |     100 |   79.08 | ...53,562,588,606 
+ planLimits.ts     |   72.72 |       50 |     100 |     100 | 54-56             
+ ...derAdapters.ts |   94.94 |    73.91 |   97.61 |   97.54 | 186,199,311,532   
+ retention.ts      |   91.66 |    65.35 |   98.18 |   91.44 | ...20,883,948-950 
+ runtimeConfig.ts  |   98.55 |    97.14 |     100 |   98.48 | 93                
+ schema.ts         |     100 |      100 |     100 |     100 |                   
+ ...eDataCrypto.ts |   80.71 |    67.05 |     100 |   80.29 | ...30,434,462-466 
+ ...eDataFields.ts |   86.66 |    85.62 |   95.83 |   86.66 | ...37,453,591-592 
+ ...taMigration.ts |   90.98 |    71.37 |    87.5 |   94.61 | ...56,885,968-972 
+ summaries.ts      |   90.84 |    75.49 |   99.08 |   90.88 | ...2159-2160,2469 
+ ...yGeneration.ts |   88.75 |    76.22 |   92.68 |   88.34 | ...96-397,570,640 
+ summaryQuality.ts |    87.5 |    68.49 |     100 |   90.26 | ...73,420,440-441 
+ ...edProviders.ts |     100 |      100 |     100 |     100 |                   
+ ...Preferences.ts |    92.3 |    63.79 |     100 |   94.52 | 35,41,285-307     
+ users.ts          |    80.4 |    65.08 |   90.69 |    81.4 | ...1161,1203-1207 
+ validators.ts     |     100 |      100 |     100 |     100 |                   
+ webhooks.ts       |   84.48 |    88.23 |     100 |   85.96 | ...24,154,164-175 
+-------------------|---------|----------|---------|---------|-------------------

@@ -369,54 +369,43 @@ const HomeScreen = () => {
             </AppCard>
           ) : (
             <AppCard padded={false}>
-              {memories.map(
-                (
-                  mem: {
-                    _id: string;
-                    mood?: string;
-                    title: string;
-                    happenedAt: number;
-                    dayKey: string;
-                  },
-                  idx: number,
-                ) => (
-                  <View
-                    key={mem._id}
-                    style={[
-                      styles.memoryRow,
-                      idx < memories.length - 1 && styles.memoryBorder,
-                    ]}
-                  >
-                    <View style={styles.moodDot}>
-                      <Text style={{ fontSize: 16 }}>
-                        {MOOD_EMOJI[mem.mood ?? ""] ?? "📝"}
-                      </Text>
-                    </View>
-                    <View style={styles.memoryInfo}>
-                      <Text style={styles.memoryTitle} numberOfLines={1}>
-                        {mem.title}
-                      </Text>
-                      {mem.mood && (
-                        <Text style={styles.memoryMood}>{mem.mood}</Text>
-                      )}
-                    </View>
-                    {thumbnailByMemoryId.get(String(mem._id)) ? (
-                      <Image
-                        source={{
-                          uri: thumbnailByMemoryId.get(String(mem._id))!,
-                        }}
-                        style={styles.memoryThumb}
-                      />
-                    ) : null}
-                    <View style={styles.memoryTime}>
-                      <Text style={styles.timeText}>
-                        {formatMemoryTime(mem.happenedAt)}
-                      </Text>
-                      <Text style={styles.dayText}>{mem.dayKey}</Text>
-                    </View>
+              {memories.map((mem, idx) => (
+                <View
+                  key={mem._id}
+                  style={[
+                    styles.memoryRow,
+                    idx < memories.length - 1 && styles.memoryBorder,
+                  ]}
+                >
+                  <View style={styles.moodDot}>
+                    <Text style={{ fontSize: 16 }}>
+                      {MOOD_EMOJI[mem.mood ?? ""] ?? "📝"}
+                    </Text>
                   </View>
-                ),
-              )}
+                  <View style={styles.memoryInfo}>
+                    <Text style={styles.memoryTitle} numberOfLines={1}>
+                      {mem.title ?? "Untitled memory"}
+                    </Text>
+                    {mem.mood && (
+                      <Text style={styles.memoryMood}>{mem.mood}</Text>
+                    )}
+                  </View>
+                  {thumbnailByMemoryId.get(String(mem._id)) ? (
+                    <Image
+                      source={{
+                        uri: thumbnailByMemoryId.get(String(mem._id))!,
+                      }}
+                      style={styles.memoryThumb}
+                    />
+                  ) : null}
+                  <View style={styles.memoryTime}>
+                    <Text style={styles.timeText}>
+                      {formatMemoryTime(mem.happenedAt)}
+                    </Text>
+                    <Text style={styles.dayText}>{mem.dayKey}</Text>
+                  </View>
+                </View>
+              ))}
             </AppCard>
           )}
         </View>

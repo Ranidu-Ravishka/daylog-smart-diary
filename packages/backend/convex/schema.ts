@@ -34,6 +34,16 @@ const encryptedSecretEnvelopeValidator = v.object({
   createdAt: v.number(),
 });
 
+const encryptedSensitiveFieldValidator = v.object({
+  version: v.number(),
+  algorithm: v.literal("AES-256-GCM"),
+  keyId: v.string(),
+  keyVersion: v.number(),
+  ciphertext: v.string(),
+  iv: v.string(),
+  createdAt: v.number(),
+});
+
 const integrationHealthStatusValidator = v.union(
   v.literal("connected"),
   v.literal("degraded"),
@@ -246,9 +256,14 @@ export default defineSchema(
     memories: defineTable({
       userId: v.id("user"),
       clientRequestId: v.optional(v.string()),
-      title: v.string(),
+      title: v.optional(v.string()),
       description: v.optional(v.string()),
       mood: v.optional(v.string()),
+      titleEncrypted: v.optional(encryptedSensitiveFieldValidator),
+      descriptionEncrypted: v.optional(encryptedSensitiveFieldValidator),
+      moodEncrypted: v.optional(encryptedSensitiveFieldValidator),
+      sensitiveDataNonce: v.optional(v.string()),
+      sensitiveDataMigratedAt: v.optional(v.number()),
       happenedAt: v.number(),
       dayKey: v.string(), // "YYYY-MM-DD" in user timezone
       thumbnailStorageId: v.optional(v.string()),
@@ -282,6 +297,10 @@ export default defineSchema(
       rating: v.optional(v.number()),
       manualNotes: v.optional(v.array(v.string())),
       peopleTags: v.optional(v.array(v.string())),
+      manualNotesEncrypted: v.optional(encryptedSensitiveFieldValidator),
+      peopleTagsEncrypted: v.optional(encryptedSensitiveFieldValidator),
+      sensitiveDataNonce: v.optional(v.string()),
+      sensitiveDataMigratedAt: v.optional(v.number()),
     })
       .index("by_user_day", ["userId", "dayKey"])
       .index("by_dayKey", ["dayKey"]),
@@ -290,8 +309,12 @@ export default defineSchema(
     daySummaries: defineTable({
       userId: v.id("user"),
       dayKey: v.string(),
-      story: v.string(),
-      highlights: v.array(v.string()),
+      story: v.optional(v.string()),
+      highlights: v.optional(v.array(v.string())),
+      storyEncrypted: v.optional(encryptedSensitiveFieldValidator),
+      highlightsEncrypted: v.optional(encryptedSensitiveFieldValidator),
+      sensitiveDataNonce: v.optional(v.string()),
+      sensitiveDataMigratedAt: v.optional(v.number()),
       metrics: v.optional(
         v.object({
           steps: v.optional(v.number()),
@@ -505,6 +528,11 @@ export default defineSchema(
       summary: v.optional(v.string()),
       signals: v.optional(v.array(v.string())),
       context: v.optional(integrationDailyContextValidator),
+      summaryEncrypted: v.optional(encryptedSensitiveFieldValidator),
+      signalsEncrypted: v.optional(encryptedSensitiveFieldValidator),
+      contextEncrypted: v.optional(encryptedSensitiveFieldValidator),
+      sensitiveDataNonce: v.optional(v.string()),
+      sensitiveDataMigratedAt: v.optional(v.number()),
     })
       .index("by_user_day", ["userId", "dayKey"])
       .index("by_user_provider_day", ["userId", "provider", "dayKey"])

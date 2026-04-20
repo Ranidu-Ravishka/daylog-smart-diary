@@ -6,6 +6,10 @@ import {
   upsertSummaryForUserDay,
 } from "./summaries";
 import { createInMemoryDb } from "../test-utils/inMemoryConvex";
+import {
+  readSummarySensitiveFields,
+  type SummarySensitiveRecord,
+} from "./sensitiveDataFields";
 
 const USER_ID = "user_001" as Id<"user">;
 
@@ -123,7 +127,10 @@ describe("summary flow behavior", () => {
 
     const summaries = db.getTable("daySummaries");
     expect(summaries).toHaveLength(1);
-    expect(summaries[0]?.story).toBe("Updated summary after retry");
+    const summarySensitive = await readSummarySensitiveFields(
+      summaries[0] as unknown as SummarySensitiveRecord,
+    );
+    expect(summarySensitive.story).toBe("Updated summary after retry");
     expect(summaries[0]?.generatedAt).toBe(200);
   });
 

@@ -9,10 +9,25 @@ import {
   getRetentionDeleteBatchSize,
   getSummaryDailyGenerationLimit,
 } from "./runtimeConfig";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import type { ActionCtx, MutationCtx } from "./_generated/server";
 import { applyDashboardMetricsDelta } from "./dashboardMetrics";
 import { captureException, logInfo } from "./observability";
+import {
+  buildDaySensitiveWritePayload,
+  buildIntegrationDailySensitiveWritePayload,
+  buildMemorySensitiveWritePayload,
+  buildSummarySensitiveWritePayload,
+  readDaySensitiveFields,
+  readIntegrationDailySensitiveFields,
+  readMemorySensitiveFields,
+  readSummarySensitiveFields,
+  withSummarySensitiveFields,
+  type DaySensitiveRecord,
+  type IntegrationDailySensitiveRecord,
+  type MemorySensitiveRecord,
+  type SummarySensitiveRecord,
+} from "./sensitiveDataFields";
 
 export function getUtcDayKey(timestamp: number): string {
   return new Date(timestamp).toISOString().slice(0, 10);
@@ -33,6 +48,11 @@ type UpsertSummaryInput = {
   sourcesUsed: string[];
 };
 
+type SummaryDocRecord = Doc<"daySummaries"> & SummarySensitiveRecord;
+type MemoryDocRecord = Doc<"memories"> & MemorySensitiveRecord;
+type DayDocRecord = Doc<"days"> & DaySensitiveRecord;
+type IntegrationDocRecord = IntegrationDailySensitiveRecord;
+
 export async function upsertSummaryForUserDay(
   db: SummaryDb,
   userId: Id<"user">,
@@ -46,23 +66,31 @@ export async function upsertSummaryForUserDay(
     )
     .unique();
 
+  const encryptedPayload = await buildSummarySensitiveWritePayload({
+    userId,
+    story: args.story,
+    highlights: args.highlights,
+    sensitiveDataNonce: existing?.sensitiveDataNonce,
+    now,
+  });
+
   if (existing) {
     await db.patch(existing._id, {
-      story: args.story,
-      highlights: args.highlights,
+      ...encryptedPayload,
       metrics: args.metrics,
       sourcesUsed: args.sourcesUsed,
       generatedAt: now,
     });
 
-    return await db.get(existing._id);
+    return await withSummarySensitiveFields(
+      (await db.get(existing._id)) as SummaryDocRecord,
+    );
   }
 
   const id = await db.insert("daySummaries", {
     userId,
     dayKey: args.dayKey,
-    story: args.story,
-    highlights: args.highlights,
+    ...encryptedPayload,
     metrics: args.metrics,
     sourcesUsed: args.sourcesUsed,
     generatedAt: now,
@@ -72,7 +100,9 @@ export async function upsertSummaryForUserDay(
     totalSummaries: 1,
   });
 
-  return await db.get(id);
+  return await withSummarySensitiveFields(
+    (await db.get(id)) as SummaryDocRecord,
+  );
 }
 
 export async function reserveSummaryGenerationSlotForUser(
@@ -128,12 +158,18 @@ export const getSummaryByDay = query({
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
 
-    return await ctx.db
+    const summary = await ctx.db
       .query("daySummaries")
       .withIndex("by_user_day", (q) =>
         q.eq("userId", user._id).eq("dayKey", args.dayKey),
       )
       .unique();
+
+    if (!summary) {
+      return null;
+    }
+
+    return await withSummarySensitiveFields(summary as SummaryDocRecord);
   },
 });
 
@@ -149,7 +185,7 @@ export const getSummaryById = query({
     }
 
     requireOwnership(user, summary.userId);
-    return summary;
+    return await withSummarySensitiveFields(summary as SummaryDocRecord);
   },
 });
 
@@ -163,11 +199,18 @@ export const listRecentSummaries = query({
     const user = await requireUser(ctx);
     const limit = clampLimit(args.limit ?? 7);
 
-    return await ctx.db
+    const summaries = await ctx.db
       .query("daySummaries")
       .withIndex("by_user_day", (q) => q.eq("userId", user._id))
       .order("desc")
       .take(limit);
+
+    return await Promise.all(
+      summaries.map(
+        async (summary) =>
+          await withSummarySensitiveFields(summary as SummaryDocRecord),
+      ),
+    );
   },
 });
 
@@ -1059,48 +1102,73 @@ function metricsEqual(
   );
 }
 
-function memoryRowEquivalent(row: ExportMemoryRow, existing: any): boolean {
+async function memoryRowEquivalent(
+  row: ExportMemoryRow,
+  existing: any,
+): Promise<boolean> {
+  const existingSensitive = await readMemorySensitiveFields(
+    existing as MemoryDocRecord,
+  );
+
   return (
     existing.dayKey === row.dayKey &&
     existing.happenedAt === row.happenedAt &&
-    existing.title === row.title &&
-    optionalStringEqual(existing.description, row.description) &&
-    optionalStringEqual(existing.mood, row.mood)
+    existingSensitive.title === row.title &&
+    optionalStringEqual(existingSensitive.description, row.description) &&
+    optionalStringEqual(existingSensitive.mood, row.mood)
   );
 }
 
-function summaryRowEquivalent(row: ExportSummaryRow, existing: any): boolean {
+async function summaryRowEquivalent(
+  row: ExportSummaryRow,
+  existing: any,
+): Promise<boolean> {
+  const existingSensitive = await readSummarySensitiveFields(
+    existing as SummaryDocRecord,
+  );
+
   return (
     existing.dayKey === row.dayKey &&
-    existing.story === row.story &&
-    stringArrayEqual(existing.highlights ?? [], row.highlights) &&
+    existingSensitive.story === row.story &&
+    stringArrayEqual(existingSensitive.highlights ?? [], row.highlights) &&
     stringArrayEqual(existing.sourcesUsed ?? [], row.sourcesUsed) &&
     existing.generatedAt === row.generatedAt &&
     metricsEqual(existing.metrics, row.metrics)
   );
 }
 
-function dayRowEquivalent(row: ExportDayRow, existing: any): boolean {
+async function dayRowEquivalent(
+  row: ExportDayRow,
+  existing: any,
+): Promise<boolean> {
+  const existingSensitive = await readDaySensitiveFields(
+    existing as DayDocRecord,
+  );
+
   return (
     existing.dayKey === row.dayKey &&
     optionalNumberEqual(existing.rating, row.rating) &&
-    stringArrayEqual(existing.manualNotes ?? [], row.manualNotes) &&
-    stringArrayEqual(existing.peopleTags ?? [], row.peopleTags)
+    stringArrayEqual(existingSensitive.manualNotes ?? [], row.manualNotes) &&
+    stringArrayEqual(existingSensitive.peopleTags ?? [], row.peopleTags)
   );
 }
 
-function integrationRowEquivalent(
+async function integrationRowEquivalent(
   row: ExportIntegrationRow,
   existing: any,
-): boolean {
+): Promise<boolean> {
+  const existingSensitive = await readIntegrationDailySensitiveFields(
+    existing as IntegrationDocRecord,
+  );
+
   return (
     existing.provider === row.provider &&
     existing.dayKey === row.dayKey &&
     existing.syncedAt === row.syncedAt &&
-    optionalStringEqual(existing.summary, row.summary) &&
+    optionalStringEqual(existingSensitive.summary, row.summary) &&
     metricsEqual(existing.metrics, row.metrics) &&
-    stringArrayEqual(existing.signals ?? [], row.signals ?? []) &&
-    jsonEquivalent(existing.context, row.context)
+    stringArrayEqual(existingSensitive.signals ?? [], row.signals ?? []) &&
+    jsonEquivalent(existingSensitive.context, row.context)
   );
 }
 
@@ -1398,17 +1466,27 @@ export const exportMyDiaryData = query({
           cursor,
         });
 
+      const mappedPage = await Promise.all(
+        page.page.map(async (summary) => {
+          const sensitive = await readSummarySensitiveFields(
+            summary as SummaryDocRecord,
+          );
+
+          return {
+            dayKey: summary.dayKey,
+            story: sensitive.story,
+            highlights: sensitive.highlights,
+            metrics: summary.metrics,
+            sourcesUsed: summary.sourcesUsed,
+            generatedAt: summary.generatedAt,
+          };
+        }),
+      );
+
       return {
         exportedAt: Date.now(),
         dataset: args.dataset,
-        page: page.page.map((summary) => ({
-          dayKey: summary.dayKey,
-          story: summary.story,
-          highlights: summary.highlights,
-          metrics: summary.metrics,
-          sourcesUsed: summary.sourcesUsed,
-          generatedAt: summary.generatedAt,
-        })),
+        page: mappedPage,
         continueCursor: page.continueCursor,
         isDone: page.isDone,
       };
@@ -1424,17 +1502,27 @@ export const exportMyDiaryData = query({
           cursor,
         });
 
+      const mappedPage = await Promise.all(
+        page.page.map(async (memory) => {
+          const sensitive = await readMemorySensitiveFields(
+            memory as MemoryDocRecord,
+          );
+
+          return {
+            clientRequestId: memory.clientRequestId,
+            dayKey: memory.dayKey,
+            title: sensitive.title,
+            description: sensitive.description,
+            mood: sensitive.mood,
+            happenedAt: memory.happenedAt,
+          };
+        }),
+      );
+
       return {
         exportedAt: Date.now(),
         dataset: args.dataset,
-        page: page.page.map((memory) => ({
-          clientRequestId: memory.clientRequestId,
-          dayKey: memory.dayKey,
-          title: memory.title,
-          description: memory.description,
-          mood: memory.mood,
-          happenedAt: memory.happenedAt,
-        })),
+        page: mappedPage,
         continueCursor: page.continueCursor,
         isDone: page.isDone,
       };
@@ -1450,15 +1538,23 @@ export const exportMyDiaryData = query({
           cursor,
         });
 
+      const mappedPage = await Promise.all(
+        page.page.map(async (day) => {
+          const sensitive = await readDaySensitiveFields(day as DayDocRecord);
+
+          return {
+            dayKey: day.dayKey,
+            rating: day.rating,
+            manualNotes: sensitive.manualNotes,
+            peopleTags: sensitive.peopleTags,
+          };
+        }),
+      );
+
       return {
         exportedAt: Date.now(),
         dataset: args.dataset,
-        page: page.page.map((day) => ({
-          dayKey: day.dayKey,
-          rating: day.rating,
-          manualNotes: day.manualNotes ?? [],
-          peopleTags: day.peopleTags ?? [],
-        })),
+        page: mappedPage,
         continueCursor: page.continueCursor,
         isDone: page.isDone,
       };
@@ -1473,17 +1569,25 @@ export const exportMyDiaryData = query({
         cursor,
       });
 
-    const mappedIntegrationPage = integrationPage.page
-      .filter((item) => includeLocationSignals || item.provider !== "location")
-      .map((item) => ({
-        provider: item.provider,
-        dayKey: item.dayKey,
-        syncedAt: item.syncedAt,
-        summary: item.summary,
-        metrics: item.metrics,
-        signals: item.signals ?? [],
-        context: item.context,
-      }));
+    const filteredIntegrationRows = integrationPage.page.filter(
+      (item) => includeLocationSignals || item.provider !== "location",
+    );
+
+    const mappedIntegrationPage = await Promise.all(
+      filteredIntegrationRows.map(async (item) => {
+        const sensitive = await readIntegrationDailySensitiveFields(item);
+
+        return {
+          provider: item.provider,
+          dayKey: item.dayKey,
+          syncedAt: item.syncedAt,
+          summary: sensitive.summary,
+          metrics: item.metrics,
+          signals: sensitive.signals ?? [],
+          context: sensitive.context,
+        };
+      }),
+    );
 
     return {
       exportedAt: Date.now(),
@@ -2031,12 +2135,18 @@ export const restoreDiaryDatasetBatchInternal = internalMutation({
             )
             .unique();
 
+          const encryptedPayload = await buildSummarySensitiveWritePayload({
+            userId: args.userId,
+            story: row.story,
+            highlights: row.highlights,
+            sensitiveDataNonce: existing?.sensitiveDataNonce,
+          });
+
           if (!existing) {
             await db.insert("daySummaries", {
               userId: args.userId,
               dayKey: row.dayKey,
-              story: row.story,
-              highlights: row.highlights,
+              ...encryptedPayload,
               metrics: row.metrics,
               sourcesUsed: row.sourcesUsed,
               generatedAt: row.generatedAt,
@@ -2045,15 +2155,14 @@ export const restoreDiaryDatasetBatchInternal = internalMutation({
             continue;
           }
 
-          if (summaryRowEquivalent(row, existing)) {
+          if (await summaryRowEquivalent(row, existing)) {
             result.skipped += 1;
             continue;
           }
 
           if (args.conflictMode === "overwrite") {
             await db.patch(existing._id, {
-              story: row.story,
-              highlights: row.highlights,
+              ...encryptedPayload,
               metrics: row.metrics,
               sourcesUsed: row.sourcesUsed,
               generatedAt: row.generatedAt,
@@ -2076,19 +2185,25 @@ export const restoreDiaryDatasetBatchInternal = internalMutation({
             )
             .unique();
 
+          const encryptedPayload = await buildDaySensitiveWritePayload({
+            userId: args.userId,
+            manualNotes: row.manualNotes,
+            peopleTags: row.peopleTags,
+            sensitiveDataNonce: existing?.sensitiveDataNonce,
+          });
+
           if (!existing) {
             await db.insert("days", {
               userId: args.userId,
               dayKey: row.dayKey,
               rating: row.rating,
-              manualNotes: row.manualNotes,
-              peopleTags: row.peopleTags,
+              ...encryptedPayload,
             });
             result.inserted += 1;
             continue;
           }
 
-          if (dayRowEquivalent(row, existing)) {
+          if (await dayRowEquivalent(row, existing)) {
             result.skipped += 1;
             continue;
           }
@@ -2096,8 +2211,7 @@ export const restoreDiaryDatasetBatchInternal = internalMutation({
           if (args.conflictMode === "overwrite") {
             await db.patch(existing._id, {
               rating: row.rating,
-              manualNotes: row.manualNotes,
-              peopleTags: row.peopleTags,
+              ...encryptedPayload,
             });
             result.updated += 1;
             continue;
@@ -2120,22 +2234,29 @@ export const restoreDiaryDatasetBatchInternal = internalMutation({
             )
             .unique();
 
+          const encryptedPayload =
+            await buildIntegrationDailySensitiveWritePayload({
+              userId: args.userId,
+              summary: row.summary,
+              signals: row.signals,
+              context: row.context as any,
+              sensitiveDataNonce: existing?.sensitiveDataNonce,
+            });
+
           if (!existing) {
             await db.insert("integrationDailyData", {
               userId: args.userId,
               provider: row.provider,
               dayKey: row.dayKey,
               syncedAt: row.syncedAt,
-              summary: row.summary,
+              ...encryptedPayload,
               metrics: row.metrics,
-              signals: row.signals,
-              context: row.context,
             });
             result.inserted += 1;
             continue;
           }
 
-          if (integrationRowEquivalent(row, existing)) {
+          if (await integrationRowEquivalent(row, existing)) {
             result.skipped += 1;
             continue;
           }
@@ -2143,10 +2264,8 @@ export const restoreDiaryDatasetBatchInternal = internalMutation({
           if (args.conflictMode === "overwrite") {
             await db.patch(existing._id, {
               syncedAt: row.syncedAt,
-              summary: row.summary,
+              ...encryptedPayload,
               metrics: row.metrics,
-              signals: row.signals,
-              context: row.context,
             });
             result.updated += 1;
             continue;
@@ -2170,18 +2289,24 @@ export const restoreDiaryDatasetBatchInternal = internalMutation({
           .unique();
 
         if (existingByRestoreRequestId) {
-          if (memoryRowEquivalent(row, existingByRestoreRequestId)) {
+          if (await memoryRowEquivalent(row, existingByRestoreRequestId)) {
             result.skipped += 1;
             continue;
           }
 
           if (args.conflictMode === "overwrite") {
-            await db.patch(existingByRestoreRequestId._id, {
-              clientRequestId: restoreClientRequestId,
-              dayKey: row.dayKey,
+            const encryptedPayload = await buildMemorySensitiveWritePayload({
+              userId: args.userId,
               title: row.title,
               description: row.description,
               mood: row.mood,
+              sensitiveDataNonce: existingByRestoreRequestId.sensitiveDataNonce,
+            });
+
+            await db.patch(existingByRestoreRequestId._id, {
+              clientRequestId: restoreClientRequestId,
+              dayKey: row.dayKey,
+              ...encryptedPayload,
               happenedAt: row.happenedAt,
             });
             result.updated += 1;
@@ -2200,28 +2325,57 @@ export const restoreDiaryDatasetBatchInternal = internalMutation({
           )
           .collect();
 
-        const exactDuplicate = rowsByTimestamp.find((existing: any) =>
-          memoryRowEquivalent(row, existing),
-        );
+        let exactDuplicate: MemoryDocRecord | undefined;
+        let potentialConflict: MemoryDocRecord | undefined;
+
+        for (const existing of rowsByTimestamp) {
+          const existingSensitive = await readMemorySensitiveFields(
+            existing as MemoryDocRecord,
+          );
+
+          const equivalent =
+            existing.dayKey === row.dayKey &&
+            existing.happenedAt === row.happenedAt &&
+            existingSensitive.title === row.title &&
+            optionalStringEqual(
+              existingSensitive.description,
+              row.description,
+            ) &&
+            optionalStringEqual(existingSensitive.mood, row.mood);
+
+          if (equivalent) {
+            exactDuplicate = existing;
+            break;
+          }
+
+          if (
+            !potentialConflict &&
+            existing.dayKey === row.dayKey &&
+            existingSensitive.title === row.title
+          ) {
+            potentialConflict = existing;
+          }
+        }
 
         if (exactDuplicate) {
           result.skipped += 1;
           continue;
         }
 
-        const potentialConflict = rowsByTimestamp.find(
-          (existing: any) =>
-            existing.dayKey === row.dayKey && existing.title === row.title,
-        );
-
         if (potentialConflict) {
           if (args.conflictMode === "overwrite") {
-            await db.patch(potentialConflict._id, {
-              clientRequestId: restoreClientRequestId,
-              dayKey: row.dayKey,
+            const encryptedPayload = await buildMemorySensitiveWritePayload({
+              userId: args.userId,
               title: row.title,
               description: row.description,
               mood: row.mood,
+              sensitiveDataNonce: potentialConflict.sensitiveDataNonce,
+            });
+
+            await db.patch(potentialConflict._id, {
+              clientRequestId: restoreClientRequestId,
+              dayKey: row.dayKey,
+              ...encryptedPayload,
               happenedAt: row.happenedAt,
             });
             result.updated += 1;
@@ -2233,13 +2387,18 @@ export const restoreDiaryDatasetBatchInternal = internalMutation({
           continue;
         }
 
+        const encryptedPayload = await buildMemorySensitiveWritePayload({
+          userId: args.userId,
+          title: row.title,
+          description: row.description,
+          mood: row.mood,
+        });
+
         await db.insert("memories", {
           userId: args.userId,
           clientRequestId: restoreClientRequestId,
           dayKey: row.dayKey,
-          title: row.title,
-          description: row.description,
-          mood: row.mood,
+          ...encryptedPayload,
           happenedAt: row.happenedAt,
         });
         result.inserted += 1;

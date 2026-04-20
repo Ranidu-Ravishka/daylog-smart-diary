@@ -64,6 +64,10 @@ import {
   isUnsupportedProvider,
   type UnsupportedProvider,
 } from "./unsupportedProviders";
+import {
+  buildIntegrationDailySensitiveWritePayload,
+  withIntegrationDailySensitiveFields,
+} from "./sensitiveDataFields";
 
 const SYNC_RUN_IN_PROGRESS_TTL_MS = 60_000;
 const DELETE_BATCH_SIZE = 256;
@@ -1060,56 +1064,11 @@ async function upsertIntegrationDailyDataDoc(
 ) {
   const provider = assertDailyDataProvider(args.provider);
 
-  const typedDb = db as {
-    query: (table: "integrationDailyData") => {
-      withIndex: (
-        indexName: "by_user_provider_day",
-        apply: (q: {
-          eq: (
-            field: string,
-            value: unknown,
-          ) => {
-            eq: (
-              field: string,
-              value: unknown,
-            ) => {
-              eq: (field: string, value: unknown) => unknown;
-            };
-          };
-        }) => unknown,
-      ) => {
-        unique: () => Promise<{ _id: Id<"integrationDailyData"> } | null>;
-      };
-    };
-    patch: (
-      id: Id<"integrationDailyData">,
-      value: {
-        metrics?: IntegrationDailyMetrics;
-        summary?: string;
-        signals?: string[];
-        context?: IntegrationDailyContext;
-        syncedAt: number;
-      },
-    ) => Promise<void>;
-    get: (id: Id<"integrationDailyData">) => Promise<unknown>;
-    insert: (
-      table: "integrationDailyData",
-      value: {
-        userId: Id<"user">;
-        provider: string;
-        dayKey: string;
-        metrics?: IntegrationDailyMetrics;
-        summary?: string;
-        signals?: string[];
-        context?: IntegrationDailyContext;
-        syncedAt: number;
-      },
-    ) => Promise<Id<"integrationDailyData">>;
-  };
+  const typedDb = db as any;
 
   const existing = await typedDb
     .query("integrationDailyData")
-    .withIndex("by_user_provider_day", (q) =>
+    .withIndex("by_user_provider_day", (q: any) =>
       q
         .eq("userId", args.userId)
         .eq("provider", provider)
@@ -1117,11 +1076,23 @@ async function upsertIntegrationDailyDataDoc(
     )
     .unique();
 
+  const sanitizedSummary = sanitizeSummaryText(args.summary);
+  const sanitizedSignals = sanitizeSignals(args.signals)
+    .map(sanitizeSignalText)
+    .slice(0, 12);
+  const sanitizedContext = sanitizeContext(args.context);
+
+  const encryptedPayload = await buildIntegrationDailySensitiveWritePayload({
+    userId: args.userId,
+    summary: sanitizedSummary,
+    signals: sanitizedSignals.length > 0 ? sanitizedSignals : undefined,
+    context: sanitizedContext,
+    sensitiveDataNonce: existing?.sensitiveDataNonce,
+  });
+
   const payload = {
     metrics: sanitizeMetrics(args.metrics),
-    summary: sanitizeSummaryText(args.summary),
-    signals: sanitizeSignals(args.signals).map(sanitizeSignalText),
-    context: sanitizeContext(args.context),
+    ...encryptedPayload,
     syncedAt: Date.now(),
   };
 
@@ -1793,12 +1764,16 @@ export const listMyIntegrationDailyDataForDay = query({
     const user = await requireUser(ctx);
     validateDayKey(args.dayKey);
 
-    return await ctx.db
+    const rows = await ctx.db
       .query("integrationDailyData")
       .withIndex("by_user_day", (q) =>
         q.eq("userId", user._id).eq("dayKey", args.dayKey),
       )
       .collect();
+
+    return await Promise.all(
+      rows.map(async (row) => await withIntegrationDailySensitiveFields(row)),
+    );
   },
 });
 
@@ -1823,7 +1798,7 @@ export const listMyIntegrationDailyDataForDayForSummaryGeneration = query({
         cursor: null,
       });
 
-    return paginated.page
+    const sortedRows = paginated.page
       .slice()
       .sort(
         (left, right) =>
@@ -1831,6 +1806,12 @@ export const listMyIntegrationDailyDataForDayForSummaryGeneration = query({
           right._creationTime - left._creationTime ||
           left.provider.localeCompare(right.provider),
       );
+
+    return await Promise.all(
+      sortedRows.map(
+        async (row) => await withIntegrationDailySensitiveFields(row),
+      ),
+    );
   },
 });
 
@@ -1840,12 +1821,27 @@ export const getMyIntegrationContextAggregateForDay = query({
     const user = await requireUser(ctx);
     validateDayKey(args.dayKey);
 
-    const rows = (await ctx.db
+    const rawRows = await ctx.db
       .query("integrationDailyData")
       .withIndex("by_user_day", (q) =>
         q.eq("userId", user._id).eq("dayKey", args.dayKey),
       )
-      .collect()) as IntegrationContextAggregateRow[];
+      .collect();
+
+    const rows = (await Promise.all(
+      rawRows.map(async (row) => {
+        const hydrated = await withIntegrationDailySensitiveFields(row);
+
+        return {
+          provider: hydrated.provider,
+          metrics: hydrated.metrics,
+          summary: hydrated.summary,
+          signals: hydrated.signals,
+          context: hydrated.context,
+          syncedAt: hydrated.syncedAt,
+        } satisfies IntegrationContextAggregateRow;
+      }),
+    )) as IntegrationContextAggregateRow[];
 
     const syncRuns = (await ctx.db
       .query("integrationSyncRuns")

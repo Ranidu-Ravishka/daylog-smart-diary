@@ -36,6 +36,10 @@ export default function EditSummaryPage() {
     return <div className="p-6 text-sm text-gray-600">Loading...</div>;
   }
 
+  if (existing === null) {
+    return <div className="p-6 text-sm text-red-600">Summary not found.</div>;
+  }
+
   return (
     <AdminGuard>
       <SummaryForm
