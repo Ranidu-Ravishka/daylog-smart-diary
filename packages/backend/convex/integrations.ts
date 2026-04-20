@@ -88,6 +88,7 @@ const LEGACY_UNSUPPORTED_CLEANUP_CURSOR_STATE_ACTION =
 const LEGACY_UNSUPPORTED_CLEANUP_CURSOR_STATE_TARGET =
   "legacy_unsupported_integrations";
 const LEGACY_UNSUPPORTED_CLEANUP_CURSOR_STATE_SCAN_LIMIT = 500;
+const LEGACY_UNSUPPORTED_OFFSET_CURSOR_PREFIX = "offset:";
 const LEGACY_TOKEN_REF_MIGRATION_AUDIT_ACTION =
   "migrate_legacy_integration_token_ref";
 const OPAQUE_TOKEN_REF_DEFINITION =
@@ -364,6 +365,36 @@ function createUnsupportedProviderCursorMap(
     strava: initial?.strava ?? null,
     todoist: initial?.todoist ?? null,
   };
+}
+
+function parseLegacyUnsupportedOffsetCursor(
+  cursor: string | null | undefined,
+): number {
+  if (typeof cursor !== "string") {
+    return 0;
+  }
+
+  const trimmed = cursor.trim();
+  if (trimmed.length === 0) {
+    return 0;
+  }
+
+  const raw = trimmed.startsWith(LEGACY_UNSUPPORTED_OFFSET_CURSOR_PREFIX)
+    ? trimmed.slice(LEGACY_UNSUPPORTED_OFFSET_CURSOR_PREFIX.length)
+    : trimmed;
+  const parsed = Number(raw);
+
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 0;
+  }
+
+  return Math.floor(parsed);
+}
+
+function formatLegacyUnsupportedOffsetCursor(offset: number): string {
+  const safeOffset =
+    Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0;
+  return `${LEGACY_UNSUPPORTED_OFFSET_CURSOR_PREFIX}${safeOffset}`;
 }
 
 function toLegacyUnsupportedProviderCursorArgs(
@@ -666,6 +697,7 @@ async function countLegacyUnsupportedIntegrations(
     args.cursorByProvider,
   );
   const affectedUsers = new Set<string>();
+  const maxRowsPerProvider = args.batchSizePerProvider * args.maxPasses;
 
   let totalRows = 0;
   let pendingCleanupRows = 0;
@@ -673,50 +705,47 @@ async function countLegacyUnsupportedIntegrations(
   let isDone = true;
 
   for (const provider of UNSUPPORTED_PROVIDERS) {
-    let cursor = nextCursorByProvider[provider];
-    let passes = 0;
+    const providerRows = (await db
+      .query("integrations")
+      .withIndex("by_provider", (q) => q.eq("provider", provider))
+      .collect()) as IntegrationRecord[];
 
-    while (passes < args.maxPasses) {
-      const page = await db
-        .query("integrations")
-        .withIndex("by_provider", (q) => q.eq("provider", provider))
-        .paginate({
-          numItems: args.batchSizePerProvider,
-          cursor,
-        });
+    const startOffset = parseLegacyUnsupportedOffsetCursor(
+      nextCursorByProvider[provider],
+    );
+    const boundedStart = Math.min(startOffset, providerRows.length);
+    const boundedEnd = Math.min(
+      boundedStart + maxRowsPerProvider,
+      providerRows.length,
+    );
+    const rows = providerRows.slice(boundedStart, boundedEnd);
 
-      passes += 1;
-      pagesScannedByProvider[provider] += 1;
+    rowsByProvider[provider] += rows.length;
+    totalRows += rows.length;
 
-      const integrations = page.page as IntegrationRecord[];
-      rowsByProvider[provider] += integrations.length;
-      totalRows += integrations.length;
+    for (const integration of rows) {
+      affectedUsers.add(String(integration.userId));
 
-      for (const integration of integrations) {
-        affectedUsers.add(String(integration.userId));
-
-        if (integration.legacyUnsupported === true) {
-          softDeletedRows += 1;
-        }
-
-        if (needsLegacyUnsupportedSoftCleanup(integration)) {
-          pendingCleanupRows += 1;
-        }
+      if (integration.legacyUnsupported === true) {
+        softDeletedRows += 1;
       }
 
-      if (page.isDone) {
-        cursor = null;
-        break;
-      }
-
-      cursor = page.continueCursor;
-      if (!cursor) {
-        break;
+      if (needsLegacyUnsupportedSoftCleanup(integration)) {
+        pendingCleanupRows += 1;
       }
     }
 
-    nextCursorByProvider[provider] = cursor;
-    if (cursor !== null) {
+    pagesScannedByProvider[provider] =
+      rows.length === 0
+        ? 0
+        : Math.ceil(rows.length / args.batchSizePerProvider);
+
+    const hasMoreRows = boundedEnd < providerRows.length;
+    nextCursorByProvider[provider] = hasMoreRows
+      ? formatLegacyUnsupportedOffsetCursor(boundedEnd)
+      : null;
+
+    if (hasMoreRows) {
       isDone = false;
     }
   }
@@ -777,123 +806,118 @@ async function runLegacyUnsupportedCleanup(
   });
 
   for (const provider of UNSUPPORTED_PROVIDERS) {
-    let cursor = nextCursorByProvider[provider];
-    let passes = 0;
+    const providerRows = (await ctx.db
+      .query("integrations")
+      .withIndex("by_provider", (q) => q.eq("provider", provider))
+      .collect()) as IntegrationRecord[];
 
-    while (passes < args.maxPasses) {
-      const pageStartCursor = cursor;
-      const page = await ctx.db
-        .query("integrations")
-        .withIndex("by_provider", (q) => q.eq("provider", provider))
-        .paginate({
-          numItems: args.batchSizePerProvider,
-          cursor,
-        });
+    const startOffset = parseLegacyUnsupportedOffsetCursor(
+      nextCursorByProvider[provider],
+    );
+    const boundedStart = Math.min(startOffset, providerRows.length);
+    const boundedEnd = Math.min(
+      boundedStart + maxRowsPerProvider,
+      providerRows.length,
+    );
+    const integrations = providerRows.slice(boundedStart, boundedEnd);
 
-      passes += 1;
-      pagesProcessedByProvider[provider] += 1;
-      const integrations = page.page as IntegrationRecord[];
+    pagesProcessedByProvider[provider] =
+      integrations.length === 0
+        ? 0
+        : Math.ceil(integrations.length / args.batchSizePerProvider);
 
-      let pageHadFailure = false;
+    let providerHadFailure = false;
 
-      for (const integration of integrations) {
-        scannedRows += 1;
+    for (const integration of integrations) {
+      scannedRows += 1;
 
-        const shouldProcess =
-          args.force || needsLegacyUnsupportedSoftCleanup(integration);
-        if (!shouldProcess) {
+      const shouldProcess =
+        args.force || needsLegacyUnsupportedSoftCleanup(integration);
+      if (!shouldProcess) {
+        continue;
+      }
+
+      try {
+        matchedRows += 1;
+        rowsByProvider[provider] += 1;
+        affectedUsers.add(String(integration.userId));
+
+        deletedSecretRows += await deleteIntegrationSecretsByUserProvider(
+          ctx.db,
+          integration.userId,
+          provider,
+        );
+
+        deletedSyncRunRows += await deleteIntegrationSyncRunsByUserProvider(
+          ctx.db,
+          integration.userId,
+          provider,
+        );
+
+        if (args.force) {
+          await ctx.db.delete(integration._id);
+          hardDeletedRows += 1;
           continue;
         }
 
-        try {
-          matchedRows += 1;
-          rowsByProvider[provider] += 1;
-          affectedUsers.add(String(integration.userId));
+        await ctx.db.patch(integration._id, {
+          status: "disconnected",
+          tokenRef: undefined,
+          scopes: undefined,
+          lastSyncAt: undefined,
+          lastError: LEGACY_UNSUPPORTED_REASON,
+          legacyUnsupported: true,
+          legacyUnsupportedAt: integration.legacyUnsupportedAt ?? now,
+          legacyUnsupportedReason: LEGACY_UNSUPPORTED_REASON,
+        });
+        softDeletedRows += 1;
+      } catch (error) {
+        failedRows += 1;
+        failedRowsByProvider[provider] += 1;
+        providerHadFailure = true;
 
-          deletedSecretRows += await deleteIntegrationSecretsByUserProvider(
-            ctx.db,
-            integration.userId,
-            provider,
-          );
+        logWarn("legacy_unsupported_integrations_cleanup.row_failed", {
+          status: "warning",
+          attemptId,
+          provider,
+          integrationId: integration._id,
+          userId: integration.userId,
+          force: args.force,
+          message: error instanceof Error ? error.message : "unknown_error",
+        });
 
-          deletedSyncRunRows += await deleteIntegrationSyncRunsByUserProvider(
-            ctx.db,
-            integration.userId,
-            provider,
-          );
-
-          if (args.force) {
-            await ctx.db.delete(integration._id);
-            hardDeletedRows += 1;
-            continue;
-          }
-
-          await ctx.db.patch(integration._id, {
-            status: "disconnected",
-            tokenRef: undefined,
-            scopes: undefined,
-            lastSyncAt: undefined,
-            lastError: LEGACY_UNSUPPORTED_REASON,
-            legacyUnsupported: true,
-            legacyUnsupportedAt: integration.legacyUnsupportedAt ?? now,
-            legacyUnsupportedReason: LEGACY_UNSUPPORTED_REASON,
-          });
-          softDeletedRows += 1;
-        } catch (error) {
-          failedRows += 1;
-          failedRowsByProvider[provider] += 1;
-          pageHadFailure = true;
-
-          logWarn("legacy_unsupported_integrations_cleanup.row_failed", {
-            status: "warning",
+        captureException(
+          "legacy_unsupported_integrations_cleanup.row_failed",
+          error,
+          {
+            status: "failed",
             attemptId,
             provider,
             integrationId: integration._id,
             userId: integration.userId,
             force: args.force,
-            message: error instanceof Error ? error.message : "unknown_error",
-          });
-
-          captureException(
-            "legacy_unsupported_integrations_cleanup.row_failed",
-            error,
-            {
-              status: "failed",
-              attemptId,
-              provider,
-              integrationId: integration._id,
-              userId: integration.userId,
-              force: args.force,
-            },
-          );
-        }
-      }
-
-      if (pageHadFailure) {
-        // Retry safety: replay this page on the next invocation instead of advancing the cursor.
-        cursor = pageStartCursor;
-        isDone = false;
-      } else if (page.isDone) {
-        cursor = null;
-      } else {
-        cursor = page.continueCursor;
-      }
-
-      logInfo("legacy_unsupported_integrations_cleanup.provider_page", {
-        status: "info",
-        attemptId,
-        provider,
-        pageSize: integrations.length,
-        pagePass: passes,
-        pageHadFailure,
-        cursorAdvanced: !pageHadFailure,
-        hasNextCursor: Boolean(cursor),
-      });
-
-      if (pageHadFailure || page.isDone || !cursor) {
-        break;
+          },
+        );
       }
     }
+
+    const hasMoreRows = boundedEnd < providerRows.length;
+    const cursor = providerHadFailure
+      ? formatLegacyUnsupportedOffsetCursor(boundedStart)
+      : hasMoreRows
+        ? formatLegacyUnsupportedOffsetCursor(boundedEnd)
+        : null;
+
+    logInfo("legacy_unsupported_integrations_cleanup.provider_page", {
+      status: "info",
+      attemptId,
+      provider,
+      pageSize: integrations.length,
+      pagePass: pagesProcessedByProvider[provider],
+      pageHadFailure: providerHadFailure,
+      cursorAdvanced: !providerHadFailure,
+      hasNextCursor: Boolean(cursor),
+    });
 
     nextCursorByProvider[provider] = cursor;
     if (cursor !== null) {
