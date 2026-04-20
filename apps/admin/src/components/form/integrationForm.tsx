@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { captureException, logInfo } from "@/lib/observability";
 
 export type IntegrationFormValues = {
   provider: string;
@@ -68,6 +69,22 @@ export default function IntegrationForm({
     setStatus("saving");
     setErrorMessage(null);
 
+    const scopesCount = scopes
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean).length;
+
+    const submitContext = {
+      status: "started",
+      formTitle: title,
+      provider: provider.trim().toLowerCase(),
+      integrationStatus: intStatus,
+      scopesCount,
+      hasTokenRef: tokenRef.trim().length > 0,
+    };
+
+    logInfo("admin_integration_write_started", submitContext);
+
     try {
       await onSubmit({
         provider: provider.trim(),
@@ -78,8 +95,17 @@ export default function IntegrationForm({
           .filter(Boolean),
         tokenRef: tokenRef.trim(),
       });
+
+      logInfo("admin_integration_write_succeeded", {
+        ...submitContext,
+        status: "succeeded",
+      });
       setStatus("saved");
     } catch (error) {
+      captureException("admin_integration_write_failed", error, {
+        ...submitContext,
+        status: "failed",
+      });
       setStatus("error");
       setErrorMessage(
         error instanceof Error ? error.message : "Failed to save integration.",

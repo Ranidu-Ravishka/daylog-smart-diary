@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { captureException, logInfo } from "@/lib/observability";
 
 export type UserFormValues = {
   email: string;
@@ -64,6 +65,17 @@ export default function UserForm({
     setStatus("saving");
     setErrorMessage(null);
 
+    const submitContext = {
+      status: "started",
+      formTitle: title,
+      hasEmail: email.trim().length > 0,
+      hasFirstName: firstName.trim().length > 0,
+      hasLastName: lastName.trim().length > 0,
+      isAdmin,
+    };
+
+    logInfo("admin_user_write_started", submitContext);
+
     try {
       await onSubmit({
         email: email.trim(),
@@ -71,8 +83,17 @@ export default function UserForm({
         lastName: lastName.trim(),
         isAdmin,
       });
+
+      logInfo("admin_user_write_succeeded", {
+        ...submitContext,
+        status: "succeeded",
+      });
       setStatus("saved");
     } catch (error) {
+      captureException("admin_user_write_failed", error, {
+        ...submitContext,
+        status: "failed",
+      });
       setStatus("error");
       setErrorMessage(
         error instanceof Error ? error.message : "Failed to save user.",

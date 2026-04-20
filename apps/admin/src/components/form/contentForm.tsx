@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { captureException, logInfo } from "@/lib/observability";
 
 export type ContentFormValues = {
   slug: string;
@@ -58,14 +59,33 @@ export default function ContentForm({
     setStatus("saving");
     setErrorMessage(null);
 
+    const submitContext = {
+      status: "started",
+      formTitle: title,
+      hasSlug: slug.trim().length > 0,
+      hasTitle: contentTitle.trim().length > 0,
+      bodyLength: body.trim().length,
+    };
+
+    logInfo("admin_content_write_started", submitContext);
+
     try {
       await onSubmit({
         slug: slug.trim(),
         title: contentTitle.trim(),
         body: body.trim(),
       });
+
+      logInfo("admin_content_write_succeeded", {
+        ...submitContext,
+        status: "succeeded",
+      });
       setStatus("saved");
     } catch (error) {
+      captureException("admin_content_write_failed", error, {
+        ...submitContext,
+        status: "failed",
+      });
       setStatus("error");
       setErrorMessage(
         error instanceof Error ? error.message : "Failed to save content.",

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { captureException, logInfo } from "@/lib/observability";
 
 export type MemoryFormValues = {
   title: string;
@@ -72,6 +73,18 @@ export default function MemoryForm({
     setStatus("saving");
     setErrorMessage(null);
 
+    const submitContext = {
+      status: "started",
+      formTitle: title,
+      hasTitle: memTitle.trim().length > 0,
+      hasDescription: desc.trim().length > 0,
+      hasMood: mood.trim().length > 0,
+      hasDayKey: dayKey.trim().length > 0,
+      hasHappenedAt: happenedAt.trim().length > 0,
+    };
+
+    logInfo("admin_memory_write_started", submitContext);
+
     try {
       await onSubmit({
         title: memTitle.trim(),
@@ -80,8 +93,17 @@ export default function MemoryForm({
         happenedAt: new Date(happenedAt).getTime(),
         dayKey: dayKey.trim(),
       });
+
+      logInfo("admin_memory_write_succeeded", {
+        ...submitContext,
+        status: "succeeded",
+      });
       setStatus("saved");
     } catch (error) {
+      captureException("admin_memory_write_failed", error, {
+        ...submitContext,
+        status: "failed",
+      });
       setStatus("error");
       setErrorMessage(
         error instanceof Error ? error.message : "Failed to save memory.",

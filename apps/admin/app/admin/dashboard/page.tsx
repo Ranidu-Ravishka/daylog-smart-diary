@@ -10,6 +10,7 @@ import {
   useQuery,
 } from "convex/react";
 import { useState } from "react";
+import { captureException, logInfo } from "@/lib/observability";
 
 type HealthSummary = {
   connected: number;
@@ -136,6 +137,8 @@ export default function AdminDashboardPage() {
   const infoTransportDropRate = transportHealth?.overall.estimatedDropRate ?? 0;
 
   const executeLegacyCleanup = async (force: boolean) => {
+    const mode = force ? "hard" : "soft";
+
     if (force) {
       const confirmed = window.confirm(
         "Force mode permanently deletes legacy unsupported integration rows. Continue?",
@@ -144,6 +147,11 @@ export default function AdminDashboardPage() {
         return;
       }
     }
+
+    logInfo("admin_legacy_unsupported_cleanup_started", {
+      status: "started",
+      mode,
+    });
 
     setCleanupError(null);
     setCleanupStatus(null);
@@ -159,7 +167,23 @@ export default function AdminDashboardPage() {
           ? `Hard cleanup complete: deleted ${result.hardDeletedRows} legacy rows (${result.deletedSecretRows} secrets, ${result.deletedSyncRunRows} sync runs) across ${result.affectedUsers} users.`
           : `Soft cleanup complete: updated ${result.softDeletedRows} legacy rows (${result.deletedSecretRows} secrets, ${result.deletedSyncRunRows} sync runs) across ${result.affectedUsers} users.${result.isDone ? "" : " More rows remain; run again."}`,
       );
+
+      logInfo("admin_legacy_unsupported_cleanup_succeeded", {
+        status: "succeeded",
+        mode,
+        isDone: result.isDone,
+        matchedRows: result.matchedRows,
+        softDeletedRows: result.softDeletedRows,
+        hardDeletedRows: result.hardDeletedRows,
+        deletedSecretRows: result.deletedSecretRows,
+        deletedSyncRunRows: result.deletedSyncRunRows,
+        affectedUsers: result.affectedUsers,
+      });
     } catch (error) {
+      captureException("admin_legacy_unsupported_cleanup_failed", error, {
+        status: "failed",
+        mode,
+      });
       setCleanupError(
         error instanceof Error
           ? error.message

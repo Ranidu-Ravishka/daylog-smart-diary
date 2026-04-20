@@ -3,7 +3,8 @@
 import { api } from "@repo/backend/convex";
 import { useConvexAuth, useQuery } from "convex/react";
 import { ReactNode, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { logWarn } from "@/lib/observability";
 
 /**
  * Wraps any admin-only page.
@@ -16,6 +17,7 @@ import { useRouter } from "next/navigation";
  */
 export default function AdminGuard({ children }: { children: ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { isAuthenticated, isLoading: authLoading } = useConvexAuth();
 
   const isAdmin = useQuery(
@@ -25,15 +27,23 @@ export default function AdminGuard({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
+      logWarn("admin_guard_redirected_to_sign_in", {
+        status: "unauthorized",
+        route: pathname,
+      });
       router.replace("/sign-in");
     }
-  }, [authLoading, isAuthenticated, router]);
+  }, [authLoading, isAuthenticated, pathname, router]);
 
   useEffect(() => {
     if (!authLoading && isAuthenticated && isAdmin === false) {
+      logWarn("admin_guard_redirected_to_unauthorized", {
+        status: "forbidden",
+        route: pathname,
+      });
       router.replace("/unauthorized");
     }
-  }, [authLoading, isAuthenticated, isAdmin, router]);
+  }, [authLoading, isAuthenticated, isAdmin, pathname, router]);
 
   // ── Auth still loading ──────────────────────────────────
   if (authLoading) {

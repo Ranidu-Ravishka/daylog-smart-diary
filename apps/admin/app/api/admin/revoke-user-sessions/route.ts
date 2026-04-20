@@ -2,6 +2,7 @@ import { api } from "@repo/backend/convex";
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { ConvexHttpClient } from "convex/browser";
 import { NextResponse } from "next/server";
+import { captureException, logInfo, logWarn } from "@/lib/observability";
 
 export const runtime = "nodejs";
 
@@ -92,6 +93,9 @@ async function revokeActiveSessionsForUser(clerkUserId: string) {
 export async function POST(request: Request) {
   const { userId, getToken } = await auth();
   if (!userId) {
+    logWarn("admin_revoke_user_sessions_unauthorized", {
+      status: "unauthorized",
+    });
     return errorResponse("Unauthorized", 401);
   }
 
@@ -101,6 +105,10 @@ export async function POST(request: Request) {
 
   const targetClerkUserId = parseClerkUserId(requestBody?.clerkUserId);
   if (!targetClerkUserId) {
+    logWarn("admin_revoke_user_sessions_invalid_request", {
+      status: "invalid_request",
+      actorUserId: userId,
+    });
     return errorResponse("A valid clerkUserId is required", 400);
   }
 
@@ -109,11 +117,21 @@ export async function POST(request: Request) {
   if (!isSelfTarget) {
     const token = await getToken({ template: "convex" });
     if (!token) {
+      logWarn("admin_revoke_user_sessions_missing_convex_token", {
+        status: "unauthorized",
+        actorUserId: userId,
+        targetClerkUserId,
+      });
       return errorResponse("Unauthorized", 401);
     }
 
     const convexUrl = readConvexUrlFromEnv();
     if (!convexUrl) {
+      logWarn("admin_revoke_user_sessions_missing_convex_url", {
+        status: "failed",
+        actorUserId: userId,
+        targetClerkUserId,
+      });
       return errorResponse(
         "Server configuration is missing NEXT_PUBLIC_CONVEX_URL",
         500,
@@ -129,6 +147,11 @@ export async function POST(request: Request) {
     );
 
     if (!adminState.isAdmin) {
+      logWarn("admin_revoke_user_sessions_forbidden", {
+        status: "forbidden",
+        actorUserId: userId,
+        targetClerkUserId,
+      });
       return errorResponse("Forbidden", 403);
     }
   }
@@ -137,17 +160,42 @@ export async function POST(request: Request) {
     const result = await revokeActiveSessionsForUser(targetClerkUserId);
 
     if (result.failedSessionCount > 0) {
+      logWarn("admin_revoke_user_sessions_partial_failure", {
+        status: "failed",
+        actorUserId: userId,
+        targetClerkUserId,
+        isSelfTarget,
+        attemptedSessionCount: result.attemptedSessionCount,
+        revokedSessionCount: result.revokedSessionCount,
+        failedSessionCount: result.failedSessionCount,
+      });
       return errorResponse(
         `Failed to revoke ${result.failedSessionCount} session(s)`,
         502,
       );
     }
 
+    logInfo("admin_revoke_user_sessions_succeeded", {
+      status: "succeeded",
+      actorUserId: userId,
+      targetClerkUserId,
+      isSelfTarget,
+      attemptedSessionCount: result.attemptedSessionCount,
+      revokedSessionCount: result.revokedSessionCount,
+      failedSessionCount: result.failedSessionCount,
+    });
+
     return NextResponse.json({
       success: true,
       ...result,
     });
   } catch (error) {
+    captureException("admin_revoke_user_sessions_failed", error, {
+      status: "failed",
+      actorUserId: userId,
+      targetClerkUserId,
+      isSelfTarget,
+    });
     const message =
       error instanceof Error ? error.message : "Session revocation failed";
     return errorResponse(message, 502);

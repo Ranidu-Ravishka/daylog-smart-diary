@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { captureException, logInfo } from "@/lib/observability";
 
 export type PreferenceFormValues = {
   focusAreas: number[];
@@ -72,6 +73,23 @@ export default function PreferenceForm({
     setStatus("saving");
     setErrorMessage(null);
 
+    const focusAreaCount = focusAreas
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean).length;
+
+    const submitContext = {
+      status: "started",
+      formTitle: title,
+      focusAreaCount,
+      reminderType,
+      hasDailyTime: dailyTime.trim().length > 0,
+      hasWeeklyDay: weeklyDay.trim().length > 0,
+      hasFormattedTime: formattedTime.trim().length > 0,
+    };
+
+    logInfo("admin_preference_write_started", submitContext);
+
     try {
       await onSubmit({
         focusAreas: focusAreas
@@ -84,8 +102,17 @@ export default function PreferenceForm({
         weeklyDay: weeklyDay.trim(),
         formattedTime: formattedTime.trim(),
       });
+
+      logInfo("admin_preference_write_succeeded", {
+        ...submitContext,
+        status: "succeeded",
+      });
       setStatus("saved");
     } catch (error) {
+      captureException("admin_preference_write_failed", error, {
+        ...submitContext,
+        status: "failed",
+      });
       setStatus("error");
       setErrorMessage(
         error instanceof Error ? error.message : "Failed to save preferences.",

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { captureException, logInfo } from "@/lib/observability";
 
 export type DayFormValues = {
   dayKey: string;
@@ -70,6 +71,26 @@ export default function DayForm({
     setStatus("saving");
     setErrorMessage(null);
 
+    const noteCount = manualNotes
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean).length;
+    const peopleTagCount = peopleTags
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean).length;
+
+    const submitContext = {
+      status: "started",
+      formTitle: title,
+      hasDayKey: dayKey.trim().length > 0,
+      ratingProvided: rating.trim().length > 0,
+      manualNoteCount: noteCount,
+      peopleTagCount,
+    };
+
+    logInfo("admin_day_write_started", submitContext);
+
     try {
       await onSubmit({
         dayKey: dayKey.trim(),
@@ -83,8 +104,17 @@ export default function DayForm({
           .map((s) => s.trim())
           .filter(Boolean),
       });
+
+      logInfo("admin_day_write_succeeded", {
+        ...submitContext,
+        status: "succeeded",
+      });
       setStatus("saved");
     } catch (error) {
+      captureException("admin_day_write_failed", error, {
+        ...submitContext,
+        status: "failed",
+      });
       setStatus("error");
       setErrorMessage(
         error instanceof Error ? error.message : "Failed to save day.",
