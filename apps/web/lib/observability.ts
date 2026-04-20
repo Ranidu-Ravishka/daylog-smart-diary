@@ -11,11 +11,10 @@ const durableInfoEventSampleRate = toSampleRate(
   process.env.NEXT_PUBLIC_INFO_EVENT_SAMPLE_RATE,
   INFO_EVENT_SAMPLE_RATE_DEFAULT,
 );
-const durableInfoEventIngestToken =
-  process.env.NEXT_PUBLIC_OBSERVABILITY_INGEST_TOKEN?.trim() ?? "";
 const durableInfoEventEndpoint = resolveInfoEventEndpoint(
   process.env.NEXT_PUBLIC_CONVEX_URL,
 );
+const durableInfoEventTokenEndpoint = "/api/observability/token";
 
 type SerializableError = {
   name: string;
@@ -82,17 +81,42 @@ function toContextJson(context: StructuredContext): string | undefined {
   }
 }
 
-function buildInfoEventHeaders(userId: string | null): Record<string, string> {
-  const headers: Record<string, string> = {
+function buildInfoEventHeaders(bearerToken: string): Record<string, string> {
+  return {
     "Content-Type": "application/json",
-    "X-Daylog-Ingest-Token": durableInfoEventIngestToken,
+    Authorization: `Bearer ${bearerToken}`,
   };
+}
 
-  if (userId) {
-    headers["X-Daylog-User-Id"] = userId;
+async function requestIngestBearerToken(): Promise<string | null> {
+  try {
+    const response = await fetch(durableInfoEventTokenEndpoint, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+      keepalive: true,
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = (await response.json().catch(() => null)) as {
+      token?: unknown;
+    } | null;
+
+    if (!payload || typeof payload.token !== "string") {
+      return null;
+    }
+
+    const token = payload.token.trim();
+    return token.length > 0 ? token : null;
+  } catch {
+    return null;
   }
-
-  return headers;
 }
 
 function emitDurableInfoEvent(payload: StructuredLogEnvelope) {
@@ -105,11 +129,15 @@ function emitDurableInfoEvent(payload: StructuredLogEnvelope) {
   }
 
   if (
-    !durableInfoEventIngestToken ||
     !durableInfoEventEndpoint ||
     (!isLifecycleEvent(payload.event) &&
       !shouldSample(durableInfoEventSampleRate))
   ) {
+    return;
+  }
+
+  // Browser-only transport keeps signing secrets on trusted backends.
+  if (typeof window === "undefined") {
     return;
   }
 
@@ -130,21 +158,20 @@ function emitDurableInfoEvent(payload: StructuredLogEnvelope) {
     }),
   });
 
-  if (typeof window !== "undefined") {
-    void fetch(durableInfoEventEndpoint, {
+  void (async () => {
+    const bearerToken = await requestIngestBearerToken();
+    if (!bearerToken) {
+      return;
+    }
+
+    await fetch(durableInfoEventEndpoint, {
       method: "POST",
-      headers: buildInfoEventHeaders(payload.userId),
+      headers: buildInfoEventHeaders(bearerToken),
       body: requestBody,
       keepalive: true,
-    }).catch(() => undefined);
-    return;
-  }
-
-  void fetch(durableInfoEventEndpoint, {
-    method: "POST",
-    headers: buildInfoEventHeaders(payload.userId),
-    body: requestBody,
-  }).catch(() => undefined);
+      cache: "no-store",
+    });
+  })().catch(() => undefined);
 }
 
 function toSerializableError(error: unknown): SerializableError {

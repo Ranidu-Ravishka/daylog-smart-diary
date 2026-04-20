@@ -9,8 +9,6 @@ const CLIENT_IP_HEADER_CANDIDATES = [
   "true-client-ip",
 ] as const;
 
-const USER_ID_HEADER_NAME = "x-daylog-user-id";
-
 const UNKNOWN_IP_KEY = "unknown";
 const ANONYMOUS_USER_KEY = "anonymous";
 
@@ -143,17 +141,19 @@ export function resolveObservabilityIngestIpKey(request: Request): string {
   return sanitizeRateLimitKey(extractRawClientIp(request), UNKNOWN_IP_KEY);
 }
 
-export function resolveObservabilityIngestUserKey(request: Request): string {
-  const headerValue = request.headers.get(USER_ID_HEADER_NAME);
-  return sanitizeRateLimitKey(headerValue, ANONYMOUS_USER_KEY);
+export function resolveObservabilityIngestPrincipalKey(
+  principalKey: string | null | undefined,
+): string {
+  return sanitizeRateLimitKey(principalKey, ANONYMOUS_USER_KEY);
 }
 
 export function resolveObservabilityIngestRateLimitIdentity(
   request: Request,
+  principalKey: string | null | undefined,
 ): ObservabilityIngestRateLimitIdentity {
   return {
     ipKey: resolveObservabilityIngestIpKey(request),
-    userKey: resolveObservabilityIngestUserKey(request),
+    userKey: resolveObservabilityIngestPrincipalKey(principalKey),
   };
 }
 

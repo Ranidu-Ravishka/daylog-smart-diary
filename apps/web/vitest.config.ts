@@ -12,6 +12,7 @@ export default defineConfig({
     include: [
       "app/api/integrations/oauth/*.test.ts",
       "app/api/integrations/oauth/**/*.test.ts",
+      "app/api/observability/**/*.test.ts",
     ],
     passWithNoTests: false,
     clearMocks: true,

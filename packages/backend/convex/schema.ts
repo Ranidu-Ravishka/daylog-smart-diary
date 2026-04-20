@@ -577,6 +577,24 @@ export default defineSchema(
       .index("by_surface_receivedAt", ["surface", "receivedAt"])
       .index("by_event_receivedAt", ["event", "receivedAt"]),
 
+    // ── Observability ingest replay guards (single-use token nonces) ─────
+    observabilityIngestNonces: defineTable({
+      nonce: v.string(),
+      userId: v.string(),
+      sessionId: v.string(),
+      issuedAtSeconds: v.number(),
+      expiresAt: v.number(),
+      consumedAt: v.number(),
+      createdAt: v.number(),
+    })
+      .index("by_nonce", ["nonce"])
+      .index("by_expiresAt", ["expiresAt"])
+      .index("by_user_session_consumedAt", [
+        "userId",
+        "sessionId",
+        "consumedAt",
+      ]),
+
     // ── Observability ingest abuse controls (rate-limit state + metrics) ──
     observabilityIngestRateLimits: defineTable({
       scope: v.union(v.literal("ip"), v.literal("user")),
