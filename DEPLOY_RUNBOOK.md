@@ -163,6 +163,34 @@ pnpm --filter mobile lint
 pnpm --filter mobile build:ci
 ```
 
+### Pre-deploy validation
+
+Before any production deploy, run the repository environment validator to ensure required secrets and production envs are present and valid. This can be run locally for a quick check or enforced in CI as a pre-deploy gate.
+
+Local quick check:
+
+```bash
+# local (less strict) checks
+node scripts/validate-prod-env.mjs --mode=local
+```
+
+CI / pre-deploy gate (strict): the repository provides a reusable workflow at `.github/workflows/pre-deploy-validate.yml` which runs in `ci` mode and will fail the caller workflow if validation fails. Example usage from a deployment workflow:
+
+```yaml
+jobs:
+  pre-deploy-check:
+    uses: ./.github/workflows/pre-deploy-validate.yml
+    with:
+      mode: ci
+    secrets:
+      CLERK_JWT_ISSUER_DOMAIN: ${{ secrets.CLERK_JWT_ISSUER_DOMAIN }}
+      CLERK_WEBHOOK_SECRET: ${{ secrets.CLERK_WEBHOOK_SECRET }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      EXPORT_SIGNING_SECRET: ${{ secrets.EXPORT_SIGNING_SECRET }}
+      INTEGRATION_SECRETS_KEYRING_JSON: ${{ secrets.INTEGRATION_SECRETS_KEYRING_JSON }}
+      INTEGRATION_SECRETS_ACTIVE_KEY_ID: ${{ secrets.INTEGRATION_SECRETS_ACTIVE_KEY_ID }}
+```
+
 Branch policy verification:
 
 ```bash

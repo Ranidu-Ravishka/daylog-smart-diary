@@ -92,3 +92,22 @@ When changing architecture or runtime behavior:
 2. Update canonical doc second (README/workflow/runbook/security).
 3. Update surface docs third (apps/packages).
 4. Add migration/troubleshooting notes when behavior changed.
+
+## 10) CI Secrets & Validation Checklist
+
+Before merging changes that affect production configuration or deployment, run this checklist:
+
+1. Add or update required repository secrets (do not commit secrets to source):
+  - `CLERK_JWT_ISSUER_DOMAIN`, `CLERK_WEBHOOK_SECRET`, `OPENAI_API_KEY`, `EXPORT_SIGNING_SECRET`, `INTEGRATION_SECRETS_KEYRING_JSON`, `INTEGRATION_SECRETS_ACTIVE_KEY_ID`.
+2. Run the validator locally to verify formats and keys:
+
+```bash
+node scripts/validate-prod-env.mjs --mode=local
+```
+
+3. Ensure CI will run the validator in strict mode (the repo contains `.github/workflows/validate-prod-env.yml`). The CI job will run in `--mode=ci` on `main` pushes and will fail the pipeline on invalid/missing secrets.
+4. Confirm `INTEGRATION_SECRETS_KEYRING_JSON` contains a JSON object mapping key ids to base64-encoded 32-byte keys and that `INTEGRATION_SECRETS_ACTIVE_KEY_ID` matches one of those keys.
+5. Do not use placeholder values in secrets; the validator rejects common placeholder tokens (for example `changeme`, `replace-me`, `your_...`).
+6. If adding new production env vars, document them in `README.md` and add validation in `scripts/validate-prod-env.mjs`.
+
+Follow this checklist to reduce accidental misconfiguration and deploy-time failures.

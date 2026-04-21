@@ -219,6 +219,46 @@ pnpm dev:backend
 pnpm dev:web
 ```
 
+## CI / Repository Secrets
+
+This repository requires several sensitive values to be stored in your GitHub repository secrets (or your deployment platform). The CI job `validate-prod-env` runs `scripts/validate-prod-env.mjs` and will fail when required secrets are missing or invalid in CI/production mode.
+
+Required repository secrets for production (store as GitHub Secrets):
+
+- `CLERK_JWT_ISSUER_DOMAIN` — the Clerk JWT issuer domain (https URL). Example: `https://your-clerk-instance.clerk.dev`
+- `CLERK_WEBHOOK_SECRET` — Clerk webhook signing secret (must start with `whsec_`).
+- `OPENAI_API_KEY` — OpenAI API key (must start with `sk-`).
+- `EXPORT_SIGNING_SECRET` — secret used to sign export/restore payloads.
+- `INTEGRATION_SECRETS_KEYRING_JSON` — JSON mapping of key ids to base64-encoded AES-256 keys. Example format:
+
+```json
+{
+  "key-1": "<base64-32-byte-key>",
+  "key-2": "<base64-32-byte-key>"
+}
+```
+
+- `INTEGRATION_SECRETS_ACTIVE_KEY_ID` — the key id (one of the keys in `INTEGRATION_SECRETS_KEYRING_JSON`) used to encrypt new secrets.
+
+Notes & guidance:
+
+- Keep secrets out of code and `.env` files checked into source. Use repository secrets or an external secrets manager.
+- `INTEGRATION_SECRETS_KEYRING_JSON` must decode each base64 value to exactly 32 bytes (AES-256 key length). The validator enforces this.
+- For GitHub Actions, add the above names in the repository Settings → Secrets. The workflow `.github/workflows/validate-prod-env.yml` runs the validator before deployments.
+- In local development you can use less strict checks by running:
+
+```bash
+node scripts/validate-prod-env.mjs --mode=local
+```
+
+For CI/production validation (fail-fast), run:
+
+```bash
+node scripts/validate-prod-env.mjs --mode=ci
+```
+
+If you need help migrating the keyring to a KMS-backed flow, open an issue and we can add migration scripts and a secure onboarding guide.
+
 ### 6. Run mobile
 
 ```bash
