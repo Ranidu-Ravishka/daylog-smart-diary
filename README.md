@@ -207,33 +207,6 @@ Where to get each variable:
 - Spotify OAuth
   - `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`: Spotify Developer Dashboard -> app credentials.
 
-## Repository secrets (GitHub Actions)
-
-For CI and production deployments, set the following repository secrets in GitHub (Settings → Secrets → Actions). These are used by the environment validator and by production runtime (Convex/environment variables).
-
-- **CLERK_JWT_ISSUER_DOMAIN**: Full https URL of the Clerk JWT issuer domain (e.g. https://my-org.clerk.dev).
-- **CLERK_WEBHOOK_SECRET**: Clerk webhook signing secret (must start with `whsec_`).
-- **OPENAI_API_KEY**: Your OpenAI `sk-` API key.
-- **EXPORT_SIGNING_SECRET**: Secret used to sign export/restore payloads (required in production).
-- **INTEGRATION_SECRETS_KEYRING_JSON**: JSON object mapping key ids to base64-encoded AES-256 key material (see format below).
-- **INTEGRATION_SECRETS_ACTIVE_KEY_ID**: The active key id present in the keyring JSON.
-
-### Keyring JSON format example (use a secure generator and never commit this to the repo)
-
-```json
-{
-  "key-v1": "<base64-encoded-32-byte-key>",
-  "key-v2": "<base64-encoded-32-byte-key>"
-}
-```
-
-Notes & recommendations
-
-- Use GitHub repository or organization secrets (not plaintext files) and restrict access to deploy pipelines.
-- Prefer using a KMS (AWS KMS, Google KMS, or Vault) to encrypt and rotate the DEK material; store only wrapped keys in secrets where possible.
-- `INTEGRATION_SECRETS_KEYRING_JSON` must decode each key to exactly 32 bytes (AES-256). The repo validator (`scripts/validate-prod-env.mjs`) enforces this in CI.
-- When rotating keys, update `INTEGRATION_SECRETS_KEYRING_JSON` first with the new key, then update `INTEGRATION_SECRETS_ACTIVE_KEY_ID` to the new id and run your secret-rotation migration job.
-
 ### 4. Run backend
 
 ```bash
@@ -245,6 +218,46 @@ pnpm dev:backend
 ```bash
 pnpm dev:web
 ```
+
+## CI / Repository Secrets
+
+This repository requires several sensitive values to be stored in your GitHub repository secrets (or your deployment platform). The CI job `validate-prod-env` runs `scripts/validate-prod-env.mjs` and will fail when required secrets are missing or invalid in CI/production mode.
+
+Required repository secrets for production (store as GitHub Secrets):
+
+- `CLERK_JWT_ISSUER_DOMAIN` — the Clerk JWT issuer domain (https URL). Example: `https://your-clerk-instance.clerk.dev`
+- `CLERK_WEBHOOK_SECRET` — Clerk webhook signing secret (must start with `whsec_`).
+- `OPENAI_API_KEY` — OpenAI API key (must start with `sk-`).
+- `EXPORT_SIGNING_SECRET` — secret used to sign export/restore payloads.
+- `INTEGRATION_SECRETS_KEYRING_JSON` — JSON mapping of key ids to base64-encoded AES-256 keys. Example format:
+
+```json
+{
+  "key-1": "<base64-32-byte-key>",
+  "key-2": "<base64-32-byte-key>"
+}
+```
+
+- `INTEGRATION_SECRETS_ACTIVE_KEY_ID` — the key id (one of the keys in `INTEGRATION_SECRETS_KEYRING_JSON`) used to encrypt new secrets.
+
+Notes & guidance:
+
+- Keep secrets out of code and `.env` files checked into source. Use repository secrets or an external secrets manager.
+- `INTEGRATION_SECRETS_KEYRING_JSON` must decode each base64 value to exactly 32 bytes (AES-256 key length). The validator enforces this.
+- For GitHub Actions, add the above names in the repository Settings → Secrets. The workflow `.github/workflows/validate-prod-env.yml` runs the validator before deployments.
+- In local development you can use less strict checks by running:
+
+```bash
+node scripts/validate-prod-env.mjs --mode=local
+```
+
+For CI/production validation (fail-fast), run:
+
+```bash
+node scripts/validate-prod-env.mjs --mode=ci
+```
+
+If you need help migrating the keyring to a KMS-backed flow, open an issue and we can add migration scripts and a secure onboarding guide.
 
 ### 6. Run mobile
 

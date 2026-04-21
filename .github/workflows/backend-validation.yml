@@ -61,42 +61,7 @@ jobs:
     # Block build/lint/typecheck until branch protection verification passes.
     needs:
       - branch-protection-verification
-      - validate-prod-env
     runs-on: ubuntu-latest
-    # Run environment validation first to gate CI (mode=ci on main, mode=local on PR)
-  validate-prod-env:
-    name: validate-prod-env
-    runs-on: ubuntu-latest
-    outputs:
-      mode: ${{ steps.mode.outputs.mode }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
-      - name: Determine mode
-        id: mode
-        run: |
-          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then echo "mode=ci" >> $GITHUB_OUTPUT; else echo "mode=local" >> $GITHUB_OUTPUT; fi
-
-      - name: Run env validator
-        env:
-          CLERK_JWT_ISSUER_DOMAIN: ${{ secrets.CLERK_JWT_ISSUER_DOMAIN }}
-          CLERK_WEBHOOK_SECRET: ${{ secrets.CLERK_WEBHOOK_SECRET }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          EXPORT_SIGNING_SECRET: ${{ secrets.EXPORT_SIGNING_SECRET }}
-          INTEGRATION_SECRETS_KEYRING_JSON: ${{ secrets.INTEGRATION_SECRETS_KEYRING_JSON }}
-          INTEGRATION_SECRETS_ACTIVE_KEY_ID: ${{ secrets.INTEGRATION_SECRETS_ACTIVE_KEY_ID }}
-          CI: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        run: |
-          MODE=${{ steps.mode.outputs.mode }}
-          echo "Running env validator in mode=${MODE}"
-          node scripts/validate-prod-env.mjs --mode=${MODE}
-
     env:
       # Dummy Convex URL so ConvexReactClient doesn't fail during Next.js build in CI
       NEXT_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"

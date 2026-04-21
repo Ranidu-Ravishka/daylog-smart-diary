@@ -152,13 +152,17 @@ function validateConvexServerEnv(env = process.env, options = {}) {
     return null;
   };
 
-  // Required in production/ci mode
-  readRequired("CLERK_JWT_ISSUER_DOMAIN", validateHttpsUrl);
-  readRequired("CLERK_WEBHOOK_SECRET", validateClerkWebhookSecret);
-  readRequired("OPENAI_API_KEY", validateOpenAiApiKey);
+  // Determine production/CI strictness
+  const isProd = (env.NODE_ENV || "").toLowerCase() === "production" || options.mode === "ci";
+
+  // Required in production/ci mode; optional in local/dev
+  const reader = isProd ? readRequired : readOptional;
+
+  reader("CLERK_JWT_ISSUER_DOMAIN", validateHttpsUrl);
+  reader("CLERK_WEBHOOK_SECRET", validateClerkWebhookSecret);
+  reader("OPENAI_API_KEY", validateOpenAiApiKey);
 
   // Export signing secret is required in production environments (when NODE_ENV=production)
-  const isProd = (env.NODE_ENV || "").toLowerCase() === "production" || options.mode === "ci";
   if (isProd) {
     readRequired("EXPORT_SIGNING_SECRET");
   } else {
