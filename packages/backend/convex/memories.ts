@@ -17,8 +17,27 @@ import {
 const IMAGE_CONTENT_TYPE_PREFIX = "image/";
 const VIDEO_CONTENT_TYPE_PREFIX = "video/";
 const MAX_MEMORY_THUMBNAIL_BATCH_SIZE = 100;
+const DEFAULT_LIST_MEMORIES_BY_DAY_LIMIT = 50;
+const MAX_LIST_MEMORIES_BY_DAY_LIMIT = 100;
+const DEFAULT_LIST_MEMORY_MEDIA_LIMIT = 50;
+const MAX_LIST_MEMORY_MEDIA_LIMIT = 100;
+const MEMORY_MEDIA_DELETE_BATCH_SIZE = 50;
 const DEFAULT_SUMMARY_GENERATION_MEMORY_LIMIT = 50;
 const MAX_SUMMARY_GENERATION_MEMORY_LIMIT = 200;
+
+function clampListMemoriesByDayLimit(value: number | undefined): number {
+  return clampLimit(
+    value ?? DEFAULT_LIST_MEMORIES_BY_DAY_LIMIT,
+    MAX_LIST_MEMORIES_BY_DAY_LIMIT,
+  );
+}
+
+function clampListMemoryMediaLimit(value: number | undefined): number {
+  return clampLimit(
+    value ?? DEFAULT_LIST_MEMORY_MEDIA_LIMIT,
+    MAX_LIST_MEMORY_MEDIA_LIMIT,
+  );
+}
 
 function clampSummaryGenerationMemoryLimit(value: number | undefined): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -391,17 +410,20 @@ export const getMemory = query({
 export const listMemoriesByDay = query({
   args: {
     dayKey: v.string(),
+    limit: v.optional(v.number()),
     refreshToken: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
+    const limit = clampListMemoriesByDayLimit(args.limit);
 
     const memories = await ctx.db
       .query("memories")
-      .withIndex("by_user_day", (q) =>
+      .withIndex("by_user_day_happenedAt", (q) =>
         q.eq("userId", user._id).eq("dayKey", args.dayKey),
       )
-      .collect();
+      .order("desc")
+      .take(limit);
 
     return await Promise.all(
       memories.map(async (memory) =>
@@ -631,18 +653,26 @@ export const deleteMemory = mutation({
       requireOwnership(user, memory.userId);
 
       // Delete associated media rows and storage blobs
-      const media = await ctx.db
-        .query("memoryMedia")
-        .withIndex("by_memory", (q) => q.eq("memoryId", args.memoryId))
-        .collect();
+      let deletedMediaCount = 0;
+      while (true) {
+        const mediaBatch = await ctx.db
+          .query("memoryMedia")
+          .withIndex("by_memory", (q) => q.eq("memoryId", args.memoryId))
+          .take(MEMORY_MEDIA_DELETE_BATCH_SIZE);
 
-      for (const m of media) {
-        try {
-          await ctx.storage.delete(m.storageId as any);
-        } catch {
-          // Storage blob may already be gone — continue cleanup
+        if (mediaBatch.length === 0) {
+          break;
         }
-        await ctx.db.delete(m._id);
+
+        for (const mediaItem of mediaBatch) {
+          try {
+            await ctx.storage.delete(mediaItem.storageId as any);
+          } catch {
+            // Storage blob may already be gone — continue cleanup
+          }
+          await ctx.db.delete(mediaItem._id);
+          deletedMediaCount += 1;
+        }
       }
 
       await ctx.db.delete(args.memoryId);
@@ -655,7 +685,7 @@ export const deleteMemory = mutation({
         status: "succeeded",
         userId: user._id,
         memoryId: args.memoryId,
-        deletedMediaCount: media.length,
+        deletedMediaCount,
         durationMs: Date.now() - startedAt,
       });
 
@@ -741,10 +771,14 @@ export const addMemoryMediaByClientRequestId = mutation({
 
 // ── List media for a memory ─────────────────────────────────
 export const listMemoryMedia = query({
-  args: { memoryId: v.id("memories") },
+  args: {
+    memoryId: v.id("memories"),
+    limit: v.optional(v.number()),
+  },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
     const memory = await ctx.db.get(args.memoryId);
+    const limit = clampListMemoryMediaLimit(args.limit);
 
     if (!memory) {
       throw new Error("Memory not found");
@@ -755,7 +789,7 @@ export const listMemoryMedia = query({
     const media = await ctx.db
       .query("memoryMedia")
       .withIndex("by_memory", (q) => q.eq("memoryId", args.memoryId))
-      .collect();
+      .take(limit);
 
     return await Promise.all(
       media.map(async (item) => ({

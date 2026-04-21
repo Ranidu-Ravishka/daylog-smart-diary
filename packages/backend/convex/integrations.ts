@@ -80,6 +80,15 @@ const LEGACY_TOKEN_REF_AUDIT_DEFAULT_MAX_ROWS = 500;
 const LEGACY_TOKEN_REF_AUDIT_MAX_ROWS = 5_000;
 const DEFAULT_SUMMARY_GENERATION_INTEGRATION_LIMIT = 32;
 const MAX_SUMMARY_GENERATION_INTEGRATION_LIMIT = 128;
+const DEFAULT_LIST_MY_INTEGRATIONS_LIMIT = 50;
+const MAX_LIST_MY_INTEGRATIONS_LIMIT = 100;
+const DEFAULT_LIST_MY_SYNC_RUNS_FOR_DAY_LIMIT = 50;
+const MAX_LIST_MY_SYNC_RUNS_FOR_DAY_LIMIT = 100;
+const DEFAULT_LIST_MY_DAILY_DATA_FOR_DAY_LIMIT = 50;
+const MAX_LIST_MY_DAILY_DATA_FOR_DAY_LIMIT = 100;
+const DEFAULT_CONTEXT_AGGREGATE_SYNC_RUNS_LIMIT = 50;
+const MAX_CONTEXT_AGGREGATE_SYNC_RUNS_LIMIT = 100;
+const LEGACY_OPAQUE_TOKEN_REF_SCAN_LIMIT = 100;
 const LEGACY_UNSUPPORTED_CLEANUP_DEFAULT_BATCH_SIZE_PER_PROVIDER = 25;
 const LEGACY_UNSUPPORTED_CLEANUP_MAX_BATCH_SIZE_PER_PROVIDER = 250;
 const LEGACY_UNSUPPORTED_CLEANUP_DEFAULT_MAX_PASSES = 2;
@@ -121,6 +130,34 @@ function clampSummaryGenerationIntegrationLimit(
   }
 
   return normalized;
+}
+
+function clampListMyIntegrationsLimit(value: number | undefined): number {
+  return clampLimit(
+    value ?? DEFAULT_LIST_MY_INTEGRATIONS_LIMIT,
+    MAX_LIST_MY_INTEGRATIONS_LIMIT,
+  );
+}
+
+function clampListMySyncRunsForDayLimit(value: number | undefined): number {
+  return clampLimit(
+    value ?? DEFAULT_LIST_MY_SYNC_RUNS_FOR_DAY_LIMIT,
+    MAX_LIST_MY_SYNC_RUNS_FOR_DAY_LIMIT,
+  );
+}
+
+function clampListMyDailyDataForDayLimit(value: number | undefined): number {
+  return clampLimit(
+    value ?? DEFAULT_LIST_MY_DAILY_DATA_FOR_DAY_LIMIT,
+    MAX_LIST_MY_DAILY_DATA_FOR_DAY_LIMIT,
+  );
+}
+
+function clampContextAggregateSyncRunsLimit(value: number | undefined): number {
+  return clampLimit(
+    value ?? DEFAULT_CONTEXT_AGGREGATE_SYNC_RUNS_LIMIT,
+    MAX_CONTEXT_AGGREGATE_SYNC_RUNS_LIMIT,
+  );
 }
 
 const integrationDailyMetricsValidator = v.object({
@@ -822,6 +859,30 @@ async function deleteIntegrationSyncRunsByUserProvider(
   return deleted;
 }
 
+async function loadLegacyUnsupportedProviderRowsWindow(
+  db: QueryCtx["db"] | MutationCtx["db"],
+  provider: UnsupportedProvider,
+  startOffset: number,
+  maxRows: number,
+): Promise<{ rows: IntegrationRecord[]; hasMoreRows: boolean }> {
+  const fetchCount = startOffset + maxRows + 1;
+  const providerRowsWindow = (await db
+    .query("integrations")
+    .withIndex("by_provider", (q) => q.eq("provider", provider))
+    .take(fetchCount)) as IntegrationRecord[];
+
+  if (providerRowsWindow.length <= startOffset) {
+    return { rows: [], hasMoreRows: false };
+  }
+
+  const rows = providerRowsWindow.slice(startOffset, startOffset + maxRows);
+
+  return {
+    rows,
+    hasMoreRows: providerRowsWindow.length > startOffset + maxRows,
+  };
+}
+
 async function countLegacyUnsupportedIntegrations(
   db: QueryCtx["db"] | MutationCtx["db"],
   args: {
@@ -844,20 +905,16 @@ async function countLegacyUnsupportedIntegrations(
   let isDone = true;
 
   for (const provider of UNSUPPORTED_PROVIDERS) {
-    const providerRows = (await db
-      .query("integrations")
-      .withIndex("by_provider", (q) => q.eq("provider", provider))
-      .collect()) as IntegrationRecord[];
-
     const startOffset = parseLegacyUnsupportedOffsetCursor(
       nextCursorByProvider[provider],
     );
-    const boundedStart = Math.min(startOffset, providerRows.length);
-    const boundedEnd = Math.min(
-      boundedStart + maxRowsPerProvider,
-      providerRows.length,
+    const { rows, hasMoreRows } = await loadLegacyUnsupportedProviderRowsWindow(
+      db,
+      provider,
+      startOffset,
+      maxRowsPerProvider,
     );
-    const rows = providerRows.slice(boundedStart, boundedEnd);
+    const nextOffset = startOffset + rows.length;
 
     rowsByProvider[provider] += rows.length;
     totalRows += rows.length;
@@ -879,9 +936,8 @@ async function countLegacyUnsupportedIntegrations(
         ? 0
         : Math.ceil(rows.length / args.batchSizePerProvider);
 
-    const hasMoreRows = boundedEnd < providerRows.length;
     nextCursorByProvider[provider] = hasMoreRows
-      ? formatLegacyUnsupportedOffsetCursor(boundedEnd)
+      ? formatLegacyUnsupportedOffsetCursor(nextOffset)
       : null;
 
     if (hasMoreRows) {
@@ -945,20 +1001,17 @@ async function runLegacyUnsupportedCleanup(
   });
 
   for (const provider of UNSUPPORTED_PROVIDERS) {
-    const providerRows = (await ctx.db
-      .query("integrations")
-      .withIndex("by_provider", (q) => q.eq("provider", provider))
-      .collect()) as IntegrationRecord[];
-
     const startOffset = parseLegacyUnsupportedOffsetCursor(
       nextCursorByProvider[provider],
     );
-    const boundedStart = Math.min(startOffset, providerRows.length);
-    const boundedEnd = Math.min(
-      boundedStart + maxRowsPerProvider,
-      providerRows.length,
-    );
-    const integrations = providerRows.slice(boundedStart, boundedEnd);
+    const { rows: integrations, hasMoreRows } =
+      await loadLegacyUnsupportedProviderRowsWindow(
+        ctx.db,
+        provider,
+        startOffset,
+        maxRowsPerProvider,
+      );
+    const nextOffset = startOffset + integrations.length;
 
     pagesProcessedByProvider[provider] =
       integrations.length === 0
@@ -1040,11 +1093,10 @@ async function runLegacyUnsupportedCleanup(
       }
     }
 
-    const hasMoreRows = boundedEnd < providerRows.length;
     const cursor = providerHadFailure
-      ? formatLegacyUnsupportedOffsetCursor(boundedStart)
+      ? formatLegacyUnsupportedOffsetCursor(startOffset)
       : hasMoreRows
-        ? formatLegacyUnsupportedOffsetCursor(boundedEnd)
+        ? formatLegacyUnsupportedOffsetCursor(nextOffset)
         : null;
 
     logInfo("legacy_unsupported_integrations_cleanup.provider_page", {
@@ -1117,7 +1169,8 @@ async function findExistingOpaqueTokenRef(
     .withIndex("by_user_provider", (q) =>
       q.eq("userId", integration.userId).eq("provider", integration.provider),
     )
-    .collect()) as IntegrationSecretRecord[];
+    .order("desc")
+    .take(LEGACY_OPAQUE_TOKEN_REF_SCAN_LIMIT)) as IntegrationSecretRecord[];
 
   let selected: IntegrationSecretRecord | undefined;
 
@@ -1669,13 +1722,17 @@ export const getIntegrationByProvider = query({
 });
 
 // ── List all integrations for the current user ──────────────
-export async function listMyIntegrationsImpl(ctx: QueryCtx) {
+export async function listMyIntegrationsImpl(
+  ctx: QueryCtx,
+  args?: { limit?: number },
+) {
   const user = await requireUser(ctx);
+  const limit = clampListMyIntegrationsLimit(args?.limit);
 
   const integrations = await ctx.db
     .query("integrations")
     .withIndex("by_user_provider", (q) => q.eq("userId", user._id))
-    .collect();
+    .take(limit);
 
   return integrations.filter(
     (integration) =>
@@ -1685,15 +1742,19 @@ export async function listMyIntegrationsImpl(ctx: QueryCtx) {
 }
 
 export const listMyIntegrations = query({
-  args: {},
-  handler: (ctx) => listMyIntegrationsImpl(ctx),
+  args: { limit: v.optional(v.number()) },
+  handler: (ctx, args) => listMyIntegrationsImpl(ctx, { limit: args.limit }),
 });
 
 export const listMyIntegrationSyncRunsForDay = query({
-  args: { dayKey: v.string() },
+  args: {
+    dayKey: v.string(),
+    limit: v.optional(v.number()),
+  },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
     validateDayKey(args.dayKey);
+    const limit = clampListMySyncRunsForDayLimit(args.limit);
 
     return await ctx.db
       .query("integrationSyncRuns")
@@ -1701,20 +1762,21 @@ export const listMyIntegrationSyncRunsForDay = query({
         q.eq("userId", user._id).eq("dayKey", args.dayKey),
       )
       .order("desc")
-      .collect();
+      .take(limit);
   },
 });
 
 export const listMyIntegrationStatusSnapshots = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
     const user = await requireUser(ctx);
+    const limit = clampListMyIntegrationsLimit(args.limit);
 
     const integrations = (
       await ctx.db
         .query("integrations")
         .withIndex("by_user_provider", (q) => q.eq("userId", user._id))
-        .collect()
+        .take(limit)
     ).filter(
       (integration) =>
         !isUnsupportedProvider(integration.provider) &&
@@ -1896,18 +1958,21 @@ export const getMyLocationTrackingRuntimeConfig = query({
 export const listMyIntegrationDailyDataForDay = query({
   args: {
     dayKey: v.string(),
+    limit: v.optional(v.number()),
     refreshToken: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
     validateDayKey(args.dayKey);
+    const limit = clampListMyDailyDataForDayLimit(args.limit);
 
     const rows = await ctx.db
       .query("integrationDailyData")
       .withIndex("by_user_day", (q) =>
         q.eq("userId", user._id).eq("dayKey", args.dayKey),
       )
-      .collect();
+      .order("desc")
+      .take(limit);
 
     return await Promise.all(
       rows.map(async (row) => await withIntegrationDailySensitiveFields(row)),
@@ -1954,17 +2019,24 @@ export const listMyIntegrationDailyDataForDayForSummaryGeneration = query({
 });
 
 export const getMyIntegrationContextAggregateForDay = query({
-  args: { dayKey: v.string() },
+  args: {
+    dayKey: v.string(),
+    dailyDataLimit: v.optional(v.number()),
+    syncRunLimit: v.optional(v.number()),
+  },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
     validateDayKey(args.dayKey);
+    const dailyDataLimit = clampListMyDailyDataForDayLimit(args.dailyDataLimit);
+    const syncRunLimit = clampContextAggregateSyncRunsLimit(args.syncRunLimit);
 
     const rawRows = await ctx.db
       .query("integrationDailyData")
       .withIndex("by_user_day", (q) =>
         q.eq("userId", user._id).eq("dayKey", args.dayKey),
       )
-      .collect();
+      .order("desc")
+      .take(dailyDataLimit);
 
     const rows = (await Promise.all(
       rawRows.map(async (row) => {
@@ -1986,7 +2058,8 @@ export const getMyIntegrationContextAggregateForDay = query({
       .withIndex("by_user_day_updatedAt", (q) =>
         q.eq("userId", user._id).eq("dayKey", args.dayKey),
       )
-      .collect()) as IntegrationContextAggregateSyncRun[];
+      .order("desc")
+      .take(syncRunLimit)) as IntegrationContextAggregateSyncRun[];
 
     return buildIntegrationContextAggregate({
       dayKey: args.dayKey,
