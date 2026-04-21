@@ -1,14 +1,11 @@
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
-import { mutation, query, MutationCtx } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import { requireAdmin } from "./authz";
 import { clampLimit, validateDayKey, validateRating } from "./validators";
 import { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import {
-  asIntegrationProvider,
-  assertIntegrationProvider,
-} from "./integrationProviders";
+import { assertIntegrationProvider } from "./integrationProviders";
 import { isOpaqueTokenRef, normalizeTokenRef } from "./integrations.auth";
 import {
   deleteDayCascadeData,
@@ -29,89 +26,45 @@ import {
   readDaySensitiveFields,
   readMemorySensitiveFields,
   readSummarySensitiveFields,
-  withDaySensitiveFields,
-  withMemorySensitiveFields,
-  withSummarySensitiveFields,
   type DaySensitiveRecord,
   type MemorySensitiveRecord,
   type SummarySensitiveRecord,
 } from "./sensitiveDataFields";
+import {
+  mapAdminDayRecord,
+  mapAdminMemoryRecord,
+  mapAdminSummaryRecord,
+} from "./admin/utilities/adminRecordMappers";
+import { buildAdminRoleStatePatch } from "./admin/utilities/adminUserPatch";
+import { countRows, logAdminAction } from "./admin/services/adminAuditService";
+import { listAuditLogsPaginatedImpl } from "./admin/services/auditLogsService";
+import {
+  buildAdminIntegrationUpdatePatch,
+  deleteIntegrationCascadeData,
+} from "./admin/services/adminIntegrationsService";
+import { listIntegrationsPaginatedImpl } from "./admin/services/adminIntegrationsQueryService";
+import {
+  listAllUserPreferencesWithEmailImpl,
+  listUserPreferencesPaginatedWithEmailImpl,
+} from "./admin/services/adminPreferencesService";
+import { listMemoriesPaginatedImpl } from "./admin/services/adminMemoriesQueryService";
+import { listDaysPaginatedImpl } from "./admin/services/adminDaysQueryService";
+import { listSummariesPaginatedImpl } from "./admin/services/adminSummariesQueryService";
+import {
+  adminDeleteAuditLogImpl,
+  listAuditLogsImpl,
+  writeAuditLogImpl,
+} from "./admin/services/adminAuditLogsService";
 
-const DELETE_BATCH_SIZE = 256;
+export { listAuditLogsPaginatedImpl };
 
 type AdminMemoryRecord = Doc<"memories"> & MemorySensitiveRecord;
 type AdminDayRecord = Doc<"days"> & DaySensitiveRecord;
 type AdminSummaryRecord = Doc<"daySummaries"> & SummarySensitiveRecord;
 
-async function mapAdminMemoryRecord(record: AdminMemoryRecord | null) {
-  if (!record) {
-    return null;
-  }
-
-  return await withMemorySensitiveFields(record);
-}
-
-async function mapAdminDayRecord(record: AdminDayRecord | null) {
-  if (!record) {
-    return null;
-  }
-
-  return await withDaySensitiveFields(record);
-}
-
-async function mapAdminSummaryRecord(record: AdminSummaryRecord | null) {
-  if (!record) {
-    return null;
-  }
-
-  return await withSummarySensitiveFields(record);
-}
-
-function buildAdminRoleStatePatch(
-  user: Pick<
-    Doc<"user">,
-    "isAdmin" | "adminAuthVersion" | "adminRoleUpdatedAt"
-  >,
-  nextIsAdmin: boolean,
-  now = Date.now(),
-): {
-  isAdmin: boolean;
-  adminAuthVersion: number;
-  adminRoleUpdatedAt: number;
-} {
-  const currentIsAdmin = user.isAdmin === true;
-  const currentVersion = user.adminAuthVersion ?? 0;
-  const roleChanged = currentIsAdmin !== nextIsAdmin;
-
-  return {
-    isAdmin: nextIsAdmin,
-    adminAuthVersion: roleChanged ? currentVersion + 1 : currentVersion,
-    adminRoleUpdatedAt: roleChanged ? now : (user.adminRoleUpdatedAt ?? now),
-  };
-}
-
 // ────────────────────────────────────────────────────────────
 // All functions in this file require admin privileges.
 // ────────────────────────────────────────────────────────────
-
-/** Inline audit-log helper — call after the main action succeeds. */
-async function logAdminAction(
-  ctx: MutationCtx,
-  adminId: Id<"user">,
-  action: string,
-  target?: string,
-) {
-  await ctx.db.insert("auditLogs", {
-    actorUserId: adminId,
-    action,
-    target,
-    at: Date.now(),
-  });
-
-  await applyDashboardMetricsDelta(ctx.db, {
-    totalAuditLogs: 1,
-  });
-}
 
 // ══════════════════════════════════════════════════════════════
 // Dashboard
@@ -125,32 +78,6 @@ export const getDashboardMetrics = query({
     return await getDashboardMetricsSnapshot(ctx.db);
   },
 });
-
-type CountableQuery = {
-  paginate: (opts: { numItems: number; cursor: string | null }) => Promise<{
-    page: unknown[];
-    isDone: boolean;
-    continueCursor: string | null;
-  }>;
-};
-
-async function countRows(queryRef: CountableQuery): Promise<number> {
-  let total = 0;
-  let cursor: string | null = null;
-
-  while (true) {
-    const page = await queryRef.paginate({
-      numItems: 512,
-      cursor,
-    });
-
-    total += page.page.length;
-    if (page.isDone) break;
-    cursor = page.continueCursor;
-  }
-
-  return total;
-}
 
 export const adminRebuildDashboardMetrics = mutation({
   args: {},
@@ -601,59 +528,15 @@ export const adminCreateUserPreference = mutation({
 
 export const listAllUserPreferences = query({
   args: {},
-  handler: async (ctx) => {
-    await requireAdmin(ctx);
-    const prefs = await ctx.db
-      .query("userPreferences")
-      .withIndex("by_updatedAt")
-      .order("desc")
-      .take(200);
-
-    // Join user email from the user table via clerkUserId
-    return await Promise.all(
-      prefs.map(async (pref) => {
-        const user = await ctx.db
-          .query("user")
-          .withIndex("by_clerkUserId", (q) =>
-            q.eq("clerkUserId", pref.clerkUserId),
-          )
-          .unique();
-        return { ...pref, email: user?.email ?? null };
-      }),
-    );
-  },
+  handler: async (ctx) => await listAllUserPreferencesWithEmailImpl(ctx),
 });
 
 export const listUserPreferencesPaginated = query({
   args: {
     paginationOpts: paginationOptsValidator,
   },
-  handler: async (ctx, args) => {
-    await requireAdmin(ctx);
-
-    const page = await ctx.db
-      .query("userPreferences")
-      .withIndex("by_updatedAt")
-      .order("desc")
-      .paginate(args.paginationOpts);
-
-    const pageWithUserEmail = await Promise.all(
-      page.page.map(async (pref) => {
-        const user = await ctx.db
-          .query("user")
-          .withIndex("by_clerkUserId", (q) =>
-            q.eq("clerkUserId", pref.clerkUserId),
-          )
-          .unique();
-        return { ...pref, email: user?.email ?? null };
-      }),
-    );
-
-    return {
-      ...page,
-      page: pageWithUserEmail,
-    };
-  },
+  handler: async (ctx, args) =>
+    await listUserPreferencesPaginatedWithEmailImpl(ctx, args),
 });
 
 export const adminGetUserPreference = query({
@@ -790,58 +673,7 @@ export const listMemoriesPaginated = query({
     dayKey: v.optional(v.string()),
     userId: v.optional(v.id("user")),
   },
-  handler: async (ctx, args) => {
-    await requireAdmin(ctx);
-
-    if (args.userId) {
-      const page = await ctx.db
-        .query("memories")
-        .withIndex("by_user_happenedAt", (q) => q.eq("userId", args.userId!))
-        .order("desc")
-        .paginate(args.paginationOpts);
-
-      return {
-        ...page,
-        page: await Promise.all(
-          page.page.map(
-            async (row) => await mapAdminMemoryRecord(row as AdminMemoryRecord),
-          ),
-        ),
-      };
-    }
-
-    if (args.dayKey) {
-      const page = await ctx.db
-        .query("memories")
-        .withIndex("by_day_happenedAt", (q) => q.eq("dayKey", args.dayKey!))
-        .order("desc")
-        .paginate(args.paginationOpts);
-
-      return {
-        ...page,
-        page: await Promise.all(
-          page.page.map(
-            async (row) => await mapAdminMemoryRecord(row as AdminMemoryRecord),
-          ),
-        ),
-      };
-    }
-
-    const page = await ctx.db
-      .query("memories")
-      .withIndex("by_happenedAt")
-      .order("desc")
-      .paginate(args.paginationOpts);
-
-    return {
-      ...page,
-      page: await Promise.all(
-        page.page.map(
-          async (row) => await mapAdminMemoryRecord(row as AdminMemoryRecord),
-        ),
-      ),
-    };
-  },
+  handler: async (ctx, args) => await listMemoriesPaginatedImpl(ctx, args),
 });
 
 export const adminGetMemory = query({
@@ -997,75 +829,7 @@ export const listDaysPaginated = query({
     dayKey: v.optional(v.string()),
     userId: v.optional(v.id("user")),
   },
-  handler: async (ctx, args) => {
-    await requireAdmin(ctx);
-
-    if (args.userId && args.dayKey) {
-      const page = await ctx.db
-        .query("days")
-        .withIndex("by_user_day", (q) =>
-          q.eq("userId", args.userId!).eq("dayKey", args.dayKey!),
-        )
-        .paginate(args.paginationOpts);
-
-      return {
-        ...page,
-        page: await Promise.all(
-          page.page.map(
-            async (row) => await mapAdminDayRecord(row as AdminDayRecord),
-          ),
-        ),
-      };
-    }
-
-    if (args.userId) {
-      const page = await ctx.db
-        .query("days")
-        .withIndex("by_user_day", (q) => q.eq("userId", args.userId!))
-        .order("desc")
-        .paginate(args.paginationOpts);
-
-      return {
-        ...page,
-        page: await Promise.all(
-          page.page.map(
-            async (row) => await mapAdminDayRecord(row as AdminDayRecord),
-          ),
-        ),
-      };
-    }
-
-    if (args.dayKey) {
-      const page = await ctx.db
-        .query("days")
-        .withIndex("by_dayKey", (q) => q.eq("dayKey", args.dayKey!))
-        .paginate(args.paginationOpts);
-
-      return {
-        ...page,
-        page: await Promise.all(
-          page.page.map(
-            async (row) => await mapAdminDayRecord(row as AdminDayRecord),
-          ),
-        ),
-      };
-    }
-
-    const page = await ctx.db
-      .query("days")
-      .withIndex("by_dayKey")
-      .order("desc")
-      .paginate(args.paginationOpts);
-
-    return {
-      ...page,
-      page: await Promise.all(
-        page.page.map(
-          async (row) => await mapAdminDayRecord(row as AdminDayRecord),
-        ),
-      ),
-    };
-  },
+  handler: async (ctx, args) => await listDaysPaginatedImpl(ctx, args),
 });
 
 export const adminGetDay = query({
@@ -1221,79 +985,7 @@ export const listSummariesPaginated = query({
     dayKey: v.optional(v.string()),
     userId: v.optional(v.id("user")),
   },
-  handler: async (ctx, args) => {
-    await requireAdmin(ctx);
-
-    if (args.userId && args.dayKey) {
-      const page = await ctx.db
-        .query("daySummaries")
-        .withIndex("by_user_day", (q) =>
-          q.eq("userId", args.userId!).eq("dayKey", args.dayKey!),
-        )
-        .paginate(args.paginationOpts);
-
-      return {
-        ...page,
-        page: await Promise.all(
-          page.page.map(
-            async (row) =>
-              await mapAdminSummaryRecord(row as AdminSummaryRecord),
-          ),
-        ),
-      };
-    }
-
-    if (args.userId) {
-      const page = await ctx.db
-        .query("daySummaries")
-        .withIndex("by_user_generatedAt", (q) => q.eq("userId", args.userId!))
-        .order("desc")
-        .paginate(args.paginationOpts);
-
-      return {
-        ...page,
-        page: await Promise.all(
-          page.page.map(
-            async (row) =>
-              await mapAdminSummaryRecord(row as AdminSummaryRecord),
-          ),
-        ),
-      };
-    }
-
-    if (args.dayKey) {
-      const page = await ctx.db
-        .query("daySummaries")
-        .withIndex("by_day_generatedAt", (q) => q.eq("dayKey", args.dayKey!))
-        .order("desc")
-        .paginate(args.paginationOpts);
-
-      return {
-        ...page,
-        page: await Promise.all(
-          page.page.map(
-            async (row) =>
-              await mapAdminSummaryRecord(row as AdminSummaryRecord),
-          ),
-        ),
-      };
-    }
-
-    const page = await ctx.db
-      .query("daySummaries")
-      .withIndex("by_generatedAt")
-      .order("desc")
-      .paginate(args.paginationOpts);
-
-    return {
-      ...page,
-      page: await Promise.all(
-        page.page.map(
-          async (row) => await mapAdminSummaryRecord(row as AdminSummaryRecord),
-        ),
-      ),
-    };
-  },
+  handler: async (ctx, args) => await listSummariesPaginatedImpl(ctx, args),
 });
 
 export const adminGetSummary = query({
@@ -1456,35 +1148,7 @@ export const listIntegrationsPaginated = query({
     provider: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireAdmin(ctx);
-
-    if (args.status && args.provider) {
-      return await ctx.db
-        .query("integrations")
-        .withIndex("by_status_provider", (q) =>
-          q.eq("status", args.status!).eq("provider", args.provider!),
-        )
-        .paginate(args.paginationOpts);
-    }
-
-    if (args.status) {
-      return await ctx.db
-        .query("integrations")
-        .withIndex("by_status", (q) => q.eq("status", args.status!))
-        .paginate(args.paginationOpts);
-    }
-
-    if (args.provider) {
-      return await ctx.db
-        .query("integrations")
-        .withIndex("by_provider", (q) => q.eq("provider", args.provider!))
-        .paginate(args.paginationOpts);
-    }
-
-    return await ctx.db
-      .query("integrations")
-      .withIndex("by_provider")
-      .paginate(args.paginationOpts);
+    return await listIntegrationsPaginatedImpl(ctx, args);
   },
 });
 
@@ -1516,35 +1180,12 @@ export const adminUpdateIntegration = mutation({
     const admin = await requireAdmin(ctx);
     const integration = await ctx.db.get(args.integrationId);
     if (!integration) throw new Error("Integration not found");
-    const currentProvider = asIntegrationProvider(integration.provider);
-    const nextProvider =
-      args.provider !== undefined
-        ? assertIntegrationProvider(args.provider)
-        : currentProvider;
-
-    const updates: Record<string, unknown> = {};
-    if (args.provider !== undefined) updates.provider = nextProvider;
-    if (args.status !== undefined) updates.status = args.status;
-    if (args.scopes !== undefined) updates.scopes = args.scopes;
-    if (args.tokenRef !== undefined) {
-      if (!nextProvider) {
-        throw new Error(
-          `Current provider "${integration.provider}" is no longer supported. Set provider to a supported value before updating tokenRef.`,
-        );
-      }
-
-      const normalizedTokenRef = normalizeTokenRef(args.tokenRef);
-
-      if (normalizedTokenRef === null) {
-        updates.tokenRef = undefined;
-      } else if (!isOpaqueTokenRef(normalizedTokenRef)) {
-        throw new Error(
-          'adminUpdateIntegration.tokenRef must be an opaque tokenRef prefixed with "tokref_". Raw token values are rejected.',
-        );
-      } else {
-        updates.tokenRef = normalizedTokenRef;
-      }
-    }
+    const updates = buildAdminIntegrationUpdatePatch(integration, {
+      provider: args.provider,
+      status: args.status,
+      scopes: args.scopes,
+      tokenRef: args.tokenRef,
+    });
 
     await ctx.db.patch(args.integrationId, updates);
     await logAdminAction(
@@ -1563,51 +1204,7 @@ export const adminDeleteIntegration = mutation({
     const admin = await requireAdmin(ctx);
     const integration = await ctx.db.get(args.integrationId);
     if (!integration) throw new Error("Integration not found");
-
-    while (true) {
-      const linkedDailyRows = await ctx.db
-        .query("integrationDailyData")
-        .withIndex("by_user_provider", (q) =>
-          q
-            .eq("userId", integration.userId)
-            .eq("provider", integration.provider),
-        )
-        .take(DELETE_BATCH_SIZE);
-
-      if (linkedDailyRows.length === 0) break;
-
-      for (const row of linkedDailyRows) {
-        await ctx.db.delete(row._id);
-      }
-    }
-
-    const tokenRef = integration.tokenRef;
-    if (tokenRef && isOpaqueTokenRef(tokenRef)) {
-      const secret = await ctx.db
-        .query("integrationSecrets")
-        .withIndex("by_tokenRef", (q) => q.eq("tokenRef", tokenRef))
-        .unique();
-      if (secret) {
-        await ctx.db.delete(secret._id);
-      }
-    }
-
-    while (true) {
-      const syncRuns = await ctx.db
-        .query("integrationSyncRuns")
-        .withIndex("by_user_provider", (q) =>
-          q
-            .eq("userId", integration.userId)
-            .eq("provider", integration.provider),
-        )
-        .take(DELETE_BATCH_SIZE);
-
-      if (syncRuns.length === 0) break;
-
-      for (const run of syncRuns) {
-        await ctx.db.delete(run._id);
-      }
-    }
+    await deleteIntegrationCascadeData(ctx.db, integration);
 
     await ctx.db.delete(args.integrationId);
 
@@ -1631,15 +1228,7 @@ export const adminDeleteIntegration = mutation({
 
 export const listAuditLogs = query({
   args: { limit: v.optional(v.number()) },
-  handler: async (ctx, args) => {
-    await requireAdmin(ctx);
-    const limit = clampLimit(args.limit ?? 100, 500);
-    return await ctx.db
-      .query("auditLogs")
-      .withIndex("by_createdAt")
-      .order("desc")
-      .take(limit);
-  },
+  handler: async (ctx, args) => await listAuditLogsImpl(ctx, args),
 });
 
 export const listAuditLogsPaginated = query({
@@ -1657,184 +1246,15 @@ export const listAuditLogsPaginated = query({
   },
 });
 
-export async function listAuditLogsPaginatedImpl(
-  ctx: Parameters<typeof requireAdmin>[0],
-  args: {
-    paginationOpts: {
-      numItems: number;
-      cursor: string | null;
-      id?: number;
-    };
-    userId?: Id<"user">;
-    actorUserId?: Id<"user">;
-    action?: string;
-    fromTs?: number;
-    toTs?: number;
-  },
-) {
-  await requireAdmin(ctx);
-
-  if (
-    args.fromTs !== undefined &&
-    args.toTs !== undefined &&
-    args.fromTs > args.toTs
-  ) {
-    throw new Error("fromTs must be less than or equal to toTs");
-  }
-
-  const userId = args.userId ?? args.actorUserId;
-  const paginationOpts = {
-    ...args.paginationOpts,
-    numItems: clampLimit(args.paginationOpts.numItems, 200),
-  };
-
-  if (
-    args.userId !== undefined &&
-    args.actorUserId !== undefined &&
-    args.userId !== args.actorUserId
-  ) {
-    throw new Error("Conflicting userId and actorUserId filters provided");
-  }
-
-  // Important: all filters are pushed into indexed query ranges before
-  // pagination, so cursor progression is deterministic and no rows are lost.
-  if (userId && args.action) {
-    return await ctx.db
-      .query("auditLogs")
-      .withIndex("by_userId_action_createdAt", (q) => {
-        if (args.fromTs !== undefined && args.toTs !== undefined) {
-          return q
-            .eq("actorUserId", userId)
-            .eq("action", args.action!)
-            .gte("at", args.fromTs)
-            .lte("at", args.toTs);
-        }
-
-        if (args.fromTs !== undefined) {
-          return q
-            .eq("actorUserId", userId)
-            .eq("action", args.action!)
-            .gte("at", args.fromTs);
-        }
-
-        if (args.toTs !== undefined) {
-          return q
-            .eq("actorUserId", userId)
-            .eq("action", args.action!)
-            .lte("at", args.toTs);
-        }
-
-        return q.eq("actorUserId", userId).eq("action", args.action!);
-      })
-      .order("desc")
-      .paginate(paginationOpts);
-  }
-
-  if (userId) {
-    return await ctx.db
-      .query("auditLogs")
-      .withIndex("by_userId_createdAt", (q) => {
-        if (args.fromTs !== undefined && args.toTs !== undefined) {
-          return q
-            .eq("actorUserId", userId)
-            .gte("at", args.fromTs)
-            .lte("at", args.toTs);
-        }
-
-        if (args.fromTs !== undefined) {
-          return q.eq("actorUserId", userId).gte("at", args.fromTs);
-        }
-
-        if (args.toTs !== undefined) {
-          return q.eq("actorUserId", userId).lte("at", args.toTs);
-        }
-
-        return q.eq("actorUserId", userId);
-      })
-      .order("desc")
-      .paginate(paginationOpts);
-  }
-
-  if (args.action) {
-    return await ctx.db
-      .query("auditLogs")
-      .withIndex("by_action_createdAt", (q) => {
-        if (args.fromTs !== undefined && args.toTs !== undefined) {
-          return q
-            .eq("action", args.action!)
-            .gte("at", args.fromTs)
-            .lte("at", args.toTs);
-        }
-
-        if (args.fromTs !== undefined) {
-          return q.eq("action", args.action!).gte("at", args.fromTs);
-        }
-
-        if (args.toTs !== undefined) {
-          return q.eq("action", args.action!).lte("at", args.toTs);
-        }
-
-        return q.eq("action", args.action!);
-      })
-      .order("desc")
-      .paginate(paginationOpts);
-  }
-
-  return await ctx.db
-    .query("auditLogs")
-    .withIndex("by_createdAt", (q) => {
-      if (args.fromTs !== undefined && args.toTs !== undefined) {
-        return q.gte("at", args.fromTs).lte("at", args.toTs);
-      }
-
-      if (args.fromTs !== undefined) {
-        return q.gte("at", args.fromTs);
-      }
-
-      if (args.toTs !== undefined) {
-        return q.lte("at", args.toTs);
-      }
-
-      return q;
-    })
-    .order("desc")
-    .paginate(paginationOpts);
-}
-
 export const writeAuditLog = mutation({
   args: {
     action: v.string(),
     target: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
-    const admin = await requireAdmin(ctx);
-    const id = await ctx.db.insert("auditLogs", {
-      actorUserId: admin._id,
-      action: args.action,
-      target: args.target,
-      at: Date.now(),
-    });
-
-    await applyDashboardMetricsDelta(ctx.db, {
-      totalAuditLogs: 1,
-    });
-
-    return await ctx.db.get(id);
-  },
+  handler: async (ctx, args) => await writeAuditLogImpl(ctx, args),
 });
 
 export const adminDeleteAuditLog = mutation({
   args: { auditLogId: v.id("auditLogs") },
-  handler: async (ctx, args) => {
-    await requireAdmin(ctx);
-    const log = await ctx.db.get(args.auditLogId);
-    if (!log) throw new Error("Audit log not found");
-    await ctx.db.delete(args.auditLogId);
-
-    await applyDashboardMetricsDelta(ctx.db, {
-      totalAuditLogs: -1,
-    });
-
-    return { success: true };
-  },
+  handler: async (ctx, args) => await adminDeleteAuditLogImpl(ctx, args),
 });

@@ -9,6 +9,17 @@
  */
 
 import type * as admin from "../admin.js";
+import type * as admin_services_adminAuditLogsService from "../admin/services/adminAuditLogsService.js";
+import type * as admin_services_adminAuditService from "../admin/services/adminAuditService.js";
+import type * as admin_services_adminDaysQueryService from "../admin/services/adminDaysQueryService.js";
+import type * as admin_services_adminIntegrationsQueryService from "../admin/services/adminIntegrationsQueryService.js";
+import type * as admin_services_adminIntegrationsService from "../admin/services/adminIntegrationsService.js";
+import type * as admin_services_adminMemoriesQueryService from "../admin/services/adminMemoriesQueryService.js";
+import type * as admin_services_adminPreferencesService from "../admin/services/adminPreferencesService.js";
+import type * as admin_services_adminSummariesQueryService from "../admin/services/adminSummariesQueryService.js";
+import type * as admin_services_auditLogsService from "../admin/services/auditLogsService.js";
+import type * as admin_utilities_adminRecordMappers from "../admin/utilities/adminRecordMappers.js";
+import type * as admin_utilities_adminUserPatch from "../admin/utilities/adminUserPatch.js";
 import type * as authz from "../authz.js";
 import type * as cascadeCleanup from "../cascadeCleanup.js";
 import type * as content from "../content.js";
@@ -23,6 +34,7 @@ import type * as integrationPlugins from "../integrationPlugins.js";
 import type * as integrationProviders from "../integrationProviders.js";
 import type * as integrationSecretsCrypto from "../integrationSecretsCrypto.js";
 import type * as integrations from "../integrations.js";
+import type * as integrations_utilities_integrationLimits from "../integrations/utilities/integrationLimits.js";
 import type * as memories from "../memories.js";
 import type * as observability from "../observability.js";
 import type * as observabilityIngestRateLimiter from "../observabilityIngestRateLimiter.js";
@@ -36,6 +48,9 @@ import type * as sensitiveDataCrypto from "../sensitiveDataCrypto.js";
 import type * as sensitiveDataFields from "../sensitiveDataFields.js";
 import type * as sensitiveDataMigration from "../sensitiveDataMigration.js";
 import type * as summaries from "../summaries.js";
+import type * as summaries_services_summaryCoreService from "../summaries/services/summaryCoreService.js";
+import type * as summaries_utilities_exportSigning from "../summaries/utilities/exportSigning.js";
+import type * as summaries_utilities_restoreExportUtils from "../summaries/utilities/restoreExportUtils.js";
 import type * as summaryGeneration from "../summaryGeneration.js";
 import type * as summaryQuality from "../summaryQuality.js";
 import type * as unsupportedProviders from "../unsupportedProviders.js";
@@ -52,6 +67,17 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
+  "admin/services/adminAuditLogsService": typeof admin_services_adminAuditLogsService;
+  "admin/services/adminAuditService": typeof admin_services_adminAuditService;
+  "admin/services/adminDaysQueryService": typeof admin_services_adminDaysQueryService;
+  "admin/services/adminIntegrationsQueryService": typeof admin_services_adminIntegrationsQueryService;
+  "admin/services/adminIntegrationsService": typeof admin_services_adminIntegrationsService;
+  "admin/services/adminMemoriesQueryService": typeof admin_services_adminMemoriesQueryService;
+  "admin/services/adminPreferencesService": typeof admin_services_adminPreferencesService;
+  "admin/services/adminSummariesQueryService": typeof admin_services_adminSummariesQueryService;
+  "admin/services/auditLogsService": typeof admin_services_auditLogsService;
+  "admin/utilities/adminRecordMappers": typeof admin_utilities_adminRecordMappers;
+  "admin/utilities/adminUserPatch": typeof admin_utilities_adminUserPatch;
   authz: typeof authz;
   cascadeCleanup: typeof cascadeCleanup;
   content: typeof content;
@@ -66,6 +92,7 @@ declare const fullApi: ApiFromModules<{
   integrationProviders: typeof integrationProviders;
   integrationSecretsCrypto: typeof integrationSecretsCrypto;
   integrations: typeof integrations;
+  "integrations/utilities/integrationLimits": typeof integrations_utilities_integrationLimits;
   memories: typeof memories;
   observability: typeof observability;
   observabilityIngestRateLimiter: typeof observabilityIngestRateLimiter;
@@ -79,6 +106,9 @@ declare const fullApi: ApiFromModules<{
   sensitiveDataFields: typeof sensitiveDataFields;
   sensitiveDataMigration: typeof sensitiveDataMigration;
   summaries: typeof summaries;
+  "summaries/services/summaryCoreService": typeof summaries_services_summaryCoreService;
+  "summaries/utilities/exportSigning": typeof summaries_utilities_exportSigning;
+  "summaries/utilities/restoreExportUtils": typeof summaries_utilities_restoreExportUtils;
   summaryGeneration: typeof summaryGeneration;
   summaryQuality: typeof summaryQuality;
   unsupportedProviders: typeof unsupportedProviders;

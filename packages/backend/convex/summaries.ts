@@ -26,123 +26,30 @@ import {
   withSummarySensitiveFields,
   type SummarySensitiveRecord,
 } from "./sensitiveDataFields";
-
-export function getUtcDayKey(timestamp: number): string {
-  return new Date(timestamp).toISOString().slice(0, 10);
-}
-
-type SummaryDb = MutationCtx["db"];
-
-type UpsertSummaryInput = {
-  dayKey: string;
-  story: string;
-  highlights: string[];
-  metrics?: {
-    steps?: number;
-    sleepMinutes?: number;
-    screenTimeMinutes?: number;
-    spendingTotal?: number;
-  };
-  sourcesUsed: string[];
-};
+import {
+  getUtcDayKey,
+  reserveSummaryGenerationSlotForUser,
+  upsertSummaryForUserDay,
+} from "./summaries/services/summaryCoreService";
+import {
+  sanitizeExportErrorMessage,
+  sanitizeRestoreErrorMessage,
+  selectedDatasets,
+  splitIntoBatches,
+} from "./summaries/utilities/restoreExportUtils";
+import {
+  computeHmacSha256Hex,
+  ensureExportSigningSecretConfiguredInProduction,
+  signaturesEqual,
+} from "./summaries/utilities/exportSigning";
 
 type SummaryDocRecord = Doc<"daySummaries"> & SummarySensitiveRecord;
 
-export async function upsertSummaryForUserDay(
-  db: SummaryDb,
-  userId: Id<"user">,
-  args: UpsertSummaryInput,
-  now: number,
-) {
-  const existing = await db
-    .query("daySummaries")
-    .withIndex("by_user_day", (q) =>
-      q.eq("userId", userId).eq("dayKey", args.dayKey),
-    )
-    .unique();
-
-  const encryptedPayload = await buildSummarySensitiveWritePayload({
-    userId,
-    story: args.story,
-    highlights: args.highlights,
-    sensitiveDataNonce: existing?.sensitiveDataNonce,
-    now,
-  });
-
-  if (existing) {
-    await db.patch(existing._id, {
-      ...encryptedPayload,
-      metrics: args.metrics,
-      sourcesUsed: args.sourcesUsed,
-      generatedAt: now,
-    });
-
-    return await withSummarySensitiveFields(
-      (await db.get(existing._id)) as SummaryDocRecord,
-    );
-  }
-
-  const id = await db.insert("daySummaries", {
-    userId,
-    dayKey: args.dayKey,
-    ...encryptedPayload,
-    metrics: args.metrics,
-    sourcesUsed: args.sourcesUsed,
-    generatedAt: now,
-  });
-
-  await applyDashboardMetricsDelta(db, {
-    totalSummaries: 1,
-  });
-
-  return await withSummarySensitiveFields(
-    (await db.get(id)) as SummaryDocRecord,
-  );
-}
-
-export async function reserveSummaryGenerationSlotForUser(
-  db: SummaryDb,
-  userId: Id<"user">,
-  now: number,
-  limit: number,
-) {
-  const quotaDayKey = getUtcDayKey(now);
-
-  const existing = await db
-    .query("summaryGenerationQuotas")
-    .withIndex("by_user_day", (q) =>
-      q.eq("userId", userId).eq("quotaDayKey", quotaDayKey),
-    )
-    .unique();
-
-  const used = existing?.used ?? 0;
-  if (used >= limit) {
-    throw new Error(
-      `Daily summary limit reached (${limit}/day). Please try again tomorrow.`,
-    );
-  }
-
-  if (existing) {
-    await db.patch(existing._id, {
-      used: used + 1,
-      updatedAt: now,
-    });
-  } else {
-    await db.insert("summaryGenerationQuotas", {
-      userId,
-      quotaDayKey,
-      used: 1,
-      updatedAt: now,
-    });
-  }
-
-  return {
-    quotaDayKey,
-    used: used + 1,
-    limit,
-    remaining: Math.max(limit - (used + 1), 0),
-  };
-}
+export {
+  getUtcDayKey,
+  reserveSummaryGenerationSlotForUser,
+  upsertSummaryForUserDay,
+};
 
 // ── Get summary for a specific day ──────────────────────────
 export const getSummaryByDay = query({
@@ -623,12 +530,6 @@ function mergeRestoreBatchResults(
   }
 
   return target;
-}
-
-function toHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((value) => value.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1157,81 +1058,14 @@ function normalizeSignedExportPayloadForSigning(
   return JSON.stringify(sortObjectForStableJson(payload));
 }
 
-function isProductionEnvironment(): boolean {
-  const envCandidates = [
-    process.env.DAYLOG_APP_ENV,
-    process.env.APP_ENV,
-    process.env.DEPLOY_ENV,
-    process.env.VERCEL_ENV,
-    process.env.NODE_ENV,
-  ];
-
-  return envCandidates.some((value) => {
-    const normalized = value?.trim().toLowerCase();
-    return normalized === "production" || normalized === "prod";
-  });
-}
-
-function ensureExportSigningSecretConfiguredInProduction(): void {
-  if (!isProductionEnvironment()) {
-    return;
-  }
-
-  if (process.env.EXPORT_SIGNING_SECRET?.trim()) {
-    return;
-  }
-
-  throw new Error(
-    "Missing export signing secret in production. Configure EXPORT_SIGNING_SECRET.",
-  );
-}
-
-function getExportSigningSecret(): string {
-  const exportSigningSecret = process.env.EXPORT_SIGNING_SECRET?.trim();
-  if (exportSigningSecret) {
-    return exportSigningSecret;
-  }
-
-  throw new Error(
-    "Missing export signing secret. Configure EXPORT_SIGNING_SECRET.",
-  );
-}
-
 ensureExportSigningSecretConfiguredInProduction();
 
 async function computeSignedPayloadSignature(
   payload: SignedDiaryExportPayload,
 ): Promise<string> {
-  const signerKey = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(getExportSigningSecret()),
-    {
-      name: "HMAC",
-      hash: "SHA-256",
-    },
-    false,
-    ["sign"],
-  );
-
-  const encodedPayload = new TextEncoder().encode(
+  return await computeHmacSha256Hex(
     normalizeSignedExportPayloadForSigning(payload),
   );
-  const signature = await crypto.subtle.sign("HMAC", signerKey, encodedPayload);
-
-  return toHex(new Uint8Array(signature));
-}
-
-function signaturesEqual(left: string, right: string): boolean {
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  let mismatch = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    mismatch |= left.charCodeAt(index) ^ right.charCodeAt(index);
-  }
-
-  return mismatch === 0;
 }
 
 function ensurePayloadSizeLimit(payloadText: string): void {
@@ -1493,54 +1327,12 @@ async function integrationRowEquivalent(
   );
 }
 
-function splitIntoBatches<TItem>(items: TItem[], batchSize: number): TItem[][] {
-  if (items.length === 0) {
-    return [];
-  }
-
-  const batches: TItem[][] = [];
-  for (let index = 0; index < items.length; index += batchSize) {
-    batches.push(items.slice(index, index + batchSize));
-  }
-
-  return batches;
-}
-
-function selectedRestoreDatasets(input?: ExportDataset[]): ExportDataset[] {
-  const defaults: ExportDataset[] = [
-    "summaries",
-    "memories",
-    "days",
-    "integrationDailyData",
-  ];
-
-  if (!input || input.length === 0) {
-    return defaults;
-  }
-
-  const unique = new Set<ExportDataset>();
-  for (const dataset of input) {
-    unique.add(dataset);
-  }
-
-  return defaults.filter((dataset) => unique.has(dataset));
-}
-
-function sanitizeExportErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim().slice(0, 220);
-  }
-
-  return "Export generation failed.";
-}
-
-function sanitizeRestoreErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim().slice(0, 220);
-  }
-
-  return "Restore failed for one or more rows.";
-}
+const RESTORE_DATASET_DEFAULTS: ReadonlyArray<ExportDataset> = [
+  "summaries",
+  "memories",
+  "days",
+  "integrationDailyData",
+];
 
 type IdNormalizer = {
   normalizeId<TTableName extends TableNames>(
@@ -2889,7 +2681,7 @@ export const restoreMyDiaryData = action({
       clerkUserId: string;
     };
 
-    const datasets = selectedRestoreDatasets(args.datasets);
+    const datasets = selectedDatasets(args.datasets, RESTORE_DATASET_DEFAULTS);
     if (datasets.length === 0) {
       throw new Error("Select at least one dataset to restore.");
     }

@@ -69,6 +69,13 @@ import {
   buildIntegrationDailySensitiveWritePayload,
   withIntegrationDailySensitiveFields,
 } from "./sensitiveDataFields";
+import {
+  clampContextAggregateSyncRunsLimit,
+  clampListMyDailyDataForDayLimit,
+  clampListMyIntegrationsLimit,
+  clampListMySyncRunsForDayLimit,
+  clampSummaryGenerationIntegrationLimit,
+} from "./integrations/utilities/integrationLimits";
 
 const SYNC_RUN_IN_PROGRESS_TTL_MS = 60_000;
 const DELETE_BATCH_SIZE = 256;
@@ -78,16 +85,6 @@ const LEGACY_SECRETS_AUDIT_DEFAULT_MAX_PAGES = 100;
 const LEGACY_SECRETS_AUDIT_MAX_PAGES = 2_000;
 const LEGACY_TOKEN_REF_AUDIT_DEFAULT_MAX_ROWS = 500;
 const LEGACY_TOKEN_REF_AUDIT_MAX_ROWS = 5_000;
-const DEFAULT_SUMMARY_GENERATION_INTEGRATION_LIMIT = 32;
-const MAX_SUMMARY_GENERATION_INTEGRATION_LIMIT = 128;
-const DEFAULT_LIST_MY_INTEGRATIONS_LIMIT = 50;
-const MAX_LIST_MY_INTEGRATIONS_LIMIT = 100;
-const DEFAULT_LIST_MY_SYNC_RUNS_FOR_DAY_LIMIT = 50;
-const MAX_LIST_MY_SYNC_RUNS_FOR_DAY_LIMIT = 100;
-const DEFAULT_LIST_MY_DAILY_DATA_FOR_DAY_LIMIT = 50;
-const MAX_LIST_MY_DAILY_DATA_FOR_DAY_LIMIT = 100;
-const DEFAULT_CONTEXT_AGGREGATE_SYNC_RUNS_LIMIT = 50;
-const MAX_CONTEXT_AGGREGATE_SYNC_RUNS_LIMIT = 100;
 const LEGACY_OPAQUE_TOKEN_REF_SCAN_LIMIT = 100;
 const LEGACY_UNSUPPORTED_CLEANUP_DEFAULT_BATCH_SIZE_PER_PROVIDER = 25;
 const LEGACY_UNSUPPORTED_CLEANUP_MAX_BATCH_SIZE_PER_PROVIDER = 250;
@@ -111,54 +108,6 @@ const UNSAFE_LEGACY_TOKEN_REF_REASON =
   "Unsafe legacy integration token reference was invalidated. Reconnect this integration.";
 const LEGACY_UNSUPPORTED_REASON =
   "This integration provider is no longer supported and has been automatically disconnected.";
-
-function clampSummaryGenerationIntegrationLimit(
-  value: number | undefined,
-): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return DEFAULT_SUMMARY_GENERATION_INTEGRATION_LIMIT;
-  }
-
-  const normalized = Math.floor(value);
-
-  if (normalized < 1) {
-    return 1;
-  }
-
-  if (normalized > MAX_SUMMARY_GENERATION_INTEGRATION_LIMIT) {
-    return MAX_SUMMARY_GENERATION_INTEGRATION_LIMIT;
-  }
-
-  return normalized;
-}
-
-function clampListMyIntegrationsLimit(value: number | undefined): number {
-  return clampLimit(
-    value ?? DEFAULT_LIST_MY_INTEGRATIONS_LIMIT,
-    MAX_LIST_MY_INTEGRATIONS_LIMIT,
-  );
-}
-
-function clampListMySyncRunsForDayLimit(value: number | undefined): number {
-  return clampLimit(
-    value ?? DEFAULT_LIST_MY_SYNC_RUNS_FOR_DAY_LIMIT,
-    MAX_LIST_MY_SYNC_RUNS_FOR_DAY_LIMIT,
-  );
-}
-
-function clampListMyDailyDataForDayLimit(value: number | undefined): number {
-  return clampLimit(
-    value ?? DEFAULT_LIST_MY_DAILY_DATA_FOR_DAY_LIMIT,
-    MAX_LIST_MY_DAILY_DATA_FOR_DAY_LIMIT,
-  );
-}
-
-function clampContextAggregateSyncRunsLimit(value: number | undefined): number {
-  return clampLimit(
-    value ?? DEFAULT_CONTEXT_AGGREGATE_SYNC_RUNS_LIMIT,
-    MAX_CONTEXT_AGGREGATE_SYNC_RUNS_LIMIT,
-  );
-}
 
 const integrationDailyMetricsValidator = v.object({
   steps: v.optional(v.number()),
