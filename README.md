@@ -207,6 +207,33 @@ Where to get each variable:
 - Spotify OAuth
   - `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`: Spotify Developer Dashboard -> app credentials.
 
+## Repository secrets (GitHub Actions)
+
+For CI and production deployments, set the following repository secrets in GitHub (Settings → Secrets → Actions). These are used by the environment validator and by production runtime (Convex/environment variables).
+
+- **CLERK_JWT_ISSUER_DOMAIN**: Full https URL of the Clerk JWT issuer domain (e.g. https://my-org.clerk.dev).
+- **CLERK_WEBHOOK_SECRET**: Clerk webhook signing secret (must start with `whsec_`).
+- **OPENAI_API_KEY**: Your OpenAI `sk-` API key.
+- **EXPORT_SIGNING_SECRET**: Secret used to sign export/restore payloads (required in production).
+- **INTEGRATION_SECRETS_KEYRING_JSON**: JSON object mapping key ids to base64-encoded AES-256 key material (see format below).
+- **INTEGRATION_SECRETS_ACTIVE_KEY_ID**: The active key id present in the keyring JSON.
+
+### Keyring JSON format example (use a secure generator and never commit this to the repo)
+
+```json
+{
+  "key-v1": "<base64-encoded-32-byte-key>",
+  "key-v2": "<base64-encoded-32-byte-key>"
+}
+```
+
+Notes & recommendations
+
+- Use GitHub repository or organization secrets (not plaintext files) and restrict access to deploy pipelines.
+- Prefer using a KMS (AWS KMS, Google KMS, or Vault) to encrypt and rotate the DEK material; store only wrapped keys in secrets where possible.
+- `INTEGRATION_SECRETS_KEYRING_JSON` must decode each key to exactly 32 bytes (AES-256). The repo validator (`scripts/validate-prod-env.mjs`) enforces this in CI.
+- When rotating keys, update `INTEGRATION_SECRETS_KEYRING_JSON` first with the new key, then update `INTEGRATION_SECRETS_ACTIVE_KEY_ID` to the new id and run your secret-rotation migration job.
+
 ### 4. Run backend
 
 ```bash
