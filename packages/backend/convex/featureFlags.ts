@@ -126,13 +126,6 @@ const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, FeatureFlagDefaultConfig> =
 const DEFAULT_ADMIN_FEATURE_FLAGS_PAGE_LIMIT = 25;
 const MAX_ADMIN_FEATURE_FLAGS_PAGE_LIMIT = 100;
 
-function asFeatureFlagKey(value: string): FeatureFlagKey | null {
-  if ((FEATURE_FLAG_KEYS as readonly string[]).includes(value)) {
-    return value as FeatureFlagKey;
-  }
-  return null;
-}
-
 function clampAdminFeatureFlagsPageLimit(value: number | undefined): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return DEFAULT_ADMIN_FEATURE_FLAGS_PAGE_LIMIT;
@@ -397,18 +390,7 @@ function evaluateFlag(
 }
 
 async function getStoredFlagMap(db: QueryCtx["db"] | MutationCtx["db"]) {
-  const rows = (await db
-    .query("featureFlags")
-    .collect()) as FeatureFlagStoredDoc[];
-  const byKey = new Map<FeatureFlagKey, FeatureFlagStoredDoc>();
-
-  for (const row of rows) {
-    const key = asFeatureFlagKey(row.key);
-    if (!key) continue;
-    byKey.set(key, row);
-  }
-
-  return byKey;
+  return await getStoredFlagMapForKeys(db, FEATURE_FLAG_KEYS);
 }
 
 async function getStoredFlagMapForKeys(
