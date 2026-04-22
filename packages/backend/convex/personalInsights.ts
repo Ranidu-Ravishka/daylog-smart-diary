@@ -405,6 +405,55 @@ export const upsertNextBestDayRecommendationInternal = internalMutation({
   },
 });
 
+export const listMyDailyFeatureVectorsByDayKeys = query({
+  args: {
+    dayKeys: v.array(v.string()),
+    vectorVersion: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    const uniqueDayKeys = Array.from(new Set(args.dayKeys)).slice(
+      0,
+      MAX_WINDOW_DAYS,
+    );
+
+    if (uniqueDayKeys.length === 0) {
+      return [] as Array<{
+        dayKey: string;
+        features: DailyFeatureVector;
+      }>;
+    }
+
+    const existingRows = await Promise.all(
+      uniqueDayKeys.map(async (dayKey) =>
+        ctx.db
+          .query("dailyFeatureVectors")
+          .withIndex("by_user_day", (q) =>
+            q.eq("userId", user._id).eq("dayKey", dayKey),
+          )
+          .unique(),
+      ),
+    );
+
+    return existingRows.flatMap((row) => {
+      if (
+        row === null ||
+        row.vectorVersion !== args.vectorVersion ||
+        row.features === undefined
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          dayKey: row.dayKey,
+          features: row.features as DailyFeatureVector,
+        },
+      ];
+    });
+  },
+});
+
 async function buildDailyFeatureVector(args: {
   ctx: ActionCtx;
   dayKey: string;
@@ -498,6 +547,70 @@ async function buildDailyFeatureVector(args: {
   };
 }
 
+async function resolveVectorsForDayKeys(args: {
+  ctx: ActionCtx;
+  dayKeys: string[];
+}): Promise<{
+  vectorsByDayKey: Map<string, DailyFeatureVector>;
+  recomputedDayKeys: string[];
+}> {
+  const uniqueDayKeys = Array.from(new Set(args.dayKeys)).slice(
+    0,
+    MAX_WINDOW_DAYS,
+  );
+  if (uniqueDayKeys.length === 0) {
+    return {
+      vectorsByDayKey: new Map<string, DailyFeatureVector>(),
+      recomputedDayKeys: [],
+    };
+  }
+
+  const existingVectors = (await args.ctx.runQuery(
+    api.personalInsights.listMyDailyFeatureVectorsByDayKeys,
+    {
+      dayKeys: uniqueDayKeys,
+      vectorVersion: FEATURE_VECTOR_VERSION,
+    },
+  )) as Array<{ dayKey: string; features: DailyFeatureVector }>;
+
+  const vectorsByDayKey = new Map<string, DailyFeatureVector>();
+  for (const row of existingVectors) {
+    vectorsByDayKey.set(row.dayKey, row.features);
+  }
+
+  const missingDayKeys = uniqueDayKeys.filter(
+    (dayKey) => !vectorsByDayKey.has(dayKey),
+  );
+
+  if (missingDayKeys.length === 0) {
+    return {
+      vectorsByDayKey,
+      recomputedDayKeys: [],
+    };
+  }
+
+  const recomputedVectors = await Promise.all(
+    missingDayKeys.map(async (dayKey) =>
+      buildDailyFeatureVector({
+        ctx: args.ctx,
+        dayKey,
+      }),
+    ),
+  );
+
+  missingDayKeys.forEach((dayKey, index) => {
+    const vector = recomputedVectors[index];
+    if (vector) {
+      vectorsByDayKey.set(dayKey, vector);
+    }
+  });
+
+  return {
+    vectorsByDayKey,
+    recomputedDayKeys: missingDayKeys,
+  };
+}
+
 function computeTrendVectors(vectors: DailyFeatureVector[]): TrendVector {
   return {
     ratingTrend: detectTrend(vectors.map((vector) => vector.rating)),
@@ -544,29 +657,26 @@ export const refreshMyDailyFeatureVector = action({
       userId: Id<"user">;
     };
 
-    const currentVector = await buildDailyFeatureVector({
-      ctx,
-      dayKey: args.dayKey,
-    });
-
     const recentDays = (await ctx.runQuery(api.days.listRecentDays, {
       limit: windowDays,
     })) as Array<{ dayKey: string }>;
 
-    const historicalDayKeys = recentDays
-      .map((day) => day.dayKey)
-      .filter((dayKey) => dayKey !== args.dayKey)
-      .slice(0, windowDays - 1);
+    const orderedDayKeys = Array.from(
+      new Set([args.dayKey, ...recentDays.map((day) => day.dayKey)]),
+    ).slice(0, windowDays);
+    const { vectorsByDayKey } = await resolveVectorsForDayKeys({
+      ctx,
+      dayKeys: orderedDayKeys,
+    });
+    const currentVector = vectorsByDayKey.get(args.dayKey);
+    if (!currentVector) {
+      throw new Error("Failed to compute feature vector for requested day.");
+    }
 
-    const historicalVectors = await Promise.all(
-      historicalDayKeys.map(
-        async (dayKey) =>
-          await buildDailyFeatureVector({
-            ctx,
-            dayKey,
-          }),
-      ),
-    );
+    const historicalVectors = orderedDayKeys
+      .filter((dayKey) => dayKey !== args.dayKey)
+      .map((dayKey) => vectorsByDayKey.get(dayKey))
+      .filter((vector): vector is DailyFeatureVector => vector !== undefined);
 
     const trend = computeTrendVectors([
       ...historicalVectors.reverse(),
@@ -641,19 +751,24 @@ export const getMyNextBestDayRecommendation = action({
     const recentDayKeys = recentDays
       .map((day) => day.dayKey)
       .slice(0, windowDays);
-    const vectors = await Promise.all(
-      recentDayKeys.map(
-        async (dayKey) =>
-          await buildDailyFeatureVector({
-            ctx,
-            dayKey,
-          }),
-      ),
-    );
+    const { vectorsByDayKey, recomputedDayKeys } =
+      await resolveVectorsForDayKeys({
+        ctx,
+        dayKeys: recentDayKeys,
+      });
+    const vectors = recentDayKeys
+      .map((dayKey) => vectorsByDayKey.get(dayKey))
+      .filter((vector): vector is DailyFeatureVector => vector !== undefined);
+
+    if (vectors.length === 0) {
+      throw new Error(
+        "No recent feature vectors available for recommendation.",
+      );
+    }
 
     await Promise.all(
-      recentDayKeys.map(async (dayKey, index) => {
-        const vector = vectors[index];
+      recomputedDayKeys.map(async (dayKey) => {
+        const vector = vectorsByDayKey.get(dayKey);
         if (!vector) return;
         await ctx.runMutation(
           internal.personalInsights.upsertDailyFeatureVectorInternal,

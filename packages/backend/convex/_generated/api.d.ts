@@ -9,6 +9,8 @@
  */
 
 import type * as admin from "../admin.js";
+import type * as admin_controllers_adminDashboardController from "../admin/controllers/adminDashboardController.js";
+import type * as admin_controllers_adminUsersController from "../admin/controllers/adminUsersController.js";
 import type * as admin_services_adminAuditLogsService from "../admin/services/adminAuditLogsService.js";
 import type * as admin_services_adminAuditService from "../admin/services/adminAuditService.js";
 import type * as admin_services_adminDaysQueryService from "../admin/services/adminDaysQueryService.js";
@@ -36,12 +38,14 @@ import type * as integrationSecretsCrypto from "../integrationSecretsCrypto.js";
 import type * as integrations from "../integrations.js";
 import type * as integrations_utilities_integrationLimits from "../integrations/utilities/integrationLimits.js";
 import type * as memories from "../memories.js";
+import type * as oauthConnect from "../oauthConnect.js";
 import type * as observability from "../observability.js";
 import type * as observabilityIngestRateLimiter from "../observabilityIngestRateLimiter.js";
 import type * as observabilityIngestion from "../observabilityIngestion.js";
 import type * as observabilityIngestionSecurity from "../observabilityIngestionSecurity.js";
 import type * as personalInsights from "../personalInsights.js";
 import type * as planLimits from "../planLimits.js";
+import type * as platformAudit from "../platformAudit.js";
 import type * as providerAdapters from "../providerAdapters.js";
 import type * as retention from "../retention.js";
 import type * as runtimeConfig from "../runtimeConfig.js";
@@ -68,6 +72,8 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
+  "admin/controllers/adminDashboardController": typeof admin_controllers_adminDashboardController;
+  "admin/controllers/adminUsersController": typeof admin_controllers_adminUsersController;
   "admin/services/adminAuditLogsService": typeof admin_services_adminAuditLogsService;
   "admin/services/adminAuditService": typeof admin_services_adminAuditService;
   "admin/services/adminDaysQueryService": typeof admin_services_adminDaysQueryService;
@@ -95,12 +101,14 @@ declare const fullApi: ApiFromModules<{
   integrations: typeof integrations;
   "integrations/utilities/integrationLimits": typeof integrations_utilities_integrationLimits;
   memories: typeof memories;
+  oauthConnect: typeof oauthConnect;
   observability: typeof observability;
   observabilityIngestRateLimiter: typeof observabilityIngestRateLimiter;
   observabilityIngestion: typeof observabilityIngestion;
   observabilityIngestionSecurity: typeof observabilityIngestionSecurity;
   personalInsights: typeof personalInsights;
   planLimits: typeof planLimits;
+  platformAudit: typeof platformAudit;
   providerAdapters: typeof providerAdapters;
   retention: typeof retention;
   runtimeConfig: typeof runtimeConfig;

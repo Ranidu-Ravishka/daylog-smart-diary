@@ -187,8 +187,12 @@ describe("oauth abuse protection", () => {
       getToken: getTokenMock,
     });
 
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo) => {
+      const url = typeof input === "string" ? input : input.url;
+      if (url.includes("/integrations/oauth/connect")) {
+        return new Response(null, { status: 204 });
+      }
+      return new Response(
         JSON.stringify({
           access_token: "oauth_access_token",
           refresh_token: "oauth_refresh_token",
@@ -196,11 +200,9 @@ describe("oauth abuse protection", () => {
           scope: "user-read-recently-played user-top-read",
         }),
         { status: 200 },
-      ),
-    );
+      );
+    });
     vi.stubGlobal("fetch", fetchMock);
-
-    convexMutationMock.mockResolvedValue({ success: true });
 
     const startRequest = makeRequest(
       "https://app.daylog.test/api/integrations/oauth/spotify/start?returnTo=/dashboard/settings",
@@ -227,10 +229,10 @@ describe("oauth abuse protection", () => {
     });
 
     expect(firstCallbackResponse.status).toBe(307);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(convexClientCtorMock).toHaveBeenCalledTimes(1);
-    expect(convexSetAuthMock).toHaveBeenCalledTimes(1);
-    expect(convexMutationMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(convexClientCtorMock).not.toHaveBeenCalled();
+    expect(convexSetAuthMock).not.toHaveBeenCalled();
+    expect(convexMutationMock).not.toHaveBeenCalled();
     expect(getTokenMock).toHaveBeenCalledTimes(1);
 
     const replayRequest = makeRequest(
@@ -252,10 +254,10 @@ describe("oauth abuse protection", () => {
       "OAuth callback rejected.",
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(convexClientCtorMock).toHaveBeenCalledTimes(1);
-    expect(convexSetAuthMock).toHaveBeenCalledTimes(1);
-    expect(convexMutationMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(convexClientCtorMock).not.toHaveBeenCalled();
+    expect(convexSetAuthMock).not.toHaveBeenCalled();
+    expect(convexMutationMock).not.toHaveBeenCalled();
     expect(getTokenMock).toHaveBeenCalledTimes(1);
   });
 

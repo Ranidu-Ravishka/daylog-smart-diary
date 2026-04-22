@@ -22,7 +22,7 @@ export async function recordIntegrationHealthEvent(
   },
 ) {
   await ctx.runMutation(
-    (internal as any).integrationHealth.recordIntegrationHealthEventInternal,
+    internal.integrationHealth.recordIntegrationHealthEventInternal,
     args,
   );
 }

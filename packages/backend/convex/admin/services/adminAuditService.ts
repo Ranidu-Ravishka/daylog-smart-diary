@@ -26,7 +26,7 @@ export async function logAdminAction(
 
   // Immutable parallel audit trail for security-sensitive admin operations.
   await ctx.db.insert("platformAuditEvents", {
-    category: "integration_health",
+    category: "admin",
     action: `admin:${action}`,
     actorType: "admin",
     actorUserId: adminId,

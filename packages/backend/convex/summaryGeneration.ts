@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { action, internalAction } from "./_generated/server";
-import { api, internal } from "./_generated/api";
+import { api } from "./_generated/api";
 import { makeFunctionReference } from "convex/server";
 import { validateDayKey } from "./validators";
 import { convexServerEnv } from "./env";
@@ -16,6 +16,30 @@ const listMemoriesByDayForSummaryGenerationRef = makeFunctionReference<"query">(
 const listMyIntegrationDailyDataForSummaryGenerationRef =
   makeFunctionReference<"query">(
     "integrations:listMyIntegrationDailyDataForDayForSummaryGeneration",
+  );
+const getSummaryGenerationIdentityRef = makeFunctionReference<"query">(
+  "summaries:getSummaryGenerationIdentity",
+);
+const reserveSummaryGenerationSlotRef = makeFunctionReference<"mutation">(
+  "summaries:reserveSummaryGenerationSlot",
+);
+const releaseSummaryGenerationSlotInternalRef =
+  makeFunctionReference<"mutation">(
+    "summaries:releaseSummaryGenerationSlotInternal",
+  );
+const upsertSummaryRef = makeFunctionReference<"mutation">(
+  "summaries:upsertSummary",
+);
+const recordSummaryGenerationEvaluationInternalRef =
+  makeFunctionReference<"mutation">(
+    "summaryQuality:recordSummaryGenerationEvaluationInternal",
+  );
+const recordSummaryAttemptInternalRef = makeFunctionReference<"mutation">(
+  "summaryQuality:recordSummaryAttemptInternal",
+);
+const markSummaryGenerationBestAttemptInternalRef =
+  makeFunctionReference<"mutation">(
+    "summaryQuality:markSummaryGenerationBestAttemptInternal",
   );
 
 const SUMMARY_GENERATION_MEMORY_LIMIT = 50;
@@ -622,12 +646,10 @@ export const generateSummaryForDay = action({
       integrationData ?? [],
     );
 
-    const generationIdentity = (await ctx.runQuery(
-      (api as any).summaries.getSummaryGenerationIdentity,
+    const generationIdentity = await ctx.runQuery(
+      getSummaryGenerationIdentityRef,
       {},
-    )) as {
-      userId: string;
-    };
+    );
 
     const summaryMemoryInput = toSummaryMemoryInput(
       memories ?? [],
@@ -695,10 +717,9 @@ export const generateSummaryForDay = action({
       });
 
       try {
-        await ctx.runMutation(
-          (api as any).summaries.reserveSummaryGenerationSlot,
-          {},
-        );
+        await ctx.runMutation(reserveSummaryGenerationSlotRef, {
+          idempotencyKey: attemptChainId,
+        });
       } catch (quotaError) {
         logWarn("summary_generation.retry_blocked_quota", {
           event: "retry_triggered",
@@ -728,8 +749,7 @@ export const generateSummaryForDay = action({
         );
 
         const qualityResult = await ctx.runMutation(
-          (internal as any).summaryQuality
-            .recordSummaryGenerationEvaluationInternal,
+          recordSummaryGenerationEvaluationInternalRef,
           {
             userId: generationIdentity.userId,
             dayKey: args.dayKey,
@@ -745,7 +765,7 @@ export const generateSummaryForDay = action({
         );
 
         const attemptId = await ctx.runMutation(
-          (internal as any).summaryQuality.recordSummaryAttemptInternal,
+          recordSummaryAttemptInternalRef,
           {
             userId: generationIdentity.userId,
             dayKey: args.dayKey,
@@ -825,8 +845,7 @@ export const generateSummaryForDay = action({
           error instanceof Error ? error.message : "Summary generation failed";
         try {
           const qualityFailure = await ctx.runMutation(
-            (internal as any).summaryQuality
-              .recordSummaryGenerationEvaluationInternal,
+            recordSummaryGenerationEvaluationInternalRef,
             {
               userId: generationIdentity.userId,
               dayKey: args.dayKey,
@@ -840,7 +859,7 @@ export const generateSummaryForDay = action({
           );
 
           const attemptId = await ctx.runMutation(
-            (internal as any).summaryQuality.recordSummaryAttemptInternal,
+            recordSummaryAttemptInternalRef,
             {
               userId: generationIdentity.userId,
               dayKey: args.dayKey,
@@ -943,23 +962,55 @@ export const generateSummaryForDay = action({
       ]),
     );
 
-    const saved = (await ctx.runMutation((api as any).summaries.upsertSummary, {
-      dayKey: args.dayKey,
-      story: selectedAttempt.generated.story,
-      highlights: selectedAttempt.generated.highlights,
-      metrics: hasMergedMetrics ? mergedMetrics : undefined,
-      sourcesUsed: mergedSourcesUsed,
-    })) as { _id?: string; generatedAt?: number } | null;
+    // Persist the selected summary. If this fails AFTER the model call
+    // already succeeded, refund the quota slot so the user is not penalized
+    // for a reserved-but-unpersisted generation. The refund is best-effort —
+    // if it also fails we still surface the original persistence error.
+    let saved: { _id?: string; generatedAt?: number } | undefined;
+    try {
+      saved = (await ctx.runMutation(upsertSummaryRef, {
+        dayKey: args.dayKey,
+        story: selectedAttempt.generated.story,
+        highlights: selectedAttempt.generated.highlights,
+        metrics: hasMergedMetrics ? mergedMetrics : undefined,
+        sourcesUsed: mergedSourcesUsed,
+      })) as { _id?: string; generatedAt?: number } | undefined;
+    } catch (persistError) {
+      try {
+        await ctx.runMutation(releaseSummaryGenerationSlotInternalRef, {
+          userId: generationIdentity.userId,
+          idempotencyKey: attemptChainId,
+        });
+        logWarn("summary_generation.persist_failed_quota_refunded", {
+          event: "persist_failed",
+          dayKey: args.dayKey,
+          userId: generationIdentity.userId,
+          attemptChainId,
+          errorMessage:
+            persistError instanceof Error
+              ? persistError.message
+              : String(persistError),
+        });
+      } catch (refundError) {
+        logWarn("summary_generation.quota_refund_failed", {
+          event: "quota_refund_failed",
+          dayKey: args.dayKey,
+          userId: generationIdentity.userId,
+          attemptChainId,
+          errorMessage:
+            refundError instanceof Error
+              ? refundError.message
+              : String(refundError),
+        });
+      }
+      throw persistError;
+    }
 
     if (selectedAttempt.generationEventId && selectedAttempt.attemptId) {
-      await ctx.runMutation(
-        (internal as any).summaryQuality
-          .markSummaryGenerationBestAttemptInternal,
-        {
-          generationEventId: selectedAttempt.generationEventId,
-          selectedBestAttemptId: selectedAttempt.attemptId,
-        },
-      );
+      await ctx.runMutation(markSummaryGenerationBestAttemptInternalRef, {
+        generationEventId: selectedAttempt.generationEventId,
+        selectedBestAttemptId: selectedAttempt.attemptId,
+      });
     }
 
     logInfo("summary_generation.best_attempt_selected", {

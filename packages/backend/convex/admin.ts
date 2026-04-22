@@ -13,8 +13,6 @@ import {
 } from "./cascadeCleanup";
 import {
   applyDashboardMetricsDelta,
-  getDashboardMetricsSnapshot,
-  replaceDashboardMetricsSnapshot,
   type DashboardMetricsSnapshot,
 } from "./dashboardMetrics";
 import {
@@ -35,8 +33,7 @@ import {
   mapAdminMemoryRecord,
   mapAdminSummaryRecord,
 } from "./admin/utilities/adminRecordMappers";
-import { buildAdminRoleStatePatch } from "./admin/utilities/adminUserPatch";
-import { countRows, logAdminAction } from "./admin/services/adminAuditService";
+import { logAdminAction } from "./admin/services/adminAuditService";
 import { listAuditLogsPaginatedImpl } from "./admin/services/auditLogsService";
 import {
   buildAdminIntegrationUpdatePatch,
@@ -55,8 +52,18 @@ import {
   listAuditLogsImpl,
   writeAuditLogImpl,
 } from "./admin/services/adminAuditLogsService";
-
-export { listAuditLogsPaginatedImpl };
+import {
+  getDashboardMetricsController,
+  rebuildDashboardMetricsController,
+} from "./admin/controllers/adminDashboardController";
+import {
+  adminCreateUserController,
+  adminGetUserController,
+  adminUpdateUserController,
+  listAllUsersController,
+  listUsersByIdsController,
+  listUsersPaginatedController,
+} from "./admin/controllers/adminUsersController";
 
 type AdminMemoryRecord = Doc<"memories"> & MemorySensitiveRecord;
 type AdminDayRecord = Doc<"days"> & DaySensitiveRecord;
@@ -74,8 +81,7 @@ export const getDashboardMetrics = query({
   args: {},
   handler: async (ctx) => {
     await requireAdmin(ctx);
-
-    return await getDashboardMetricsSnapshot(ctx.db);
+    return await getDashboardMetricsController(ctx);
   },
 });
 
@@ -83,38 +89,7 @@ export const adminRebuildDashboardMetrics = mutation({
   args: {},
   handler: async (ctx): Promise<DashboardMetricsSnapshot> => {
     const admin = await requireAdmin(ctx);
-
-    const [
-      totalUsers,
-      totalMemories,
-      totalDays,
-      totalSummaries,
-      totalIntegrations,
-      totalPreferences,
-      totalAuditLogs,
-    ] = await Promise.all([
-      countRows(ctx.db.query("user")),
-      countRows(ctx.db.query("memories")),
-      countRows(ctx.db.query("days")),
-      countRows(ctx.db.query("daySummaries")),
-      countRows(ctx.db.query("integrations")),
-      countRows(ctx.db.query("userPreferences")),
-      countRows(ctx.db.query("auditLogs")),
-    ]);
-
-    await replaceDashboardMetricsSnapshot(ctx.db, {
-      totalUsers,
-      totalMemories,
-      totalDays,
-      totalSummaries,
-      totalIntegrations,
-      totalPreferences,
-      totalAuditLogs,
-    });
-
-    await logAdminAction(ctx, admin._id, "rebuild_dashboard_metrics", "global");
-
-    return await getDashboardMetricsSnapshot(ctx.db);
+    return await rebuildDashboardMetricsController(ctx, admin._id);
   },
 });
 
@@ -132,23 +107,7 @@ export const adminCreateUser = mutation({
   },
   handler: async (ctx, args) => {
     const admin = await requireAdmin(ctx);
-    const now = Date.now();
-    const id = await ctx.db.insert("user", {
-      clerkUserId: args.clerkUserId,
-      email: args.email,
-      firstName: args.firstName,
-      lastName: args.lastName,
-      isAdmin: args.isAdmin,
-      adminAuthVersion: 0,
-      adminRoleUpdatedAt: now,
-    });
-
-    await applyDashboardMetricsDelta(ctx.db, {
-      totalUsers: 1,
-    });
-
-    await logAdminAction(ctx, admin._id, "create_user", args.email);
-    return await ctx.db.get(id);
+    return await adminCreateUserController(ctx, args, admin._id);
   },
 });
 
@@ -156,7 +115,7 @@ export const listAllUsers = query({
   args: {},
   handler: async (ctx) => {
     await requireAdmin(ctx);
-    return await ctx.db.query("user").withIndex("by_email").take(200);
+    return await listAllUsersController(ctx);
   },
 });
 
@@ -166,20 +125,7 @@ export const listUsersByIds = query({
   },
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
-
-    const uniqueUserIds = Array.from(
-      new Set(args.userIds.map((userId) => String(userId))),
-    )
-      .slice(0, 200)
-      .map((userId) => userId as Id<"user">);
-
-    const users = await Promise.all(
-      uniqueUserIds.map(async (userId) => await ctx.db.get(userId)),
-    );
-
-    return users.filter(
-      (user): user is NonNullable<typeof user> => user !== null,
-    );
+    return await listUsersByIdsController(ctx, args.userIds);
   },
 });
 
@@ -189,10 +135,7 @@ export const listUsersPaginated = query({
   },
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
-    return await ctx.db
-      .query("user")
-      .withIndex("by_email")
-      .paginate(args.paginationOpts);
+    return await listUsersPaginatedController(ctx, args.paginationOpts);
   },
 });
 
@@ -200,9 +143,7 @@ export const adminGetUser = query({
   args: { userId: v.id("user") },
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
-    const user = await ctx.db.get(args.userId);
-    if (!user) throw new Error("User not found");
-    return user;
+    return await adminGetUserController(ctx, args.userId);
   },
 });
 
@@ -216,23 +157,7 @@ export const adminUpdateUser = mutation({
   },
   handler: async (ctx, args) => {
     const admin = await requireAdmin(ctx);
-    const user = await ctx.db.get(args.userId);
-    if (!user) throw new Error("User not found");
-
-    const updates: Record<string, unknown> = {};
-    if (args.email !== undefined) updates.email = args.email;
-    if (args.firstName !== undefined) updates.firstName = args.firstName;
-    if (args.lastName !== undefined) updates.lastName = args.lastName;
-    if (args.isAdmin !== undefined) {
-      const adminRolePatch = buildAdminRoleStatePatch(user, args.isAdmin);
-      updates.isAdmin = adminRolePatch.isAdmin;
-      updates.adminAuthVersion = adminRolePatch.adminAuthVersion;
-      updates.adminRoleUpdatedAt = adminRolePatch.adminRoleUpdatedAt;
-    }
-
-    await ctx.db.patch(args.userId, updates);
-    await logAdminAction(ctx, admin._id, "update_user", args.userId);
-    return await ctx.db.get(args.userId);
+    return await adminUpdateUserController(ctx, args, admin._id);
   },
 });
 
@@ -253,19 +178,14 @@ export const adminDeleteUser = mutation({
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("User not found");
 
-    const deletionJob = (await ctx.runMutation(
-      internal.users.enqueueUserDeletionJobInternal as any,
+    const deletionJob = await ctx.runMutation(
+      internal.users.enqueueUserDeletionJobInternal,
       {
         userId: args.userId,
         clerkUserId: user.clerkUserId,
         requestedByUserId: admin._id,
       },
-    )) as {
-      jobId: Id<"userDeletionJobs">;
-      status: "requested" | "processing" | "completed" | "failed";
-      stage: string;
-      created: boolean;
-    };
+    );
 
     await logAdminAction(ctx, admin._id, "delete_user_requested", user.email);
 

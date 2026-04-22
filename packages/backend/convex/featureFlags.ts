@@ -7,6 +7,7 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { requireAdmin, requireUser } from "./authz";
+import { logAdminAction } from "./admin/services/adminAuditService";
 
 export const FEATURE_FLAG_KEYS = [
   "aiSummaryEnabled",
@@ -512,6 +513,13 @@ export const upsertFeatureFlagForAdmin = mutation({
         createdAt: now,
       });
     }
+
+    await logAdminAction(
+      ctx,
+      admin._id,
+      existing ? "feature_flag.updated" : "feature_flag.created",
+      `featureFlag:${args.key}`,
+    );
 
     return {
       key: args.key,

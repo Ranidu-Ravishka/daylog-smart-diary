@@ -4,6 +4,7 @@ import {
   ingestObservabilityInfoEvent,
   observabilityInfoEventOptions,
 } from "./observabilityIngestion";
+import { oauthConnect } from "./oauthConnect";
 import "./env";
 
 const http = httpRouter();
@@ -24,6 +25,12 @@ http.route({
   path: "/observability/info-event",
   method: "POST",
   handler: ingestObservabilityInfoEvent,
+});
+
+http.route({
+  path: "/integrations/oauth/connect",
+  method: "POST",
+  handler: oauthConnect,
 });
 
 export default http;

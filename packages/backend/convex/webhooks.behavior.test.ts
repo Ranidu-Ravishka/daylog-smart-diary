@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Webhook } from "svix";
+import { getFunctionName } from "convex/server";
 
 let webhooksModule: typeof import("./webhooks");
 
@@ -14,6 +15,28 @@ beforeAll(async () => {
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+/**
+ * Build a `runMutation` mock that transparently allows rate limit calls and
+ * forwards any other mutation to the provided delegate. Keeps tests focused on
+ * webhook behavior rather than rate-limiter plumbing.
+ */
+function buildRunMutation(
+  delegate: (ref: unknown, args: Record<string, unknown>) => unknown,
+) {
+  return vi.fn(async (ref: unknown, args: Record<string, unknown>) => {
+    let name = "";
+    try {
+      name = getFunctionName(ref as never);
+    } catch {
+      name = "";
+    }
+    if (name.endsWith(":evaluateObservabilityIngestRateLimitInternal")) {
+      return { allowed: true };
+    }
+    return delegate(ref, args);
+  });
+}
 
 describe("webhooks behavior", () => {
   it("parses Clerk user payload selecting primary email", () => {
@@ -39,9 +62,10 @@ describe("webhooks behavior", () => {
   });
 
   it("rejects non-POST and invalid signatures", async () => {
-    const runMutation = vi.fn(
-      async (_ref: unknown, _args: Record<string, unknown>) => undefined,
+    const downstream = vi.fn(
+      async (_ref: unknown, _args: unknown) => undefined,
     );
+    const runMutation = buildRunMutation(downstream);
     const webhookHandler = (
       webhooksModule.clerkWebhook as unknown as {
         _handler: (ctx: unknown, request: Request) => Promise<Response>;
@@ -62,7 +86,7 @@ describe("webhooks behavior", () => {
       }),
     );
     expect(invalidSigResponse.status).toBe(401);
-    expect(runMutation).not.toHaveBeenCalled();
+    expect(downstream).not.toHaveBeenCalled();
   });
 
   it("handles created and deleted events when signature verification passes", async () => {
@@ -70,9 +94,10 @@ describe("webhooks behavior", () => {
       () => ({}) as never,
     );
 
-    const runMutation = vi.fn(
-      async (_ref: unknown, _args: Record<string, unknown>) => undefined,
+    const downstream = vi.fn(
+      async (_ref: unknown, _args: unknown) => undefined,
     );
+    const runMutation = buildRunMutation(downstream);
     const webhookHandler = (
       webhooksModule.clerkWebhook as unknown as {
         _handler: (ctx: unknown, request: Request) => Promise<Response>;
@@ -110,8 +135,8 @@ describe("webhooks behavior", () => {
     );
 
     expect(createdResponse.status).toBe(204);
-    expect(runMutation).toHaveBeenCalledTimes(1);
-    expect(runMutation.mock.calls[0]?.[1]).toMatchObject({
+    expect(downstream).toHaveBeenCalledTimes(1);
+    expect(downstream.mock.calls[0]?.[1]).toMatchObject({
       clerkUserId: "clerk_user_002",
       email: "created@example.com",
     });
@@ -131,8 +156,8 @@ describe("webhooks behavior", () => {
     );
 
     expect(deletedResponse.status).toBe(204);
-    expect(runMutation).toHaveBeenCalledTimes(2);
-    expect(runMutation.mock.calls[1]?.[1]).toMatchObject({
+    expect(downstream).toHaveBeenCalledTimes(2);
+    expect(downstream.mock.calls[1]?.[1]).toMatchObject({
       clerkUserId: "clerk_user_002",
     });
   });
@@ -142,11 +167,10 @@ describe("webhooks behavior", () => {
       () => ({}) as never,
     );
 
-    const runMutation = vi.fn(
-      async (_ref: unknown, _args: Record<string, unknown>) => {
-        throw new Error("sync failed");
-      },
-    );
+    const downstream = vi.fn(async (_ref: unknown, _args: unknown) => {
+      throw new Error("sync failed");
+    });
+    const runMutation = buildRunMutation(downstream);
     const webhookHandler = (
       webhooksModule.clerkWebhook as unknown as {
         _handler: (ctx: unknown, request: Request) => Promise<Response>;
@@ -181,11 +205,10 @@ describe("webhooks behavior", () => {
       () => ({}) as never,
     );
 
-    const runMutation = vi.fn(
-      async (_ref: unknown, _args: Record<string, unknown>) => {
-        throw new Error("deletion cleanup unavailable");
-      },
-    );
+    const downstream = vi.fn(async (_ref: unknown, _args: unknown) => {
+      throw new Error("deletion cleanup unavailable");
+    });
+    const runMutation = buildRunMutation(downstream);
     const webhookHandler = (
       webhooksModule.clerkWebhook as unknown as {
         _handler: (ctx: unknown, request: Request) => Promise<Response>;
@@ -212,8 +235,8 @@ describe("webhooks behavior", () => {
     );
 
     expect(response.status).toBe(500);
-    expect(runMutation).toHaveBeenCalledTimes(1);
-    expect(runMutation.mock.calls[0]?.[1]).toMatchObject({
+    expect(downstream).toHaveBeenCalledTimes(1);
+    expect(downstream.mock.calls[0]?.[1]).toMatchObject({
       clerkUserId: "clerk_user_004",
     });
   });

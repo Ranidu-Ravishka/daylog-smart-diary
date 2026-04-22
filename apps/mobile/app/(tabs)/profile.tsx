@@ -23,7 +23,13 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useUser, useAuth } from "@clerk/clerk-expo";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useAction, useMutation, useQuery, useConvexAuth } from "convex/react";
+import {
+  useAction,
+  useConvex,
+  useMutation,
+  useQuery,
+  useConvexAuth,
+} from "convex/react";
 import { usePreventRemove } from "@react-navigation/native";
 import { api } from "@repo/backend/convex";
 import {
@@ -297,7 +303,11 @@ const SettingsScreen = () => {
     api.integrations.getMyLocationTrackingRuntimeConfig,
     isAuthenticated ? {} : "skip",
   );
+  const convexClient = useConvex();
   const connectIntegration = useMutation(api.integrations.connectIntegration);
+  const beginOAuthMobileHandoff = useMutation(
+    api.integrations.beginOAuthMobileHandoff,
+  );
   const disconnectIntegration = useMutation(
     api.integrations.disconnectIntegration,
   );
@@ -1890,6 +1900,45 @@ const SettingsScreen = () => {
     [],
   );
 
+  // Poll `listMyIntegrations` after an OAuth callback so the UI only reports
+  // success when persistence on the *mobile user's* Convex row is confirmed.
+  // Guards against cross-user writes, reactivity gaps, and silent failures.
+  const verifyIntegrationPersisted = useCallback(
+    async (provider: string, timeoutMs = 6000): Promise<boolean> => {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        try {
+          const list = (await convexClient.query(
+            api.integrations.listMyIntegrations,
+            {},
+          )) as IntegrationDoc[] | null | undefined;
+          const found =
+            Array.isArray(list) &&
+            list.some(
+              (integration) =>
+                integration.provider === provider &&
+                integration.status === "connected",
+            );
+          if (found) {
+            return true;
+          }
+        } catch (error) {
+          logWarn("integration_connect.verify_poll_failed", {
+            area: "mobile",
+            provider,
+            errorMessage:
+              error instanceof Error ? error.message : String(error),
+          });
+        }
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 500);
+        });
+      }
+      return false;
+    },
+    [convexClient],
+  );
+
   const handleConnectIntegration = useCallback(
     async (provider: string) => {
       const providerStatus =
@@ -1941,7 +1990,41 @@ const SettingsScreen = () => {
           const normalizedWebAppUrl = webAppUrl.replace(/\/$/, "");
           const returnUrl = ExpoLinking.createURL("/oauth-complete");
           const returnTo = `/integrations/oauth/complete?mode=mobile&returnUrl=${encodeURIComponent(returnUrl)}`;
-          const startUrl = `${normalizedWebAppUrl}/api/integrations/oauth/${provider}/start?returnTo=${encodeURIComponent(returnTo)}`;
+
+          // Mint a one-time handoff code that binds *this* mobile user's
+          // Convex identity to the OAuth flow. The web callback forwards it
+          // to Convex via `X-Mobile-Handoff`, ensuring the integration is
+          // persisted on the mobile user's row even though the in-app
+          // browser has its own cookie jar (isolated from mobile Clerk).
+          let mobileHandoffCode: string;
+          try {
+            logInfo("integration_connect.oauth_handoff_requested", {
+              area: "mobile",
+              provider,
+            });
+            const handoff = await beginOAuthMobileHandoff({ provider });
+            mobileHandoffCode = handoff.handoffCode;
+          } catch (handoffError) {
+            const label =
+              INTEGRATION_PROVIDER_META[
+                provider as keyof typeof INTEGRATION_PROVIDER_META
+              ]?.label ?? provider;
+            setIntegrationFeedback({
+              type: "error",
+              message: `Could not prepare ${label} connection. Please check your connection and try again.`,
+            });
+            captureException(
+              "integration_connect.oauth_handoff_failed",
+              handoffError,
+              {
+                area: "mobile",
+                provider,
+              },
+            );
+            return;
+          }
+
+          const startUrl = `${normalizedWebAppUrl}/api/integrations/oauth/${provider}/start?returnTo=${encodeURIComponent(returnTo)}&mobileHandoff=${encodeURIComponent(mobileHandoffCode)}`;
           const authResult = await WebBrowser.openAuthSessionAsync(
             startUrl,
             returnUrl,
@@ -1968,38 +2051,121 @@ const SettingsScreen = () => {
             return;
           }
 
+          // Parse status from the browser redirect URL. Default to "error"
+          // (never "success") — a missing status field means the flow did NOT
+          // confirm completion and we should not fabricate a success toast.
+          let redirectStatus: "success" | "error" = "error";
+          let redirectMessage = "OAuth completion status was unclear.";
           try {
             const callbackUrl = new URL(authResult.url);
-            const integrationStatus =
-              callbackUrl.searchParams.get("integrationStatus") ?? "success";
-            const integrationMessage =
-              callbackUrl.searchParams.get("integrationMessage") ??
-              "OAuth completed.";
-
-            setIntegrationFeedback({
-              type: integrationStatus === "success" ? "success" : "error",
-              message: integrationMessage,
+            const rawStatus =
+              callbackUrl.searchParams.get("integrationStatus") ?? "";
+            redirectStatus = rawStatus === "success" ? "success" : "error";
+            const rawMessage =
+              callbackUrl.searchParams.get("integrationMessage");
+            if (rawMessage && rawMessage.trim().length > 0) {
+              redirectMessage = rawMessage;
+            } else if (redirectStatus === "success") {
+              redirectMessage = `${label} connected.`;
+            } else {
+              redirectMessage = `${label} connection could not be verified. Please try again.`;
+            }
+          } catch (parseError) {
+            logWarn("integration_connect.callback_url_parse_failed", {
+              area: "mobile",
+              provider,
+              errorMessage:
+                parseError instanceof Error
+                  ? parseError.message
+                  : String(parseError),
             });
-          } catch {
+            setIntegrationFeedback({
+              type: "error",
+              message: `${label} connection could not be completed. Please try again.`,
+            });
+            return;
+          }
+
+          if (redirectStatus === "error") {
+            setIntegrationFeedback({
+              type: "error",
+              message: redirectMessage,
+            });
+            logWarn("integration_connect.oauth_callback_reported_error", {
+              area: "mobile",
+              provider,
+              redirectMessage,
+            });
+            return;
+          }
+
+          // Web callback reported success — but we only trust that once the
+          // integration row is visible to *this* mobile user. This catches
+          // cross-user persistence (web Clerk session != mobile Clerk session),
+          // silent backend failures, and reactivity gaps.
+          logInfo("integration_connect.oauth_verify_started", {
+            area: "mobile",
+            provider,
+          });
+          const verified = await verifyIntegrationPersisted(provider);
+          if (verified) {
             setIntegrationFeedback({
               type: "success",
-              message: `${label} OAuth flow completed.`,
+              message: redirectMessage,
+            });
+            logInfo("integration_connect.oauth_verify_succeeded", {
+              area: "mobile",
+              provider,
+            });
+          } else {
+            setIntegrationFeedback({
+              type: "error",
+              message: `${label} connection reported success but did not appear in your account. This can happen if you signed in to the web browser with a different account. Please try again from this device.`,
+            });
+            logWarn("integration_connect.oauth_verify_failed", {
+              area: "mobile",
+              provider,
+              reason: "not_found_in_list_after_timeout",
             });
           }
 
           return;
         }
 
+        logInfo("integration_connect.manual_mutation_started", {
+          area: "mobile",
+          provider,
+        });
         await connectIntegration({ provider, scopes: [] });
         const label =
           INTEGRATION_PROVIDER_META[
             provider as keyof typeof INTEGRATION_PROVIDER_META
           ]?.label ?? provider;
 
-        setIntegrationFeedback({
-          type: "success",
-          message: `${label} connected successfully.`,
-        });
+        // Mutation returned — verify persistence before showing success. This
+        // closes the small reactivity window where the toast could appear
+        // before `listMyIntegrations` surfaces the new row.
+        const verifiedManual = await verifyIntegrationPersisted(provider, 4000);
+        if (verifiedManual) {
+          setIntegrationFeedback({
+            type: "success",
+            message: `${label} connected successfully.`,
+          });
+          logInfo("integration_connect.manual_verify_succeeded", {
+            area: "mobile",
+            provider,
+          });
+        } else {
+          setIntegrationFeedback({
+            type: "error",
+            message: `${label} connection was accepted but did not appear in your account. Please try again.`,
+          });
+          logWarn("integration_connect.manual_verify_failed", {
+            area: "mobile",
+            provider,
+            reason: "not_found_in_list_after_timeout",
+          });
+        }
       } catch (error) {
         setIntegrationFeedback({
           type: "error",
@@ -2008,11 +2174,21 @@ const SettingsScreen = () => {
               ? error.message
               : `Failed to connect ${provider}`,
         });
+        captureException("integration_connect.failed", error, {
+          area: "mobile",
+          provider,
+        });
       } finally {
         setProviderAction(provider, undefined);
       }
     },
-    [connectIntegration, setProviderAction, supportedProviders],
+    [
+      beginOAuthMobileHandoff,
+      connectIntegration,
+      setProviderAction,
+      supportedProviders,
+      verifyIntegrationPersisted,
+    ],
   );
 
   const handleDisconnectIntegration = useCallback(

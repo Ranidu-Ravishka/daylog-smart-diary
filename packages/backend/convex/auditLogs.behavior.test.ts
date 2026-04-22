@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Id } from "./_generated/dataModel";
-import { listAuditLogsPaginatedImpl } from "./admin";
+import { listAuditLogsPaginatedImpl } from "./admin/services/auditLogsService";
 import {
   createAuthCtx,
   createInMemoryDb,
@@ -20,6 +20,9 @@ type AuditLogShape = {
   action: string;
   actorUserId: string;
 };
+type AuditLogsPaginatedPage = Awaited<
+  ReturnType<typeof listAuditLogsPaginatedImpl>
+>;
 
 function seedAuditDb(): {
   db: InMemoryDb;
@@ -103,13 +106,16 @@ async function collectAllPages(
   let cursor: string | null = null;
 
   for (let guard = 0; guard < 50; guard += 1) {
-    const page = await listAuditLogsPaginatedImpl(ctx as never, {
-      paginationOpts: {
-        numItems: 5,
-        cursor,
+    const page: AuditLogsPaginatedPage = await listAuditLogsPaginatedImpl(
+      ctx as never,
+      {
+        paginationOpts: {
+          numItems: 5,
+          cursor,
+        },
+        ...filters,
       },
-      ...filters,
-    });
+    );
 
     all.push(...(page.page as unknown as AuditLogShape[]));
 
@@ -133,13 +139,16 @@ async function collectAllPagesByActorAlias(
   let cursor: string | null = null;
 
   for (let guard = 0; guard < 50; guard += 1) {
-    const page = await listAuditLogsPaginatedImpl(ctx as never, {
-      paginationOpts: {
-        numItems: 5,
-        cursor,
+    const page: AuditLogsPaginatedPage = await listAuditLogsPaginatedImpl(
+      ctx as never,
+      {
+        paginationOpts: {
+          numItems: 5,
+          cursor,
+        },
+        ...filters,
       },
-      ...filters,
-    });
+    );
 
     all.push(...(page.page as unknown as AuditLogShape[]));
 
