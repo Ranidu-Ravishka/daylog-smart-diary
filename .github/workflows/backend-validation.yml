@@ -88,6 +88,22 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Validate production environment gate (fail-closed)
+        env:
+          CLERK_JWT_ISSUER_DOMAIN: ${{ secrets.CLERK_JWT_ISSUER_DOMAIN }}
+          CLERK_WEBHOOK_SECRET: ${{ secrets.CLERK_WEBHOOK_SECRET }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EXPORT_SIGNING_SECRET: ${{ secrets.EXPORT_SIGNING_SECRET }}
+          INTEGRATION_SECRETS_KMS_KEY_ID: ${{ secrets.INTEGRATION_SECRETS_KMS_KEY_ID }}
+          KMS_KEY_ID: ${{ secrets.KMS_KEY_ID }}
+          KEY_RING_URI: ${{ secrets.KEY_RING_URI }}
+          INTEGRATION_SECRETS_KEYRING_JSON: ${{ secrets.INTEGRATION_SECRETS_KEYRING_JSON }}
+          INTEGRATION_SECRETS_ACTIVE_KEY_ID: ${{ secrets.INTEGRATION_SECRETS_ACTIVE_KEY_ID }}
+        run: |
+          MODE=local
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then MODE=ci; fi
+          node scripts/validate-prod-env.mjs --mode=${MODE}
+
       - name: Filter changed paths
         uses: dorny/paths-filter@v4
         id: filter

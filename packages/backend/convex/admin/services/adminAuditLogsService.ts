@@ -22,11 +22,21 @@ export async function writeAuditLogImpl(
   args: { action: string; target?: string },
 ) {
   const admin = await requireAdmin(ctx);
+  const now = Date.now();
   const id = await ctx.db.insert("auditLogs", {
     actorUserId: admin._id,
     action: args.action,
     target: args.target,
-    at: Date.now(),
+    at: now,
+  });
+
+  await ctx.db.insert("platformAuditEvents", {
+    category: "integration_health",
+    action: `admin:${args.action}`,
+    actorType: "admin",
+    actorUserId: admin._id,
+    target: args.target,
+    at: now,
   });
 
   await applyDashboardMetricsDelta(ctx.db, {
@@ -41,13 +51,7 @@ export async function adminDeleteAuditLogImpl(
   args: { auditLogId: Id<"auditLogs"> },
 ) {
   await requireAdmin(ctx);
-  const log = await ctx.db.get(args.auditLogId);
-  if (!log) throw new Error("Audit log not found");
-  await ctx.db.delete(args.auditLogId);
-
-  await applyDashboardMetricsDelta(ctx.db, {
-    totalAuditLogs: -1,
-  });
-
-  return { success: true };
+  void args.auditLogId;
+  // Fail-closed: audit logs are immutable in production-grade mode.
+  throw new Error("Audit logs are immutable and cannot be deleted");
 }

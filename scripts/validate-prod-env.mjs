@@ -95,6 +95,24 @@ function validateIntegrationKeyring(rawJsonString) {
   return { valid: true, keys: Object.keys(parsed) };
 }
 
+function validateKmsReference(value, name) {
+  if (!value || !value.trim()) return `${name} must be non-empty`;
+  const normalized = value.trim();
+  if (isPlaceholderValue(normalized)) {
+    return `${name} appears to be a placeholder`;
+  }
+  // Allow AWS ARN, GCP URI-style, and provider ids.
+  if (
+    normalized.startsWith("arn:") ||
+    normalized.startsWith("kms://") ||
+    normalized.startsWith("projects/") ||
+    /^[a-z0-9._:/-]{8,}$/i.test(normalized)
+  ) {
+    return null;
+  }
+  return `${name} has invalid format`;
+}
+
 function validateConvexServerEnv(env = process.env, options = {}) {
   const errors = [];
   const warnings = [];
@@ -194,13 +212,31 @@ async function runCli() {
     failures.push(`ConvexEnv: ${err.message}`);
   }
 
-  // 2) Validate integration keyring if provided or required in strict mode
+  // 2) Validate integration key config (KMS-first, legacy keyring fallback)
   const keyringRaw = process.env.INTEGRATION_SECRETS_KEYRING_JSON;
   const activeKeyId = process.env.INTEGRATION_SECRETS_ACTIVE_KEY_ID;
+  const kmsKeyId =
+    process.env.INTEGRATION_SECRETS_KMS_KEY_ID || process.env.KMS_KEY_ID;
+  const keyRingUri = process.env.KEY_RING_URI;
+
+  const hasKmsRef = Boolean(kmsKeyId || keyRingUri);
+  const hasLegacyKeyring = Boolean(keyringRaw || activeKeyId);
 
   if (strict) {
-    if (!keyringRaw) failures.push("INTEGRATION_SECRETS_KEYRING_JSON is required in CI/production mode");
-    if (!activeKeyId) failures.push("INTEGRATION_SECRETS_ACTIVE_KEY_ID is required in CI/production mode");
+    if (!hasKmsRef && !hasLegacyKeyring) {
+      failures.push(
+        "Either KMS reference (INTEGRATION_SECRETS_KMS_KEY_ID/KMS_KEY_ID/KEY_RING_URI) or legacy keyring vars must be configured",
+      );
+    }
+  }
+
+  if (kmsKeyId) {
+    const reason = validateKmsReference(kmsKeyId, "KMS_KEY_ID");
+    if (reason) failures.push(reason);
+  }
+  if (keyRingUri) {
+    const reason = validateKmsReference(keyRingUri, "KEY_RING_URI");
+    if (reason) failures.push(reason);
   }
 
   if (keyringRaw) {

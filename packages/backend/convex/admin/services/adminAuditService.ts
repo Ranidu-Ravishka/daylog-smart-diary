@@ -16,11 +16,22 @@ export async function logAdminAction(
   action: string,
   target?: string,
 ) {
+  const now = Date.now();
   await ctx.db.insert("auditLogs", {
     actorUserId: adminId,
     action,
     target,
-    at: Date.now(),
+    at: now,
+  });
+
+  // Immutable parallel audit trail for security-sensitive admin operations.
+  await ctx.db.insert("platformAuditEvents", {
+    category: "integration_health",
+    action: `admin:${action}`,
+    actorType: "admin",
+    actorUserId: adminId,
+    target,
+    at: now,
   });
 
   await applyDashboardMetricsDelta(ctx.db, {

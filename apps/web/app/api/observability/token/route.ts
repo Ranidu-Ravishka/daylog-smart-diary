@@ -14,6 +14,9 @@ const INGEST_JWT_TYPE = "JWT";
 
 const JWT_SECRET_MIN_LENGTH = 32;
 const TOKEN_TTL_SECONDS = 5 * 60;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX_REQUESTS_PER_IP = 30;
+const RATE_LIMIT_MAX_REQUESTS_PER_USER = 30;
 
 const LOCAL_DEVELOPMENT_ORIGINS = [
   "http://localhost:3000",
@@ -32,6 +35,7 @@ type RouteConfig = {
 
 let cachedConfigKey: string | null = null;
 let cachedConfig: RouteConfig | null = null;
+const rateLimitState = new Map<string, number[]>();
 
 function isProductionEnvironment(): boolean {
   const normalized = process.env.NODE_ENV?.trim().toLowerCase();
@@ -196,6 +200,46 @@ function jsonError(message: string, status: number): NextResponse {
   );
 }
 
+function parseIp(request: NextRequest): string {
+  const forwardedFor = request.headers.get("x-forwarded-for");
+  if (forwardedFor) {
+    const first = forwardedFor
+      .split(",")
+      .map((part) => part.trim())
+      .find((part) => part.length > 0);
+    if (first) return first.toLowerCase();
+  }
+  return (
+    request.headers.get("x-real-ip") ??
+    request.headers.get("cf-connecting-ip") ??
+    "unknown"
+  ).toLowerCase();
+}
+
+function pruneWindow(now: number, points: number[]): number[] {
+  return points.filter((ts) => now - ts <= RATE_LIMIT_WINDOW_MS);
+}
+
+function evaluateSlidingWindowRateLimit(
+  key: string,
+  limit: number,
+  now = Date.now(),
+): { allowed: boolean; retryAfterSeconds: number } {
+  const existing = pruneWindow(now, rateLimitState.get(key) ?? []);
+  if (existing.length >= limit) {
+    const oldest = existing[0] ?? now;
+    const retryAfterSeconds = Math.max(
+      1,
+      Math.ceil((RATE_LIMIT_WINDOW_MS - (now - oldest)) / 1000),
+    );
+    rateLimitState.set(key, existing);
+    return { allowed: false, retryAfterSeconds };
+  }
+  existing.push(now);
+  rateLimitState.set(key, existing);
+  return { allowed: true, retryAfterSeconds: 0 };
+}
+
 function validateRequestOrigin(
   request: NextRequest,
   allowedOrigins: Set<string>,
@@ -296,6 +340,32 @@ export async function POST(request: NextRequest) {
   const { userId, sessionId } = await auth();
   if (!userId || !sessionId) {
     return jsonError("Unauthorized", 401);
+  }
+
+  const now = Date.now();
+  const ipDecision = evaluateSlidingWindowRateLimit(
+    `obs-token:ip:${parseIp(request)}`,
+    RATE_LIMIT_MAX_REQUESTS_PER_IP,
+    now,
+  );
+  const userDecision = evaluateSlidingWindowRateLimit(
+    `obs-token:user:${userId}`,
+    RATE_LIMIT_MAX_REQUESTS_PER_USER,
+    now,
+  );
+  if (!ipDecision.allowed || !userDecision.allowed) {
+    return NextResponse.json(
+      { error: "Too many requests" },
+      {
+        status: 429,
+        headers: {
+          "Cache-Control": "no-store, no-cache, max-age=0",
+          "Retry-After": String(
+            Math.max(ipDecision.retryAfterSeconds, userDecision.retryAfterSeconds),
+          ),
+        },
+      },
+    );
   }
 
   const config = getRouteConfig();

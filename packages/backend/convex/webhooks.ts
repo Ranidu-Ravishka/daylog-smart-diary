@@ -3,6 +3,11 @@ import { internal } from "./_generated/api";
 import { Webhook } from "svix";
 import { convexServerEnv } from "./env";
 import { captureException, logInfo, logWarn } from "./observability";
+import { resolveObservabilityIngestIpKey } from "./observabilityIngestRateLimiter";
+
+const WEBHOOK_RATE_LIMIT_WINDOW_MS = 60_000;
+const WEBHOOK_RATE_LIMIT_MAX_PER_IP = 120;
+const webhookRateLimit = new Map<string, number[]>();
 
 type ClerkWebhookEmailAddress = {
   id?: string;
@@ -86,6 +91,18 @@ export function parseClerkWebhookUser(
 }
 
 export const clerkWebhook = httpAction(async (ctx, request) => {
+  const ipKey = resolveObservabilityIngestIpKey(request);
+  const now = Date.now();
+  const scopedKey = `clerk-webhook:${ipKey}`;
+  const points = (webhookRateLimit.get(scopedKey) ?? []).filter(
+    (ts) => now - ts <= WEBHOOK_RATE_LIMIT_WINDOW_MS,
+  );
+  if (points.length >= WEBHOOK_RATE_LIMIT_MAX_PER_IP) {
+    return new Response("Too many requests", { status: 429 });
+  }
+  points.push(now);
+  webhookRateLimit.set(scopedKey, points);
+
   if (request.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
   }

@@ -12,6 +12,7 @@ const ACTIVE_KEY_ID_ENV_NAME = "INTEGRATION_SECRETS_ACTIVE_KEY_ID";
 // New KMS-based envs
 const KMS_KEY_ID_ENV = "INTEGRATION_SECRETS_KMS_KEY_ID";
 const KMS_KEY_ID_ENV_FALLBACK = "KMS_KEY_ID";
+const KEY_RING_URI_ENV = "KEY_RING_URI";
 
 // Local-dev fallback key file path. Create via scripts/init-local-integration-kms.mjs
 const LOCAL_KEK_PATH_ENV = "INTEGRATION_SECRETS_LOCAL_KEK_PATH";
@@ -45,6 +46,11 @@ export type EncryptedSecretEnvelope = {
   encryptedDek: string;
   dekIv: string;
   createdAt: number;
+};
+
+export type ActiveKeyDescriptor = {
+  keyId: string;
+  keyVersion: number;
 };
 
 export class IntegrationSecretCryptoError extends Error {
@@ -370,13 +376,27 @@ export function getActiveIntegrationSecretKeyId(): string {
 
   const kmsId =
     process.env[KMS_KEY_ID_ENV]?.trim() ||
-    process.env[KMS_KEY_ID_ENV_FALLBACK]?.trim();
+    process.env[KMS_KEY_ID_ENV_FALLBACK]?.trim() ||
+    process.env[KEY_RING_URI_ENV]?.trim();
   if (kmsId) return kmsId;
 
   throw new IntegrationSecretCryptoError(
     "CONFIG_ERROR",
     `Missing active key configuration. Set ${ACTIVE_KEY_ID_ENV_NAME} or ${KMS_KEY_ID_ENV}.`,
   );
+}
+
+export function getActiveKey(): ActiveKeyDescriptor {
+  const keyId = getActiveIntegrationSecretKeyId();
+  const keyVersionRaw = process.env.INTEGRATION_SECRETS_KEY_VERSION?.trim();
+  const keyVersionParsed = keyVersionRaw ? Number.parseInt(keyVersionRaw, 10) : NaN;
+  return {
+    keyId,
+    keyVersion:
+      Number.isFinite(keyVersionParsed) && keyVersionParsed > 0
+        ? keyVersionParsed
+        : ENVELOPE_VERSION,
+  };
 }
 
 export function constantTimeStringEquals(left: string, right: string): boolean {
@@ -449,7 +469,7 @@ export async function encryptIntegrationSecret(
           algorithm: VALUE_ALGORITHM,
           wrappedDekAlgorithm: WRAPPED_DEK_ALGORITHM,
           keyId,
-          keyVersion: ENVELOPE_VERSION,
+          keyVersion: getActiveKey().keyVersion,
           encryptedValue: encodeBase64Url(encryptedValue),
           valueIv: encodeBase64Url(valueIv),
           encryptedDek: encodeBase64Url(encryptedDek),
@@ -501,7 +521,7 @@ export async function encryptIntegrationSecret(
       algorithm: VALUE_ALGORITHM,
       wrappedDekAlgorithm: WRAPPED_DEK_ALGORITHM,
       keyId,
-      keyVersion: ENVELOPE_VERSION,
+      keyVersion: getActiveKey().keyVersion,
       encryptedValue: encodeBase64Url(encryptedValue),
       valueIv: encodeBase64Url(valueIv),
       encryptedDek: encodeBase64Url(encryptedDek),
@@ -824,6 +844,19 @@ export async function encryptSecret(
   };
 }
 
+export async function encryptWithDEK(
+  plaintext: string,
+  context: IntegrationSecretContext,
+  keyId?: string,
+  now = Date.now(),
+): Promise<EncryptedSecretEnvelope> {
+  if (keyId && keyId.trim().length > 0) {
+    return await encryptIntegrationSecretWithKeyId(plaintext, context, keyId, now);
+  }
+
+  return await encryptIntegrationSecret(plaintext, context, now);
+}
+
 export async function decryptSecret(
   encryptedValueB64: string,
   valueIvB64: string,
@@ -838,6 +871,13 @@ export async function decryptSecret(
     buildAad(context, "value"),
   );
   return fromUtf8Bytes(plaintextBytes);
+}
+
+export async function decryptWithDEK(
+  envelope: EncryptedSecretEnvelope,
+  context: IntegrationSecretContext,
+): Promise<string> {
+  return await decryptIntegrationSecret(envelope, context);
 }
 
 export async function encryptIntegrationSecretWithKeyId(
@@ -887,7 +927,7 @@ export async function encryptIntegrationSecretWithKeyId(
       algorithm: VALUE_ALGORITHM,
       wrappedDekAlgorithm: WRAPPED_DEK_ALGORITHM,
       keyId,
-      keyVersion: ENVELOPE_VERSION,
+      keyVersion: getActiveKey().keyVersion,
       encryptedValue: encodeBase64Url(encryptedValue),
       valueIv: encodeBase64Url(valueIv),
       encryptedDek: encodeBase64Url(wrappedDek),

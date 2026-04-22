@@ -14,6 +14,8 @@ const backendSentryTracesSampleRate = toSampleRate(
   BACKEND_INFO_EVENT_SAMPLE_RATE_DEFAULT,
 );
 const BACKEND_SENTRY_MODULE = ["@sentry", "node"].join("/");
+const REDACTED = "<redacted>";
+const SECRET_KEY_PATTERN = /(token|secret|password|authorization|api[-_]?key|cookie)/i;
 
 type SerializableError = {
   name: string;
@@ -120,6 +122,47 @@ function resolveUserId(context: StructuredContext): string | null {
     toStringOrNull(context.actorUserId) ??
     null
   );
+}
+
+function toSafeCorrelationId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, 120);
+}
+
+function ensureCorrelationContext(context: StructuredContext): StructuredContext {
+  const requestId =
+    toSafeCorrelationId(context.requestId) ??
+    toSafeCorrelationId(context.reqId) ??
+    crypto.randomUUID();
+  const traceId =
+    toSafeCorrelationId(context.traceId) ??
+    toSafeCorrelationId(context.sentryTrace) ??
+    requestId;
+  const userId = resolveUserId(context);
+  return {
+    ...context,
+    requestId,
+    traceId,
+    userId: userId ?? context.userId ?? null,
+  };
+}
+
+function sanitizeContext(context: StructuredContext): StructuredContext {
+  const next: StructuredContext = {};
+  for (const [key, value] of Object.entries(context)) {
+    if (SECRET_KEY_PATTERN.test(key)) {
+      next[key] = REDACTED;
+      continue;
+    }
+    if (typeof value === "string" && value.length > 1_200) {
+      next[key] = `${value.slice(0, 1_200)}…`;
+      continue;
+    }
+    next[key] = value;
+  }
+  return next;
 }
 
 function resolveStatus(level: LogLevel, context: StructuredContext): string {
@@ -332,11 +375,13 @@ function writeStructured(
   context: StructuredContext = {},
   error?: unknown,
 ) {
+  const correlatedContext = ensureCorrelationContext(context);
+  const safeContext = sanitizeContext(correlatedContext);
   const serializedError =
     typeof error === "undefined" ? undefined : toSerializableError(error);
-  const userId = resolveUserId(context);
-  const status = resolveStatus(level, context);
-  const errorMessage = resolveErrorMessage(serializedError, context);
+  const userId = resolveUserId(safeContext);
+  const status = resolveStatus(level, safeContext);
+  const errorMessage = resolveErrorMessage(serializedError, safeContext);
 
   const payload: StructuredLogEnvelope = {
     schemaVersion: 1,
@@ -348,7 +393,7 @@ function writeStructured(
     userId,
     status,
     errorMessage,
-    context,
+    context: safeContext,
     ...(serializedError ? { error: serializedError } : {}),
   };
 
@@ -362,7 +407,7 @@ function writeStructured(
     console.info(line);
   }
 
-  emitSentryEvent(level, event, error, context, userId, status, errorMessage);
+  emitSentryEvent(level, event, error, safeContext, userId, status, errorMessage);
 }
 
 export function logInfo(event: string, context: StructuredContext = {}) {

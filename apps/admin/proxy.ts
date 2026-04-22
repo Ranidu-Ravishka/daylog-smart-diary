@@ -4,6 +4,10 @@ import { ConvexHttpClient } from "convex/browser";
 import type { NextFetchEvent, NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { adminServerEnv } from "./src/server/env";
+import {
+  evaluateAdminRateLimit,
+  resolveRateLimitIdentity,
+} from "./src/server/rateLimit";
 
 const ADMIN_CACHE_COOKIE = "daylog_admin_cache";
 const ADMIN_CACHE_TTL_SECONDS = 60;
@@ -166,11 +170,23 @@ async function fetchAdminCacheState(
 }
 
 const handler = clerkMiddleware(async (auth, req) => {
+  const { userId } = await auth();
+  const rateLimitIdentity = resolveRateLimitIdentity(req, userId ?? undefined);
+  const rateLimitDecision = evaluateAdminRateLimit(rateLimitIdentity);
+  if (!rateLimitDecision.allowed) {
+    return new NextResponse("Too many requests", {
+      status: 429,
+      headers: {
+        "Retry-After": String(rateLimitDecision.retryAfterSeconds),
+      },
+    });
+  }
+
   if (isPublicRoute(req)) {
     return NextResponse.next();
   }
 
-  const { userId, getToken } = await auth();
+  const { getToken } = await auth();
 
   if (!userId) {
     return NextResponse.redirect(new URL("/sign-in", req.url));
