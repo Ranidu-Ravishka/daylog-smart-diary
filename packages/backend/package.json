@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@repo/user-settings": "workspace:*",
+    "@aws-sdk/client-kms": "^3.500.0",
     "@sentry/node": "^10.48.0",
     "convex": "^1.29.3",
     "svix": "^1.58.0"

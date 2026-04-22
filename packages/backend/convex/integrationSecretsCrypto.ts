@@ -5,8 +5,16 @@ const AES_GCM_NAME = "AES-GCM";
 const AES_KEY_BYTES = 32;
 const AES_GCM_IV_BYTES = 12;
 
+// Legacy keyring env (deprecated)
 const KEYRING_ENV_NAME = "INTEGRATION_SECRETS_KEYRING_JSON";
 const ACTIVE_KEY_ID_ENV_NAME = "INTEGRATION_SECRETS_ACTIVE_KEY_ID";
+
+// New KMS-based envs
+const KMS_KEY_ID_ENV = "INTEGRATION_SECRETS_KMS_KEY_ID";
+const KMS_KEY_ID_ENV_FALLBACK = "KMS_KEY_ID";
+
+// Local-dev fallback key file path. Create via scripts/init-local-integration-kms.mjs
+const LOCAL_KEK_PATH_ENV = "INTEGRATION_SECRETS_LOCAL_KEK_PATH";
 
 type EnvelopePhase = "value" | "dek";
 
@@ -263,6 +271,24 @@ function fromUtf8Bytes(value: Uint8Array): string {
   return new TextDecoder().decode(value);
 }
 
+function getRecordProperty(
+  value: unknown,
+  key: string,
+): Uint8Array | ArrayBuffer | null {
+  if (!value || typeof value !== "object" || !(key in value)) {
+    return null;
+  }
+  const property = (value as Record<string, unknown>)[key];
+  if (!property) return null;
+  if (property instanceof Uint8Array || property instanceof ArrayBuffer) {
+    return property;
+  }
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer(property)) {
+    return new Uint8Array(property);
+  }
+  return null;
+}
+
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
@@ -332,7 +358,25 @@ async function decryptAesGcm(
 }
 
 export function getActiveIntegrationSecretKeyId(): string {
-  return getParsedKeyring().activeKeyId;
+  // Prefer legacy keyring if present (keeps tests and older deployments working).
+  const legacyActive = process.env[ACTIVE_KEY_ID_ENV_NAME]?.trim();
+  if (legacyActive) {
+    try {
+      return getParsedKeyring().activeKeyId;
+    } catch {
+      // fallthrough to KMS options
+    }
+  }
+
+  const kmsId =
+    process.env[KMS_KEY_ID_ENV]?.trim() ||
+    process.env[KMS_KEY_ID_ENV_FALLBACK]?.trim();
+  if (kmsId) return kmsId;
+
+  throw new IntegrationSecretCryptoError(
+    "CONFIG_ERROR",
+    `Missing active key configuration. Set ${ACTIVE_KEY_ID_ENV_NAME} or ${KMS_KEY_ID_ENV}.`,
+  );
 }
 
 export function constantTimeStringEquals(left: string, right: string): boolean {
@@ -350,7 +394,75 @@ export async function encryptIntegrationSecret(
       "Secret plaintext is empty.",
     );
   }
+  // If a KMS key id is configured, prefer KMS-based envelope encryption.
+  const kmsConfiguredKeyId =
+    process.env[KMS_KEY_ID_ENV]?.trim() ||
+    process.env[KMS_KEY_ID_ENV_FALLBACK]?.trim();
+  if (kmsConfiguredKeyId) {
+    return encryptIntegrationSecretWithKeyId(
+      plaintext,
+      context,
+      kmsConfiguredKeyId,
+      now,
+    );
+  }
 
+  // Local-dev secure fallback: use a KEK stored in a local file (no plaintext key material in env)
+  const localKekPath = process.env[LOCAL_KEK_PATH_ENV]?.trim();
+  if (localKekPath) {
+    try {
+      const fs = await import("node:fs");
+      if (fs.existsSync(localKekPath)) {
+        const raw = fs.readFileSync(localKekPath, { encoding: "utf8" }).trim();
+        const kekBytes = decodeBase64Flexible(raw);
+        if (kekBytes.byteLength !== AES_KEY_BYTES) {
+          throw new IntegrationSecretCryptoError(
+            "CONFIG_ERROR",
+            "Local KEK file has invalid length.",
+          );
+        }
+
+        const keyId = `local:${localKekPath}`;
+
+        const dekBytes = randomBytes(AES_KEY_BYTES);
+        const valueIv = randomBytes(AES_GCM_IV_BYTES);
+        const dekIv = randomBytes(AES_GCM_IV_BYTES);
+
+        const dek = await importAesGcmKey(dekBytes, ["encrypt", "decrypt"]);
+        const kek = await importAesGcmKey(kekBytes, ["encrypt", "decrypt"]);
+
+        const encryptedValue = await encryptAesGcm(
+          dek,
+          toUtf8Bytes(plaintext),
+          valueIv,
+          buildAad(context, "value"),
+        );
+        const encryptedDek = await encryptAesGcm(
+          kek,
+          dekBytes,
+          dekIv,
+          buildAad(context, "dek", keyId),
+        );
+
+        return {
+          version: ENVELOPE_VERSION,
+          algorithm: VALUE_ALGORITHM,
+          wrappedDekAlgorithm: WRAPPED_DEK_ALGORITHM,
+          keyId,
+          keyVersion: ENVELOPE_VERSION,
+          encryptedValue: encodeBase64Url(encryptedValue),
+          valueIv: encodeBase64Url(valueIv),
+          encryptedDek: encodeBase64Url(encryptedDek),
+          dekIv: encodeBase64Url(dekIv),
+          createdAt: now,
+        };
+      }
+    } catch {
+      // fallthrough to legacy keyring
+    }
+  }
+
+  // Fallback to legacy keyring behavior for backwards compatibility.
   const parsedKeyring = getParsedKeyring();
   const keyId = parsedKeyring.activeKeyId;
   const kekBytes = parsedKeyring.keyring.get(keyId);
@@ -425,31 +537,88 @@ export async function decryptIntegrationSecret(
     );
   }
 
-  const parsedKeyring = getParsedKeyring();
-  const kekBytes = parsedKeyring.keyring.get(envelope.keyId);
-  if (!kekBytes) {
+  // Try KMS-based DEK unwrap first (if available), then fall back to legacy keyring
+  let dekBytes: Uint8Array | null = null;
+
+  // Attempt KMS decrypt path
+  try {
+    dekBytes = await tryKmsDecrypt(
+      decodeBase64Flexible(envelope.encryptedDek),
+      envelope.keyId,
+      buildAad(context, "dek", envelope.keyId),
+    );
+  } catch {
+    // continue to legacy fallback
+  }
+
+  // Legacy keyring fallback
+  if (!dekBytes) {
+    // Try local KEK file fallback
+    const localKekPath = process.env[LOCAL_KEK_PATH_ENV]?.trim();
+    if (localKekPath) {
+      try {
+        const fs = await import("node:fs");
+        if (fs.existsSync(localKekPath)) {
+          const raw = fs
+            .readFileSync(localKekPath, { encoding: "utf8" })
+            .trim();
+          const kekBytes = decodeBase64Flexible(raw);
+          if (kekBytes.byteLength !== AES_KEY_BYTES) {
+            throw new IntegrationSecretCryptoError(
+              "CONFIG_ERROR",
+              "Local KEK file has invalid length.",
+            );
+          }
+
+          const kek = await importAesGcmKey(kekBytes, ["encrypt", "decrypt"]);
+          dekBytes = await decryptAesGcm(
+            kek,
+            decodeBase64Flexible(envelope.encryptedDek),
+            decodeBase64Flexible(envelope.dekIv),
+            buildAad(context, "dek", envelope.keyId),
+          );
+        }
+      } catch {
+        // ignore local fallback failure and continue
+      }
+    }
+
+    if (!dekBytes) {
+      try {
+        const parsedKeyring = getParsedKeyring();
+        const kekBytes = parsedKeyring.keyring.get(envelope.keyId);
+        if (!kekBytes) {
+          throw new IntegrationSecretCryptoError(
+            "MISSING_KEY_ID",
+            "No decryption key found for integration secret key_id.",
+          );
+        }
+
+        const kek = await importAesGcmKey(kekBytes, ["encrypt", "decrypt"]);
+        dekBytes = await decryptAesGcm(
+          kek,
+          decodeBase64Flexible(envelope.encryptedDek),
+          decodeBase64Flexible(envelope.dekIv),
+          buildAad(context, "dek", envelope.keyId),
+        );
+      } catch (error) {
+        if (error instanceof IntegrationSecretCryptoError) throw error;
+        throw new IntegrationSecretCryptoError(
+          "DECRYPTION_FAILED",
+          "Failed to unwrap data encryption key.",
+        );
+      }
+    }
+  }
+
+  if (!dekBytes || dekBytes.byteLength !== AES_KEY_BYTES) {
     throw new IntegrationSecretCryptoError(
-      "MISSING_KEY_ID",
-      "No decryption key found for integration secret key_id.",
+      "DECRYPTION_FAILED",
+      "Decrypted data key has invalid length.",
     );
   }
 
   try {
-    const kek = await importAesGcmKey(kekBytes, ["encrypt", "decrypt"]);
-    const dekBytes = await decryptAesGcm(
-      kek,
-      decodeBase64Flexible(envelope.encryptedDek),
-      decodeBase64Flexible(envelope.dekIv),
-      buildAad(context, "dek", envelope.keyId),
-    );
-
-    if (dekBytes.byteLength !== AES_KEY_BYTES) {
-      throw new IntegrationSecretCryptoError(
-        "DECRYPTION_FAILED",
-        "Decrypted data key has invalid length.",
-      );
-    }
-
     const dek = await importAesGcmKey(dekBytes, ["encrypt", "decrypt"]);
     const plaintextBytes = await decryptAesGcm(
       dek,
@@ -457,6 +626,14 @@ export async function decryptIntegrationSecret(
       decodeBase64Flexible(envelope.valueIv),
       buildAad(context, "value"),
     );
+
+    // Audit decrypt event (best-effort)
+    void recordAuditEvent("decrypt", {
+      keyId: envelope.keyId,
+      provider: context.provider,
+      userId: context.userId,
+      tokenRef: context.tokenRef,
+    });
 
     return fromUtf8Bytes(plaintextBytes);
   } catch (error) {
@@ -469,4 +646,345 @@ export async function decryptIntegrationSecret(
       "Failed to decrypt integration secret.",
     );
   }
+}
+
+// ------------------------
+// KMS + DEK helper routines
+// ------------------------
+
+let auditLogger: ((event: Record<string, unknown>) => Promise<void>) | null =
+  null;
+
+export function setAuditLogger(
+  fn: (event: Record<string, unknown>) => Promise<void>,
+) {
+  auditLogger = fn;
+}
+
+async function appendAuditFile(entry: Record<string, unknown>) {
+  const path = process.env["INTEGRATION_SECRETS_AUDIT_LOG_PATH"]?.trim();
+  if (!path) return;
+
+  try {
+    const fs = await import("node:fs");
+    const dir = path.replace(/\/[^/]+$/, "");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path, JSON.stringify(entry) + "\n", {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+  } catch {
+    // best-effort audit logging
+  }
+}
+
+async function recordAuditEvent(
+  action: string,
+  details: Record<string, unknown>,
+) {
+  const event = {
+    ts: Date.now(),
+    action,
+    ...details,
+  } as Record<string, unknown>;
+
+  try {
+    if (auditLogger) await auditLogger(event);
+  } catch {
+    // best-effort audit logging
+  }
+
+  try {
+    await appendAuditFile(event);
+  } catch {
+    // best-effort audit logging
+  }
+}
+
+async function tryKmsDecrypt(
+  ciphertext: Uint8Array,
+  keyId: string,
+  aad: Uint8Array,
+): Promise<Uint8Array | null> {
+  // Try AWS KMS dynamic import. This is best-effort: if the SDK isn't present
+  // or the operation fails, we return null and allow legacy fallback.
+  try {
+    const { KMSClient, DecryptCommand } = await import("@aws-sdk/client-kms");
+    const client = new KMSClient({});
+    const encryptionContext = { aad: fromUtf8Bytes(aad) } as Record<
+      string,
+      string
+    >;
+    const command = new DecryptCommand({
+      CiphertextBlob: ciphertext,
+      EncryptionContext: encryptionContext,
+    });
+    const result = await client.send(command as any);
+    const plain = getRecordProperty(result, "Plaintext");
+    if (!plain) return null;
+    if (plain instanceof ArrayBuffer) return new Uint8Array(plain);
+    if (plain instanceof Uint8Array) return plain;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function kmsEncryptDek(
+  dekBytes: Uint8Array,
+  keyId: string,
+  aad: Uint8Array,
+): Promise<Uint8Array> {
+  const { KMSClient, EncryptCommand } = await import("@aws-sdk/client-kms");
+  const client = new KMSClient({});
+  const encryptionContext = { aad: fromUtf8Bytes(aad) } as Record<
+    string,
+    string
+  >;
+  const cmd = new EncryptCommand({
+    KeyId: keyId,
+    Plaintext: dekBytes,
+    EncryptionContext: encryptionContext,
+  });
+  const res = await client.send(cmd as any);
+  const blob = getRecordProperty(res, "CiphertextBlob");
+  if (!blob)
+    throw new IntegrationSecretCryptoError(
+      "ENCRYPTION_FAILED",
+      "KMS encrypt returned no ciphertext.",
+    );
+  if (blob instanceof ArrayBuffer) return new Uint8Array(blob);
+  if (blob instanceof Uint8Array) return blob;
+  throw new IntegrationSecretCryptoError(
+    "ENCRYPTION_FAILED",
+    "Unexpected KMS ciphertext type.",
+  );
+}
+
+export async function decryptDEK(
+  encryptedDekBase64: string,
+  envelopeKeyId: string,
+  context: IntegrationSecretContext,
+  dekIvBase64?: string,
+): Promise<Uint8Array> {
+  const encryptedDek = decodeBase64Flexible(encryptedDekBase64);
+  const aad = buildAad(context, "dek", envelopeKeyId);
+
+  // First try KMS
+  const kmsDecoded = await tryKmsDecrypt(encryptedDek, envelopeKeyId, aad);
+  if (kmsDecoded && kmsDecoded.byteLength === AES_KEY_BYTES) return kmsDecoded;
+
+  // Fallback to legacy KEK unwrap (requires dekIv)
+  if (!dekIvBase64) {
+    throw new IntegrationSecretCryptoError(
+      "MISSING_KEY_ID",
+      "Legacy DEK unwrap requires dekIv.",
+    );
+  }
+
+  const parsedKeyring = getParsedKeyring();
+  const kekBytes = parsedKeyring.keyring.get(envelopeKeyId);
+  if (!kekBytes)
+    throw new IntegrationSecretCryptoError(
+      "MISSING_KEY_ID",
+      "No decryption key found for integration secret key_id.",
+    );
+
+  const kek = await importAesGcmKey(kekBytes, ["encrypt", "decrypt"]);
+  const dek = await decryptAesGcm(
+    kek,
+    encryptedDek,
+    decodeBase64Flexible(dekIvBase64),
+    aad,
+  );
+  if (dek.byteLength !== AES_KEY_BYTES)
+    throw new IntegrationSecretCryptoError(
+      "DECRYPTION_FAILED",
+      "Decrypted DEK has invalid length.",
+    );
+  return dek;
+}
+
+export async function encryptSecret(
+  plaintext: string,
+  dekBytes: Uint8Array,
+  context: IntegrationSecretContext,
+) {
+  const valueIv = randomBytes(AES_GCM_IV_BYTES);
+  const dekKey = await importAesGcmKey(dekBytes, ["encrypt"]);
+  const encryptedValue = await encryptAesGcm(
+    dekKey,
+    toUtf8Bytes(plaintext),
+    valueIv,
+    buildAad(context, "value"),
+  );
+  return {
+    encryptedValue: encodeBase64Url(encryptedValue),
+    valueIv: encodeBase64Url(valueIv),
+  };
+}
+
+export async function decryptSecret(
+  encryptedValueB64: string,
+  valueIvB64: string,
+  dekBytes: Uint8Array,
+  context: IntegrationSecretContext,
+) {
+  const dekKey = await importAesGcmKey(dekBytes, ["decrypt"]);
+  const plaintextBytes = await decryptAesGcm(
+    dekKey,
+    decodeBase64Flexible(encryptedValueB64),
+    decodeBase64Flexible(valueIvB64),
+    buildAad(context, "value"),
+  );
+  return fromUtf8Bytes(plaintextBytes);
+}
+
+export async function encryptIntegrationSecretWithKeyId(
+  plaintext: string,
+  context: IntegrationSecretContext,
+  keyId: string,
+  now = Date.now(),
+): Promise<EncryptedSecretEnvelope> {
+  if (!plaintext || plaintext.length === 0) {
+    throw new IntegrationSecretCryptoError(
+      "ENCRYPTION_FAILED",
+      "Secret plaintext is empty.",
+    );
+  }
+
+  try {
+    const dekBytes = randomBytes(AES_KEY_BYTES);
+    const valueIv = randomBytes(AES_GCM_IV_BYTES);
+    const dekIv = randomBytes(AES_GCM_IV_BYTES);
+
+    const dek = await importAesGcmKey(dekBytes, ["encrypt", "decrypt"]);
+
+    const encryptedValue = await encryptAesGcm(
+      dek,
+      toUtf8Bytes(plaintext),
+      valueIv,
+      buildAad(context, "value"),
+    );
+
+    // Wrap DEK with KMS
+    const wrappedDek = await kmsEncryptDek(
+      dekBytes,
+      keyId,
+      buildAad(context, "dek", keyId),
+    );
+
+    // Audit encrypt event (best-effort)
+    void recordAuditEvent("encrypt", {
+      keyId,
+      provider: context.provider,
+      userId: context.userId,
+      tokenRef: context.tokenRef,
+    });
+
+    return {
+      version: ENVELOPE_VERSION,
+      algorithm: VALUE_ALGORITHM,
+      wrappedDekAlgorithm: WRAPPED_DEK_ALGORITHM,
+      keyId,
+      keyVersion: ENVELOPE_VERSION,
+      encryptedValue: encodeBase64Url(encryptedValue),
+      valueIv: encodeBase64Url(valueIv),
+      encryptedDek: encodeBase64Url(wrappedDek),
+      dekIv: encodeBase64Url(dekIv),
+      createdAt: now,
+    };
+  } catch {
+    throw new IntegrationSecretCryptoError(
+      "ENCRYPTION_FAILED",
+      "Failed to encrypt integration secret.",
+    );
+  }
+}
+
+export async function rotateKey(
+  db: any,
+  newKeyId: string,
+  opts?: { pageSize?: number; dryRun?: boolean },
+): Promise<{ processed: number; rotated: number; errors: number }> {
+  const pageSize = opts?.pageSize ?? 200;
+  let cursor: string | null = null;
+  let processed = 0;
+  let rotated = 0;
+  let errors = 0;
+
+  while (true) {
+    const page: any = await db
+      .query("integrationSecrets")
+      .paginate({ numItems: pageSize, cursor });
+    for (const secret of page.page as any[]) {
+      processed += 1;
+      const cryptoContext: IntegrationSecretContext = {
+        userId: String(secret.userId),
+        provider: secret.provider,
+        tokenRef: secret.tokenRef,
+      };
+
+      const patch: Record<string, unknown> = {};
+
+      try {
+        if (secret.encryptedAccessToken) {
+          const plaintext = await decryptIntegrationSecret(
+            secret.encryptedAccessToken,
+            cryptoContext,
+          );
+          if (!opts?.dryRun) {
+            patch.encryptedAccessToken =
+              await encryptIntegrationSecretWithKeyId(
+                plaintext,
+                cryptoContext,
+                newKeyId,
+                Date.now(),
+              );
+          }
+        }
+
+        if (secret.encryptedRefreshToken) {
+          const plaintext = await decryptIntegrationSecret(
+            secret.encryptedRefreshToken,
+            cryptoContext,
+          );
+          if (!opts?.dryRun) {
+            patch.encryptedRefreshToken =
+              await encryptIntegrationSecretWithKeyId(
+                plaintext,
+                cryptoContext,
+                newKeyId,
+                Date.now(),
+              );
+          }
+        }
+
+        if (!opts?.dryRun) {
+          patch.updatedAt = Date.now();
+          await db.patch(secret._id, patch);
+        }
+
+        rotated += 1;
+        void recordAuditEvent("rotate", {
+          id: String(secret._id),
+          provider: secret.provider,
+          userId: String(secret.userId),
+        });
+      } catch (e) {
+        errors += 1;
+        // best-effort audit of failure
+        void recordAuditEvent("rotate_error", {
+          id: String(secret._id),
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+
+    if (page.isDone) break;
+    cursor = page.continueCursor ?? null;
+    if (!cursor) break;
+  }
+
+  return { processed, rotated, errors };
 }
