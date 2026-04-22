@@ -10,6 +10,7 @@ import { requireAdmin, requireUser } from "./authz";
 
 export const FEATURE_FLAG_KEYS = [
   "aiSummaryEnabled",
+  "aiSummaryAutopilotEnabled",
   "backgroundTrackingEnabled",
 ] as const;
 
@@ -17,6 +18,7 @@ export type FeatureFlagKey = (typeof FEATURE_FLAG_KEYS)[number];
 
 const featureFlagKeyValidator = v.union(
   v.literal("aiSummaryEnabled"),
+  v.literal("aiSummaryAutopilotEnabled"),
   v.literal("backgroundTrackingEnabled"),
 );
 
@@ -107,6 +109,17 @@ const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, FeatureFlagDefaultConfig> =
       enabledInDevelopment: true,
       enabledInStaging: true,
       enabledInProduction: true,
+      includeClerkUserIds: [],
+      excludeClerkUserIds: [],
+    },
+    aiSummaryAutopilotEnabled: {
+      description:
+        "Controls adaptive summary quality autopilot retries and strategy remediation.",
+      defaultEnabled: false,
+      rolloutPercentage: 0,
+      enabledInDevelopment: true,
+      enabledInStaging: false,
+      enabledInProduction: false,
       includeClerkUserIds: [],
       excludeClerkUserIds: [],
     },
@@ -529,6 +542,7 @@ export const getMyResolvedFeatureFlags = query({
       },
       {
         aiSummaryEnabled: false,
+        aiSummaryAutopilotEnabled: false,
         backgroundTrackingEnabled: false,
       } as Record<FeatureFlagKey, boolean>,
     );

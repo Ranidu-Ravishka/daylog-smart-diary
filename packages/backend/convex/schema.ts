@@ -72,6 +72,47 @@ const summaryQualityScoresValidator = v.object({
   failure: v.number(),
 });
 
+const personalInsightTrendDirectionValidator = v.union(
+  v.literal("up"),
+  v.literal("down"),
+  v.literal("flat"),
+);
+
+const personalInsightDailyFeatureVectorValidator = v.object({
+  rating: v.optional(v.number()),
+  memoryCount: v.number(),
+  noteCount: v.number(),
+  peopleTagCount: v.number(),
+  highlightCount: v.number(),
+  steps: v.optional(v.number()),
+  sleepMinutes: v.optional(v.number()),
+  screenTimeMinutes: v.optional(v.number()),
+  spendingTotal: v.optional(v.number()),
+  meetingsCount: v.optional(v.number()),
+  busyMinutes: v.optional(v.number()),
+  callsCount: v.optional(v.number()),
+  callDurationMinutes: v.optional(v.number()),
+  integrationProviderCount: v.number(),
+});
+
+const personalInsightTrendVectorValidator = v.object({
+  ratingTrend: personalInsightTrendDirectionValidator,
+  memoryTrend: personalInsightTrendDirectionValidator,
+  stepsTrend: personalInsightTrendDirectionValidator,
+  sleepTrend: personalInsightTrendDirectionValidator,
+  screenTimeTrend: personalInsightTrendDirectionValidator,
+  spendingTrend: personalInsightTrendDirectionValidator,
+  socialTrend: personalInsightTrendDirectionValidator,
+});
+
+const aiSummaryAttemptStrategyValidator = v.union(
+  v.literal("default"),
+  v.literal("concise"),
+  v.literal("factual_bias"),
+  v.literal("source_grounded"),
+  v.literal("structured_output"),
+);
+
 const restoreBatchResultValidator = v.object({
   processed: v.number(),
   inserted: v.number(),
@@ -732,11 +773,35 @@ export default defineSchema(
       success: v.boolean(),
       failureReason: v.optional(v.string()),
       summaryId: v.optional(v.id("daySummaries")),
+      attemptChainId: v.optional(v.string()),
+      selectedBestAttemptId: v.optional(v.id("aiSummaryAttempts")),
       createdAt: v.number(),
     })
       .index("by_createdAt", ["createdAt"])
       .index("by_user_day_createdAt", ["userId", "dayKey", "createdAt"])
-      .index("by_success_createdAt", ["success", "createdAt"]),
+      .index("by_success_createdAt", ["success", "createdAt"])
+      .index("by_attemptChainId_createdAt", ["attemptChainId", "createdAt"]),
+
+    aiSummaryAttempts: defineTable({
+      userId: v.id("user"),
+      dayKey: v.string(),
+      attemptChainId: v.string(),
+      generationEventId: v.id("summaryGenerationEvents"),
+      attemptNumber: v.number(),
+      strategy: aiSummaryAttemptStrategyValidator,
+      inputHash: v.string(),
+      outputSummary: v.optional(v.string()),
+      qualityScore: v.optional(v.number()),
+      evaluationFlags: v.array(v.string()),
+      failureReason: v.optional(v.string()),
+      createdAt: v.number(),
+    })
+      .index("by_attemptChainId_attemptNumber", [
+        "attemptChainId",
+        "attemptNumber",
+      ])
+      .index("by_user_day_createdAt", ["userId", "dayKey", "createdAt"])
+      .index("by_createdAt", ["createdAt"]),
 
     summaryQualityEvaluations: defineTable({
       userId: v.id("user"),
@@ -754,6 +819,39 @@ export default defineSchema(
       .index("by_lowQuality_evaluatedAt", ["lowQuality", "evaluatedAt"])
       .index("by_generationEventId", ["generationEventId"])
       .index("by_user_day_evaluatedAt", ["userId", "dayKey", "evaluatedAt"]),
+
+    dailyFeatureVectors: defineTable({
+      userId: v.id("user"),
+      dayKey: v.string(),
+      vectorVersion: v.number(),
+      features: personalInsightDailyFeatureVectorValidator,
+      trend: v.optional(personalInsightTrendVectorValidator),
+      sourceDays: v.number(),
+      generatedAt: v.number(),
+      updatedAt: v.number(),
+    })
+      .index("by_user_day", ["userId", "dayKey"])
+      .index("by_user_generatedAt", ["userId", "generatedAt"])
+      .index("by_generatedAt", ["generatedAt"]),
+
+    nextBestDayRecommendations: defineTable({
+      userId: v.id("user"),
+      targetDayKey: v.string(),
+      generatedAt: v.number(),
+      basedOnDays: v.number(),
+      confidence: v.number(),
+      recommendationType: v.union(
+        v.literal("stabilize"),
+        v.literal("momentum"),
+        v.literal("recovery"),
+      ),
+      recommendations: v.array(v.string()),
+      rationale: v.array(v.string()),
+      trend: personalInsightTrendVectorValidator,
+    })
+      .index("by_user_targetDay", ["userId", "targetDayKey"])
+      .index("by_user_generatedAt", ["userId", "generatedAt"])
+      .index("by_generatedAt", ["generatedAt"]),
 
     // ── Audit logs (admin + security) ────────────────────────
     userDeletionJobs: defineTable({

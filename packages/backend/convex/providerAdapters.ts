@@ -561,6 +561,7 @@ type SummaryModelAdapterInput = {
   dayKey: string;
   modelInput: string;
   apiKey: string;
+  strategyGuidance?: string;
 };
 
 type SummaryModelAdapter = ProviderAdapter<
@@ -646,7 +647,7 @@ function normalizeSummaryModelOutput(payload: unknown): SummaryModelOutput {
 
 const openAiSummaryAdapter: SummaryModelAdapter = {
   id: "openai",
-  execute: async ({ dayKey, modelInput, apiKey }) => {
+  execute: async ({ dayKey, modelInput, apiKey, strategyGuidance }) => {
     const responseJson = await executeWithProviderRetry<{
       choices?: Array<{ message?: { content?: string } }>;
     }>({
@@ -704,7 +705,10 @@ const openAiSummaryAdapter: SummaryModelAdapter = {
                 {
                   role: "system",
                   content:
-                    "You are a concise wellbeing journaling assistant. Create an honest, grounded summary with no invented facts. Keep the narrative under 120 words and highlights short.",
+                    "You are a concise wellbeing journaling assistant. Create an honest, grounded summary with no invented facts. Keep the narrative under 120 words and highlights short." +
+                    (strategyGuidance
+                      ? ` Follow this remediation strategy: ${strategyGuidance}`
+                      : ""),
                 },
                 {
                   role: "user",

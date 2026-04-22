@@ -389,7 +389,9 @@ export function getActiveIntegrationSecretKeyId(): string {
 export function getActiveKey(): ActiveKeyDescriptor {
   const keyId = getActiveIntegrationSecretKeyId();
   const keyVersionRaw = process.env.INTEGRATION_SECRETS_KEY_VERSION?.trim();
-  const keyVersionParsed = keyVersionRaw ? Number.parseInt(keyVersionRaw, 10) : NaN;
+  const keyVersionParsed = keyVersionRaw
+    ? Number.parseInt(keyVersionRaw, 10)
+    : NaN;
   return {
     keyId,
     keyVersion:
@@ -851,7 +853,12 @@ export async function encryptWithDEK(
   now = Date.now(),
 ): Promise<EncryptedSecretEnvelope> {
   if (keyId && keyId.trim().length > 0) {
-    return await encryptIntegrationSecretWithKeyId(plaintext, context, keyId, now);
+    return await encryptIntegrationSecretWithKeyId(
+      plaintext,
+      context,
+      keyId,
+      now,
+    );
   }
 
   return await encryptIntegrationSecret(plaintext, context, now);

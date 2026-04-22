@@ -29,9 +29,15 @@ function clamp(value: number, min: number, max: number): number {
   return value;
 }
 
-function sanitizeIdentity(value: string | null | undefined, fallback: string): string {
+function sanitizeIdentity(
+  value: string | null | undefined,
+  fallback: string,
+): string {
   if (!value) return fallback;
-  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9._:-]/g, "_");
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._:-]/g, "_");
   return normalized.length > 0 ? normalized.slice(0, 128) : fallback;
 }
 
@@ -44,7 +50,10 @@ function getIpFromHeaderValue(value: string | null): string | null {
   return first ?? null;
 }
 
-export function resolveRateLimitIdentity(request: Request, userId?: string): RateLimitIdentity {
+export function resolveRateLimitIdentity(
+  request: Request,
+  userId?: string,
+): RateLimitIdentity {
   const ip =
     getIpFromHeaderValue(request.headers.get("x-forwarded-for")) ??
     request.headers.get("x-real-ip") ??
@@ -66,7 +75,11 @@ function evaluateBucket(key: string, now = Date.now()): RateLimitDecision {
   };
 
   const refill = ((now - current.lastRefillAt) / 1000) * REFILL_PER_SECOND;
-  const tokens = clamp(current.tokens + Math.max(refill, 0), 0, BUCKET_CAPACITY);
+  const tokens = clamp(
+    current.tokens + Math.max(refill, 0),
+    0,
+    BUCKET_CAPACITY,
+  );
 
   if (current.blockedUntil > now) {
     const retryAfterSeconds = Math.ceil((current.blockedUntil - now) / 1000);
@@ -114,7 +127,9 @@ function evaluateBucket(key: string, now = Date.now()): RateLimitDecision {
   };
 }
 
-export function evaluateAdminRateLimit(identity: RateLimitIdentity): RateLimitDecision {
+export function evaluateAdminRateLimit(
+  identity: RateLimitIdentity,
+): RateLimitDecision {
   const perIp = evaluateBucket(`admin:ip:${identity.ip}`);
   const perUser = evaluateBucket(`admin:user:${identity.user}`);
 
@@ -124,7 +139,10 @@ export function evaluateAdminRateLimit(identity: RateLimitIdentity): RateLimitDe
 
   return {
     allowed: false,
-    retryAfterSeconds: Math.max(perIp.retryAfterSeconds, perUser.retryAfterSeconds),
+    retryAfterSeconds: Math.max(
+      perIp.retryAfterSeconds,
+      perUser.retryAfterSeconds,
+    ),
     penaltyLevel: Math.max(perIp.penaltyLevel, perUser.penaltyLevel),
   };
 }

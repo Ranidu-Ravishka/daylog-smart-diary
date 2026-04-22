@@ -3,6 +3,7 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { ConvexHttpClient } from "convex/browser";
 import { NextResponse } from "next/server";
 import { captureException, logInfo, logWarn } from "@/lib/observability";
+import type { RevokeUserSessionsRequestBody } from "@/lib/types/adminQueries";
 import {
   evaluateAdminRateLimit,
   resolveRateLimitIdentity,
@@ -25,6 +26,13 @@ function parseClerkUserId(value: unknown): string | null {
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function parseRevokeRequestBody(value: unknown): RevokeUserSessionsRequestBody {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  return value as RevokeUserSessionsRequestBody;
 }
 
 function readConvexUrlFromEnv(): string | null {
@@ -109,9 +117,9 @@ export async function POST(request: Request) {
     return errorResponse("Too many requests", 429);
   }
 
-  const requestBody = (await request.json().catch(() => null)) as {
-    clerkUserId?: unknown;
-  } | null;
+  const requestBody = parseRevokeRequestBody(
+    await request.json().catch(() => null),
+  );
 
   const targetClerkUserId = parseClerkUserId(requestBody?.clerkUserId);
   if (!targetClerkUserId) {

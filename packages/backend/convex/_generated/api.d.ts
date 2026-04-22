@@ -40,6 +40,7 @@ import type * as observability from "../observability.js";
 import type * as observabilityIngestRateLimiter from "../observabilityIngestRateLimiter.js";
 import type * as observabilityIngestion from "../observabilityIngestion.js";
 import type * as observabilityIngestionSecurity from "../observabilityIngestionSecurity.js";
+import type * as personalInsights from "../personalInsights.js";
 import type * as planLimits from "../planLimits.js";
 import type * as providerAdapters from "../providerAdapters.js";
 import type * as retention from "../retention.js";
@@ -98,6 +99,7 @@ declare const fullApi: ApiFromModules<{
   observabilityIngestRateLimiter: typeof observabilityIngestRateLimiter;
   observabilityIngestion: typeof observabilityIngestion;
   observabilityIngestionSecurity: typeof observabilityIngestionSecurity;
+  personalInsights: typeof personalInsights;
   planLimits: typeof planLimits;
   providerAdapters: typeof providerAdapters;
   retention: typeof retention;

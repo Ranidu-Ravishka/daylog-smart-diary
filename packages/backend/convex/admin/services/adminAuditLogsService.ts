@@ -51,7 +51,8 @@ export async function adminDeleteAuditLogImpl(
   args: { auditLogId: Id<"auditLogs"> },
 ) {
   const admin = await requireAdmin(ctx);
-  const isProduction = (process.env.NODE_ENV ?? "").toLowerCase() === "production";
+  const isProduction =
+    (process.env.NODE_ENV ?? "").toLowerCase() === "production";
 
   if (isProduction) {
     // Fail-closed in production: audit logs are immutable.

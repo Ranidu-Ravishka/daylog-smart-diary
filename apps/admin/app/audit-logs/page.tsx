@@ -2,6 +2,7 @@
 
 import AdminGuard from "@/components/admin-guard";
 import { toEntityId } from "@/lib/admin-ids";
+import type { AdminLookupUser } from "@/lib/types/adminQueries";
 import { api } from "@repo/backend/convex";
 import { makeFunctionReference } from "convex/server";
 import { useConvexAuth, usePaginatedQuery, useQuery } from "convex/react";
@@ -60,7 +61,7 @@ export default function AuditLogsPage() {
           userIds: actorUserIds.map((id) => toEntityId<"user">(id)),
         }
       : "skip",
-  ) as Array<{ _id: string; email: string; clerkUserId: string }> | undefined;
+  ) as Array<AdminLookupUser> | undefined;
 
   const actionOptions = useMemo(() => {
     if (!logs) return [];

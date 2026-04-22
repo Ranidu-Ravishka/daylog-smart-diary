@@ -337,6 +337,131 @@ type SummaryGenerationResult =
       message: string;
     };
 
+type SummaryRemediationStrategy =
+  | "default"
+  | "concise"
+  | "factual_bias"
+  | "source_grounded"
+  | "structured_output";
+
+type SummaryAttemptOutcome = {
+  attemptId?: string;
+  generationEventId?: string;
+  attemptNumber: number;
+  strategy: SummaryRemediationStrategy;
+  modelInput: string;
+  qualityScore: number;
+  evaluationFlags: string[];
+  lowQuality: boolean;
+  generated?: {
+    story: string;
+    highlights: string[];
+    metrics?: {
+      steps?: number;
+      sleepMinutes?: number;
+      screenTimeMinutes?: number;
+      spendingTotal?: number;
+    };
+    sourcesUsed: string[];
+  };
+  failed: boolean;
+  failureReason?: string;
+};
+
+const AUTOPILOT_MAX_RETRIES = 2;
+const AUTOPILOT_BASE_BACKOFF_MS = 250;
+
+const PROMPT_STRATEGY_GUIDANCE: Record<SummaryRemediationStrategy, string> = {
+  default:
+    "Balanced baseline summary. Stay accurate and concise with clear language.",
+  concise:
+    "Prefer concise output: 60-90 words total, 2-4 sharp highlights, no filler.",
+  factual_bias:
+    "Bias toward explicit facts and measurable details. Avoid interpretation when uncertain.",
+  source_grounded:
+    "Ground every claim in provided memories/day metadata/integration context only.",
+  structured_output:
+    "Use clear structure: opening sentence, evidence-backed body, and practical close.",
+};
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function buildAttemptChainId(
+  userId: string,
+  dayKey: string,
+  now: number,
+): string {
+  const random = Math.floor(Math.random() * 1_000_000)
+    .toString(16)
+    .padStart(5, "0");
+  return `${userId}:${dayKey}:${now}:${random}`;
+}
+
+function hashInput(text: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a:${(hash >>> 0).toString(16)}`;
+}
+
+export function shouldRetrySummary(evaluation: {
+  lowQuality?: boolean;
+  overallScore?: number;
+  flags?: string[];
+  attemptNumber: number;
+}): boolean {
+  if (evaluation.attemptNumber > AUTOPILOT_MAX_RETRIES) {
+    return false;
+  }
+
+  if (evaluation.lowQuality) {
+    return true;
+  }
+
+  const score = evaluation.overallScore ?? 1;
+  if (score < 0.6) {
+    return true;
+  }
+
+  const retryableFlags = new Set([
+    "too_long",
+    "too_short",
+    "high_duplication",
+    "failure_risk",
+    "low_quality",
+    "too_vague",
+    "hallucination_risk",
+  ]);
+  return (evaluation.flags ?? []).some((flag) => retryableFlags.has(flag));
+}
+
+function chooseNextStrategy(flags: string[]): SummaryRemediationStrategy {
+  if (flags.includes("too_long")) return "concise";
+  if (flags.includes("failure_risk")) return "factual_bias";
+  if (flags.includes("high_duplication")) return "structured_output";
+  if (flags.includes("low_quality")) return "source_grounded";
+  return "default";
+}
+
+function buildModelInputWithStrategy(
+  baseModelInput: string,
+  strategy: SummaryRemediationStrategy,
+): string {
+  const base = JSON.parse(baseModelInput) as Record<string, unknown>;
+  const strategyGuidance = PROMPT_STRATEGY_GUIDANCE[strategy];
+  return JSON.stringify({
+    ...base,
+    autopilot: {
+      strategy,
+      strategyGuidance,
+    },
+  });
+}
+
 function toUserFacingSummaryGenerationErrorMessage(error: unknown): string {
   const fallback =
     "Summary generation is temporarily unavailable. Please try again later.";
@@ -365,6 +490,7 @@ function toUserFacingSummaryGenerationErrorMessage(error: unknown): string {
 export async function generateSummaryWithOpenAi(
   dayKey: string,
   modelInput: string,
+  strategy: SummaryRemediationStrategy = "default",
 ) {
   const openAiKey = convexServerEnv.openAiApiKey;
   const adapter = resolveSummaryModelAdapter("openai");
@@ -374,6 +500,7 @@ export async function generateSummaryWithOpenAi(
       dayKey,
       modelInput,
       apiKey: openAiKey,
+      strategyGuidance: PROMPT_STRATEGY_GUIDANCE[strategy],
     });
   } catch (error) {
     if (error instanceof Error) {
@@ -391,10 +518,23 @@ export const generateSummaryFromModel = internalAction({
   args: {
     dayKey: v.string(),
     modelInput: v.string(),
+    strategy: v.optional(
+      v.union(
+        v.literal("default"),
+        v.literal("concise"),
+        v.literal("factual_bias"),
+        v.literal("source_grounded"),
+        v.literal("structured_output"),
+      ),
+    ),
   },
   handler: async (_ctx, args) => {
     void _ctx;
-    return await generateSummaryWithOpenAi(args.dayKey, args.modelInput);
+    return await generateSummaryWithOpenAi(
+      args.dayKey,
+      args.modelInput,
+      args.strategy ?? "default",
+    );
   },
 });
 
@@ -413,6 +553,7 @@ export const generateSummaryForDay = action({
     )) as {
       flags?: {
         aiSummaryEnabled?: boolean;
+        aiSummaryAutopilotEnabled?: boolean;
       };
     };
 
@@ -488,11 +629,6 @@ export const generateSummaryForDay = action({
       userId: string;
     };
 
-    await ctx.runMutation(
-      (api as any).summaries.reserveSummaryGenerationSlot,
-      {},
-    );
-
     const summaryMemoryInput = toSummaryMemoryInput(
       memories ?? [],
       MAX_SUMMARY_MEMORY_INPUT_BYTES,
@@ -525,32 +661,73 @@ export const generateSummaryForDay = action({
       },
     });
 
-    let generated:
-      | {
-          story: string;
-          highlights: string[];
-          metrics?: {
-            steps?: number;
-            sleepMinutes?: number;
-            screenTimeMinutes?: number;
-            spendingTotal?: number;
-          };
-          sourcesUsed: string[];
-        }
-      | undefined;
+    const attemptChainId = buildAttemptChainId(
+      generationIdentity.userId,
+      args.dayKey,
+      startedAt,
+    );
+    const autopilotEnabled = Boolean(
+      runtimeFlags.flags?.aiSummaryAutopilotEnabled,
+    );
+    const maxAttempts = autopilotEnabled ? AUTOPILOT_MAX_RETRIES + 1 : 1;
+    const attempts: SummaryAttemptOutcome[] = [];
+    let nextStrategy: SummaryRemediationStrategy = "default";
+    let latestError: unknown;
 
-    try {
-      generated = await generateSummaryWithOpenAi(args.dayKey, modelInput);
-    } catch (error) {
-      captureException("summary_generation.failed", error, {
-        status: "failed",
+    for (
+      let attemptNumber = 1;
+      attemptNumber <= maxAttempts;
+      attemptNumber += 1
+    ) {
+      const strategy = attemptNumber === 1 ? "default" : nextStrategy;
+      const attemptModelInput =
+        strategy === "default"
+          ? modelInput
+          : buildModelInputWithStrategy(modelInput, strategy);
+
+      logInfo("summary_generation.attempt_started", {
+        event: "attempt_started",
         dayKey: args.dayKey,
         userId: generationIdentity.userId,
-        durationMs: Date.now() - startedAt,
+        attemptChainId,
+        attemptNumber,
+        strategy,
       });
 
       try {
         await ctx.runMutation(
+          (api as any).summaries.reserveSummaryGenerationSlot,
+          {},
+        );
+      } catch (quotaError) {
+        logWarn("summary_generation.retry_blocked_quota", {
+          event: "retry_triggered",
+          dayKey: args.dayKey,
+          userId: generationIdentity.userId,
+          attemptChainId,
+          attemptNumber,
+          strategy,
+          reason: "quota_exceeded",
+        });
+        latestError = quotaError;
+        break;
+      }
+
+      try {
+        const generated = await generateSummaryWithOpenAi(
+          args.dayKey,
+          attemptModelInput,
+          strategy,
+        );
+        const mergedSourcesUsed = Array.from(
+          new Set([
+            ...generated.sourcesUsed,
+            ...(integrationContext.sources.length > 0 ? ["Integrations"] : []),
+            ...integrationContext.sources,
+          ]),
+        );
+
+        const qualityResult = await ctx.runMutation(
           (internal as any).summaryQuality
             .recordSummaryGenerationEvaluationInternal,
           {
@@ -558,45 +735,200 @@ export const generateSummaryForDay = action({
             dayKey: args.dayKey,
             modelProvider: "openai",
             modelName: "gpt-4o",
-            modelInput,
-            success: false,
-            failureReason:
-              error instanceof Error
-                ? error.message
-                : "Summary generation failed",
+            modelInput: attemptModelInput,
+            success: true,
+            generatedStory: generated.story,
+            generatedHighlights: generated.highlights,
+            sourcesUsed: mergedSourcesUsed,
+            attemptChainId,
           },
         );
-      } catch (qualityLoggingError) {
-        logWarn("summary_generation.quality_logging_failed", {
-          status: "degraded",
+
+        const attemptId = await ctx.runMutation(
+          (internal as any).summaryQuality.recordSummaryAttemptInternal,
+          {
+            userId: generationIdentity.userId,
+            dayKey: args.dayKey,
+            attemptChainId,
+            generationEventId: qualityResult.generationEventId,
+            attemptNumber,
+            strategy,
+            inputHash: hashInput(attemptModelInput),
+            qualityScore: qualityResult.overallScore ?? 0,
+            evaluationFlags: qualityResult.flags ?? [],
+          },
+        );
+
+        const attemptOutcome: SummaryAttemptOutcome = {
+          attemptId,
+          generationEventId: qualityResult.generationEventId,
+          attemptNumber,
+          strategy,
+          modelInput: attemptModelInput,
+          qualityScore: qualityResult.overallScore ?? 0,
+          evaluationFlags: qualityResult.flags ?? [],
+          lowQuality: Boolean(qualityResult.lowQuality),
+          generated,
+          failed: false,
+        };
+        attempts.push(attemptOutcome);
+
+        logInfo("summary_generation.attempt_completed", {
+          event: "attempt_completed",
           dayKey: args.dayKey,
           userId: generationIdentity.userId,
-          reason: "failure_logging",
-          error:
-            qualityLoggingError instanceof Error
-              ? qualityLoggingError.message
-              : "unknown",
+          attemptChainId,
+          attemptNumber,
+          strategy,
+          qualityScore: attemptOutcome.qualityScore,
+          lowQuality: attemptOutcome.lowQuality,
         });
-      }
 
+        const shouldRetry = autopilotEnabled
+          ? shouldRetrySummary({
+              lowQuality: attemptOutcome.lowQuality,
+              overallScore: attemptOutcome.qualityScore,
+              flags: attemptOutcome.evaluationFlags,
+              attemptNumber,
+            })
+          : false;
+
+        if (!shouldRetry) {
+          break;
+        }
+
+        nextStrategy = chooseNextStrategy(attemptOutcome.evaluationFlags);
+        logWarn("summary_generation.retry_triggered", {
+          event: "retry_triggered",
+          dayKey: args.dayKey,
+          userId: generationIdentity.userId,
+          attemptChainId,
+          attemptNumber,
+          strategy,
+          nextStrategy,
+          qualityScore: attemptOutcome.qualityScore,
+        });
+        await wait(AUTOPILOT_BASE_BACKOFF_MS * 2 ** (attemptNumber - 1));
+      } catch (error) {
+        latestError = error;
+        captureException("summary_generation.failed", error, {
+          status: "failed",
+          dayKey: args.dayKey,
+          userId: generationIdentity.userId,
+          attemptChainId,
+          attemptNumber,
+          strategy,
+          durationMs: Date.now() - startedAt,
+        });
+
+        const failureReason =
+          error instanceof Error ? error.message : "Summary generation failed";
+        try {
+          const qualityFailure = await ctx.runMutation(
+            (internal as any).summaryQuality
+              .recordSummaryGenerationEvaluationInternal,
+            {
+              userId: generationIdentity.userId,
+              dayKey: args.dayKey,
+              modelProvider: "openai",
+              modelName: "gpt-4o",
+              modelInput: attemptModelInput,
+              success: false,
+              failureReason,
+              attemptChainId,
+            },
+          );
+
+          const attemptId = await ctx.runMutation(
+            (internal as any).summaryQuality.recordSummaryAttemptInternal,
+            {
+              userId: generationIdentity.userId,
+              dayKey: args.dayKey,
+              attemptChainId,
+              generationEventId: qualityFailure.generationEventId,
+              attemptNumber,
+              strategy,
+              inputHash: hashInput(attemptModelInput),
+              evaluationFlags: ["generation_failed"],
+              failureReason,
+            },
+          );
+
+          attempts.push({
+            attemptId,
+            generationEventId: qualityFailure.generationEventId,
+            attemptNumber,
+            strategy,
+            modelInput: attemptModelInput,
+            qualityScore: 0,
+            evaluationFlags: ["generation_failed"],
+            lowQuality: true,
+            failed: true,
+            failureReason,
+          });
+        } catch (qualityLoggingError) {
+          logWarn("summary_generation.quality_logging_failed", {
+            status: "degraded",
+            dayKey: args.dayKey,
+            userId: generationIdentity.userId,
+            reason: "failure_logging",
+            error:
+              qualityLoggingError instanceof Error
+                ? qualityLoggingError.message
+                : "unknown",
+          });
+        }
+
+        if (attemptNumber >= maxAttempts || !autopilotEnabled) {
+          break;
+        }
+      }
+    }
+
+    const successfulAttempts = attempts.filter(
+      (
+        attempt,
+      ): attempt is SummaryAttemptOutcome & {
+        generated: NonNullable<SummaryAttemptOutcome["generated"]>;
+      } => Boolean(attempt.generated),
+    );
+
+    if (successfulAttempts.length === 0) {
       return {
         success: false,
         errorCode: "model_generation_failed",
-        message: toUserFacingSummaryGenerationErrorMessage(error),
+        message: toUserFacingSummaryGenerationErrorMessage(latestError),
+      };
+    }
+
+    const sortedAttempts = successfulAttempts.slice().sort((left, right) => {
+      if (right.qualityScore !== left.qualityScore) {
+        return right.qualityScore - left.qualityScore;
+      }
+      return left.attemptNumber - right.attemptNumber;
+    });
+    const selectedAttempt = sortedAttempts[0] ?? successfulAttempts[0];
+    if (!selectedAttempt) {
+      // Unreachable: successfulAttempts.length > 0 was just asserted.
+      return {
+        success: false,
+        errorCode: "model_generation_failed",
+        message: toUserFacingSummaryGenerationErrorMessage(latestError),
       };
     }
 
     const mergedMetrics = {
       steps:
-        generated.metrics?.steps ?? integrationContext.mergedMetrics?.steps,
+        selectedAttempt.generated.metrics?.steps ??
+        integrationContext.mergedMetrics?.steps,
       sleepMinutes:
-        generated.metrics?.sleepMinutes ??
+        selectedAttempt.generated.metrics?.sleepMinutes ??
         integrationContext.mergedMetrics?.sleepMinutes,
       screenTimeMinutes:
-        generated.metrics?.screenTimeMinutes ??
+        selectedAttempt.generated.metrics?.screenTimeMinutes ??
         integrationContext.mergedMetrics?.screenTimeMinutes,
       spendingTotal:
-        generated.metrics?.spendingTotal ??
+        selectedAttempt.generated.metrics?.spendingTotal ??
         integrationContext.mergedMetrics?.spendingTotal,
     };
 
@@ -605,7 +937,7 @@ export const generateSummaryForDay = action({
     );
     const mergedSourcesUsed = Array.from(
       new Set([
-        ...generated.sourcesUsed,
+        ...selectedAttempt.generated.sourcesUsed,
         ...(integrationContext.sources.length > 0 ? ["Integrations"] : []),
         ...integrationContext.sources,
       ]),
@@ -613,47 +945,41 @@ export const generateSummaryForDay = action({
 
     const saved = (await ctx.runMutation((api as any).summaries.upsertSummary, {
       dayKey: args.dayKey,
-      story: generated.story,
-      highlights: generated.highlights,
+      story: selectedAttempt.generated.story,
+      highlights: selectedAttempt.generated.highlights,
       metrics: hasMergedMetrics ? mergedMetrics : undefined,
       sourcesUsed: mergedSourcesUsed,
     })) as { _id?: string; generatedAt?: number } | null;
 
-    try {
+    if (selectedAttempt.generationEventId && selectedAttempt.attemptId) {
       await ctx.runMutation(
         (internal as any).summaryQuality
-          .recordSummaryGenerationEvaluationInternal,
+          .markSummaryGenerationBestAttemptInternal,
         {
-          userId: generationIdentity.userId,
-          dayKey: args.dayKey,
-          modelProvider: "openai",
-          modelName: "gpt-4o",
-          modelInput,
-          success: true,
-          generatedStory: generated.story,
-          generatedHighlights: generated.highlights,
-          sourcesUsed: mergedSourcesUsed,
-          summaryId: saved?._id,
+          generationEventId: selectedAttempt.generationEventId,
+          selectedBestAttemptId: selectedAttempt.attemptId,
         },
       );
-    } catch (qualityLoggingError) {
-      logWarn("summary_generation.quality_logging_failed", {
-        status: "degraded",
-        dayKey: args.dayKey,
-        userId: generationIdentity.userId,
-        reason: "success_logging",
-        error:
-          qualityLoggingError instanceof Error
-            ? qualityLoggingError.message
-            : "unknown",
-      });
     }
+
+    logInfo("summary_generation.best_attempt_selected", {
+      event: "best_attempt_selected",
+      dayKey: args.dayKey,
+      userId: generationIdentity.userId,
+      attemptChainId,
+      selectedAttemptNumber: selectedAttempt.attemptNumber,
+      selectedStrategy: selectedAttempt.strategy,
+      selectedQualityScore: selectedAttempt.qualityScore,
+      attemptsEvaluated: attempts.length,
+    });
 
     logInfo("summary_generation.succeeded", {
       status: "succeeded",
       dayKey: args.dayKey,
       userId: generationIdentity.userId,
       summaryId: saved?._id,
+      attemptChainId,
+      selectedAttemptNumber: selectedAttempt.attemptNumber,
       durationMs: Date.now() - startedAt,
     });
 

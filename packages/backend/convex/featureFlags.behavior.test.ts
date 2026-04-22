@@ -85,6 +85,7 @@ describe("feature flags behavior", () => {
 
     expect(listed.items.map((flag) => flag.key)).toEqual([
       "aiSummaryEnabled",
+      "aiSummaryAutopilotEnabled",
       "backgroundTrackingEnabled",
     ]);
     expect(listed.items.every((flag) => flag.source === "default")).toBe(true);
@@ -106,7 +107,10 @@ describe("feature flags behavior", () => {
 
     const upsertFeatureFlagForAdmin = handler<
       {
-        key: "aiSummaryEnabled" | "backgroundTrackingEnabled";
+        key:
+          | "aiSummaryEnabled"
+          | "aiSummaryAutopilotEnabled"
+          | "backgroundTrackingEnabled";
         description?: string;
         defaultEnabled: boolean;
         killSwitch: boolean;
@@ -125,6 +129,7 @@ describe("feature flags behavior", () => {
       {
         flags: {
           aiSummaryEnabled: boolean;
+          aiSummaryAutopilotEnabled: boolean;
           backgroundTrackingEnabled: boolean;
         };
         evaluations: Array<{ key: string; reason: string; enabled: boolean }>;
@@ -186,7 +191,10 @@ describe("feature flags behavior", () => {
 
     const upsertFeatureFlagForAdmin = handler<
       {
-        key: "aiSummaryEnabled" | "backgroundTrackingEnabled";
+        key:
+          | "aiSummaryEnabled"
+          | "aiSummaryAutopilotEnabled"
+          | "backgroundTrackingEnabled";
         description?: string;
         defaultEnabled: boolean;
         killSwitch: boolean;
@@ -206,6 +214,7 @@ describe("feature flags behavior", () => {
         environment: string;
         flags: {
           aiSummaryEnabled: boolean;
+          aiSummaryAutopilotEnabled: boolean;
           backgroundTrackingEnabled: boolean;
         };
       }
