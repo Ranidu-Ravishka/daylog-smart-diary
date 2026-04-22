@@ -1,7 +1,5 @@
-import { ConvexHttpClient } from "convex/browser";
 import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
-import { api } from "@repo/backend/convex";
 import {
   type OAuthProvider,
   getAppBaseUrl,
@@ -14,14 +12,21 @@ import {
   getIntegrationProviderDefinition,
   isIntegrationProviderComingSoon,
 } from "@repo/user-settings/lib/integration-provider-catalog";
+import { resolveConvexHttpSiteOrigin } from "@/lib/convex-http-site";
 
 const OAUTH_COOKIE_PREFIX = "daylog_oauth_state_";
 
 type OAuthStateCookiePayload = {
   state: string;
-  userId: string;
+  // `userId` is the *web* Clerk userId that started the flow, or null when
+  // the flow was initiated via a mobile handoff (see `/start` route).
+  userId: string | null;
   provider: string;
   returnPath: string;
+  // One-time opaque code minted by the mobile app's authenticated Convex
+  // session. When present, the callback uses it to identify the Convex user
+  // for integration persistence instead of the web Clerk session.
+  mobileHandoff?: string;
 };
 
 export const runtime = "nodejs";
@@ -417,16 +422,33 @@ export async function GET(
     returnPath: statePayload.returnPath,
   });
 
-  const { userId, getToken } = await auth();
-  if (!userId || userId !== statePayload.userId) {
-    return rejectOAuthCallback(
-      request,
-      provider,
-      oauthCookieName,
-      statePayload.returnPath,
-      "user_mismatch",
-    );
+  const { userId: webUserId, getToken } = await auth();
+
+  // Two valid authentication modes converge here:
+  //  1. Web-initiated flow: statePayload.userId was the web Clerk userId
+  //     captured in /start, and the current session must still match.
+  //  2. Mobile-initiated flow: statePayload.userId is null and the state
+  //     cookie carries a Convex-minted mobileHandoff. The web Clerk session
+  //     is irrelevant here — in fact, it is *expected* to be absent or
+  //     different. Identity resolution is deferred to Convex, which trades
+  //     the handoff for the mobile Convex userId.
+  const isMobileHandoffFlow = Boolean(statePayload.mobileHandoff);
+
+  if (!isMobileHandoffFlow) {
+    if (!webUserId || webUserId !== statePayload.userId) {
+      return rejectOAuthCallback(
+        request,
+        provider,
+        oauthCookieName,
+        statePayload.returnPath,
+        "user_mismatch",
+      );
+    }
   }
+
+  // Retained for downstream logs only; the real correlation id for a mobile
+  // handoff flow lives on the Convex `oauthMobileHandoffs` row.
+  const userId = webUserId ?? "mobile_handoff";
 
   const config = getOAuthProviderConfig(provider);
   if (!config.clientId || !config.clientSecret) {
@@ -461,28 +483,70 @@ export async function GET(
     const { accessToken, refreshToken, accessTokenExpiresAt, grantedScope } =
       await exchangeCodeForAccessToken(provider, code, callbackUrl);
 
-    const convexToken = await getToken({ template: "convex" });
-    if (!convexToken) {
-      throw new Error("Missing Convex auth token for OAuth callback");
+    const convexHttpOrigin = resolveConvexHttpSiteOrigin();
+    const connectHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    if (isMobileHandoffFlow && statePayload.mobileHandoff) {
+      // Mobile flow: authenticate to Convex via the one-time handoff. The
+      // Convex HTTP action will trade it for the mobile user's Convex row.
+      connectHeaders["X-Mobile-Handoff"] = statePayload.mobileHandoff;
+      logOAuthCallback("info", "oauth_callback_convex_call_mobile_handoff", {
+        provider,
+        returnPath: statePayload.returnPath,
+      });
+    } else {
+      // Web flow: authenticate to Convex using the web user's Clerk token.
+      const convexToken = await getToken({ template: "convex" });
+      if (!convexToken) {
+        throw new Error("Missing Convex auth token for OAuth callback");
+      }
+      connectHeaders.Authorization = `Bearer ${convexToken}`;
     }
 
-    const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
-    if (!convexUrl) {
-      throw new Error("Missing NEXT_PUBLIC_CONVEX_URL");
+    const connectResponse = await fetch(
+      `${convexHttpOrigin}/integrations/oauth/connect`,
+      {
+        method: "POST",
+        headers: connectHeaders,
+        body: JSON.stringify({
+          provider,
+          scopes: grantedScope,
+          accessToken,
+          refreshToken,
+          accessTokenExpiresAt,
+        }),
+      },
+    );
+
+    if (!connectResponse.ok) {
+      let detail = "";
+      try {
+        const text = await connectResponse.text();
+        if (text) {
+          try {
+            const parsed = JSON.parse(text) as {
+              message?: string;
+              code?: string;
+            };
+            detail =
+              typeof parsed.message === "string" && parsed.message.trim()
+                ? parsed.message.trim()
+                : text.slice(0, 280);
+          } catch {
+            detail = text.slice(0, 280);
+          }
+        }
+      } catch {
+        // ignore
+      }
+      throw new Error(
+        `Convex OAuth connect failed (${connectResponse.status})${detail ? `: ${detail}` : ""}`,
+      );
     }
 
-    const convex = new ConvexHttpClient(convexUrl);
-    convex.setAuth(convexToken);
-
-    await convex.mutation(api.integrations.connectIntegration, {
-      provider,
-      scopes: grantedScope,
-      accessToken,
-      refreshToken,
-      accessTokenExpiresAt,
-    });
-
-    logOAuthCallback("info", "oauth_callback_connect_mutation_succeeded", {
+    logOAuthCallback("info", "oauth_callback_connect_http_succeeded", {
       provider,
       userId,
       returnPath: statePayload.returnPath,

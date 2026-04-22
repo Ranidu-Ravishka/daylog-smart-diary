@@ -31,7 +31,7 @@ export async function writeAuditLogImpl(
   });
 
   await ctx.db.insert("platformAuditEvents", {
-    category: "integration_health",
+    category: "admin",
     action: `admin:${args.action}`,
     actorType: "admin",
     actorUserId: admin._id,
@@ -51,7 +51,8 @@ export async function adminDeleteAuditLogImpl(
   args: { auditLogId: Id<"auditLogs"> },
 ) {
   const admin = await requireAdmin(ctx);
-  const isProduction = (process.env.NODE_ENV ?? "").toLowerCase() === "production";
+  const isProduction =
+    (process.env.NODE_ENV ?? "").toLowerCase() === "production";
 
   if (isProduction) {
     // Fail-closed in production: audit logs are immutable.
@@ -64,7 +65,7 @@ export async function adminDeleteAuditLogImpl(
   await ctx.db.delete(args.auditLogId);
 
   await ctx.db.insert("platformAuditEvents", {
-    category: "integration_health",
+    category: "admin",
     action: "admin:delete_audit_log",
     actorType: "admin",
     actorUserId: admin._id,

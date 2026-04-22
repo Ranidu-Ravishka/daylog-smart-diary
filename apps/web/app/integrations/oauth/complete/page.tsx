@@ -56,7 +56,10 @@ function buildMobileDeepLink(
 
 function OAuthCompleteContent() {
   const searchParams = useSearchParams();
-  const status = searchParams.get("integrationStatus") ?? "success";
+  // Default to "unknown" (never "success") so missing redirect params are
+  // surfaced as a failure, not silently masked as a successful connection.
+  const rawStatus = searchParams.get("integrationStatus");
+  const status = rawStatus === "success" ? "success" : "error";
   const message = safeMessage(searchParams.get("integrationMessage"));
   const provider = searchParams.get("integrationProvider") ?? "provider";
   const mode = searchParams.get("mode") ?? "web";

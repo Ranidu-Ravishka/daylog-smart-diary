@@ -29,6 +29,19 @@ const DEFAULT_USER_DELETION_BATCH_SIZE = 128;
 const DEFAULT_ADMIN_USERS_PAGE_LIMIT = 50;
 const MAX_ADMIN_USERS_PAGE_LIMIT = 200;
 
+export const getUserIdByClerkIdInternal = internalQuery({
+  args: {
+    clerkUserId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await ctx.db
+      .query("user")
+      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", args.clerkUserId))
+      .unique();
+    return user?._id;
+  },
+});
+
 function clampAdminUsersPageLimit(value: number | undefined): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return DEFAULT_ADMIN_USERS_PAGE_LIMIT;

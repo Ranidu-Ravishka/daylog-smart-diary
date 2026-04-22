@@ -15,7 +15,8 @@ const backendSentryTracesSampleRate = toSampleRate(
 );
 const BACKEND_SENTRY_MODULE = ["@sentry", "node"].join("/");
 const REDACTED = "<redacted>";
-const SECRET_KEY_PATTERN = /(token|secret|password|authorization|api[-_]?key|cookie)/i;
+const SECRET_KEY_PATTERN =
+  /(token|secret|password|authorization|api[-_]?key|cookie)/i;
 
 type SerializableError = {
   name: string;
@@ -131,7 +132,9 @@ function toSafeCorrelationId(value: unknown): string | null {
   return trimmed.slice(0, 120);
 }
 
-function ensureCorrelationContext(context: StructuredContext): StructuredContext {
+function ensureCorrelationContext(
+  context: StructuredContext,
+): StructuredContext {
   const requestId =
     toSafeCorrelationId(context.requestId) ??
     toSafeCorrelationId(context.reqId) ??
@@ -407,7 +410,15 @@ function writeStructured(
     console.info(line);
   }
 
-  emitSentryEvent(level, event, error, safeContext, userId, status, errorMessage);
+  emitSentryEvent(
+    level,
+    event,
+    error,
+    safeContext,
+    userId,
+    status,
+    errorMessage,
+  );
 }
 
 export function logInfo(event: string, context: StructuredContext = {}) {

@@ -162,6 +162,13 @@ describe("summary generation behavior", () => {
     const runMutation = vi
       .fn()
       .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce({
+        generationEventId: "event_001",
+        evaluated: true,
+        lowQuality: false,
+        overallScore: 0.9,
+      })
+      .mockResolvedValueOnce("attempt_001")
       .mockResolvedValueOnce({ _id: "summary_001", generatedAt: 123 })
       .mockResolvedValueOnce({ success: true });
 
@@ -193,9 +200,9 @@ describe("summary generation behavior", () => {
       limit: 32,
     });
 
-    expect(runMutation).toHaveBeenCalledTimes(3);
+    expect(runMutation).toHaveBeenCalledTimes(5);
 
-    const upsertCallArgs = runMutation.mock.calls[1]?.[1] as {
+    const upsertCallArgs = runMutation.mock.calls[3]?.[1] as {
       metrics?: {
         steps?: number;
         spendingTotal?: number;
@@ -262,6 +269,13 @@ describe("summary generation behavior", () => {
     const runMutation = vi
       .fn()
       .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce({
+        generationEventId: "event_002",
+        evaluated: true,
+        lowQuality: false,
+        overallScore: 0.9,
+      })
+      .mockResolvedValueOnce("attempt_002")
       .mockResolvedValueOnce({ _id: "summary_002", generatedAt: 456 })
       .mockResolvedValueOnce({ success: true });
 
@@ -284,7 +298,7 @@ describe("summary generation behavior", () => {
       generatedAt: 456,
     });
 
-    const upsertCallArgs = runMutation.mock.calls[1]?.[1] as {
+    const upsertCallArgs = runMutation.mock.calls[3]?.[1] as {
       metrics?: {
         steps?: number;
         sleepMinutes?: number;
@@ -345,6 +359,13 @@ describe("summary generation behavior", () => {
     const runMutation = vi
       .fn()
       .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce({
+        generationEventId: "event_003",
+        evaluated: true,
+        lowQuality: false,
+        overallScore: 0.9,
+      })
+      .mockResolvedValueOnce("attempt_003")
       .mockResolvedValueOnce({ _id: "summary_003", generatedAt: 789 })
       .mockResolvedValueOnce({ success: true });
 
@@ -376,7 +397,7 @@ describe("summary generation behavior", () => {
       limit: 32,
     });
 
-    const qualityArgs = runMutation.mock.calls[2]?.[1] as {
+    const qualityArgs = runMutation.mock.calls[1]?.[1] as {
       modelInput: string;
     };
     const modelInputBytes = new TextEncoder().encode(
@@ -454,7 +475,11 @@ describe("summary generation behavior", () => {
     const runMutation = vi
       .fn()
       .mockResolvedValueOnce({ success: true })
-      .mockResolvedValueOnce({ success: true });
+      .mockResolvedValueOnce({
+        generationEventId: "event_fail_001",
+        evaluated: false,
+      })
+      .mockResolvedValueOnce("attempt_fail_001");
 
     await expect(
       generateSummaryForDay(
@@ -470,7 +495,7 @@ describe("summary generation behavior", () => {
       message: "OpenAI request failed (400)",
     });
 
-    expect(runMutation).toHaveBeenCalledTimes(2);
+    expect(runMutation).toHaveBeenCalledTimes(3);
   });
 
   it("returns unavailable when ai summary feature flag is disabled", async () => {
@@ -509,5 +534,102 @@ describe("summary generation behavior", () => {
 
     expect(runQuery).toHaveBeenCalledTimes(1);
     expect(runMutation).not.toHaveBeenCalled();
+  });
+
+  it("retries low-quality summaries when autopilot is enabled", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    story: "Too short",
+                    highlights: ["short"],
+                    sourcesUsed: ["Memories"],
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    story:
+                      "Today started with focused planning and two completed priorities, followed by a healthy walk and clear preparation for tomorrow.",
+                    highlights: ["Completed priorities", "Healthy walk"],
+                    sourcesUsed: ["Memories"],
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const runQuery = vi
+      .fn()
+      .mockResolvedValueOnce({
+        flags: {
+          aiSummaryEnabled: true,
+          aiSummaryAutopilotEnabled: true,
+        },
+      })
+      .mockResolvedValueOnce([{ title: "Memory", happenedAt: 1 }])
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ userId: "user_001" });
+
+    const runMutation = vi
+      .fn()
+      // attempt 1
+      .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce({
+        generationEventId: "event_low",
+        evaluated: true,
+        lowQuality: true,
+        overallScore: 0.2,
+      })
+      .mockResolvedValueOnce("attempt_low")
+      // attempt 2
+      .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce({
+        generationEventId: "event_good",
+        evaluated: true,
+        lowQuality: false,
+        overallScore: 0.9,
+      })
+      .mockResolvedValueOnce("attempt_good")
+      // save + mark best
+      .mockResolvedValueOnce({ _id: "summary_best", generatedAt: 999 })
+      .mockResolvedValueOnce({ success: true });
+
+    const generateSummaryForDay = handler<
+      { dayKey: string },
+      { success: boolean; summaryId?: string }
+    >(summaryGenerationModule.generateSummaryForDay);
+
+    const result = await generateSummaryForDay(
+      {
+        runQuery,
+        runMutation,
+      },
+      { dayKey: "2026-04-08" },
+    );
+
+    expect(result.success).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(runMutation).toHaveBeenCalledTimes(8);
   });
 });

@@ -710,9 +710,8 @@ export const ingestObservabilityInfoEvent = httpAction(async (ctx, request) => {
 
   let replayDecision: ReplayNonceConsumeResult | null = null;
   try {
-    replayDecision = (await ctx.runMutation(
-      (internal as any).observabilityIngestion
-        .consumeObservabilityIngestNonceInternal,
+    replayDecision = await ctx.runMutation(
+      internal.observabilityIngestion.consumeObservabilityIngestNonceInternal,
       {
         nonce: authContext.tokenId,
         userId: authContext.userId,
@@ -721,7 +720,7 @@ export const ingestObservabilityInfoEvent = httpAction(async (ctx, request) => {
         expiresAtSeconds: authContext.expiresAtSeconds,
         consumedAt: Date.now(),
       },
-    )) as ReplayNonceConsumeResult;
+    );
   } catch (error) {
     captureException("observability_info_event_replay_guard_failed", error, {
       status: "failed_closed",

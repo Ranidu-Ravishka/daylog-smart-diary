@@ -23,4 +23,15 @@ crons.interval(
   },
 );
 
+// Purge consumed/expired mobile OAuth handoff codes. Rows naturally expire
+// after 10 minutes; this keeps the table from growing unbounded.
+crons.interval(
+  "purge-oauth-mobile-handoffs-hourly",
+  { hours: 1 },
+  internal.integrations.purgeExpiredOAuthMobileHandoffsInternal,
+  {
+    limit: 500,
+  },
+);
+
 export default crons;

@@ -33,6 +33,12 @@ import { MemoryCard, type MemoryData } from "@/components/MemoryCard";
 import { DashboardDatePicker } from "@/components/DashboardDatePicker";
 import { captureException, logInfo, logWarn } from "@/lib/observability";
 import { toastError, toastSuccess } from "@/lib/toast";
+import type {
+  DashboardDay,
+  DashboardIntegrationSource,
+  DashboardSummary,
+  GenerateSummaryForDayResult,
+} from "@/lib/types/dashboard";
 
 function LoadingSkeleton() {
   return (
@@ -152,19 +158,12 @@ function getSummaryGenerationErrorMessage(error: unknown): string {
 }
 
 function getSummaryGenerationFailureResultMessage(
-  result: unknown,
+  result: GenerateSummaryForDayResult,
 ): string | null {
-  if (typeof result !== "object" || result === null) return null;
+  if (result.success !== false) return null;
 
-  const candidate = result as {
-    success?: unknown;
-    message?: unknown;
-  };
-
-  if (candidate.success !== false) return null;
-
-  if (typeof candidate.message === "string" && candidate.message.trim()) {
-    return candidate.message.trim();
+  if (typeof result.message === "string" && result.message.trim()) {
+    return result.message.trim();
   }
 
   return "Failed to generate summary. Please try again.";
@@ -191,7 +190,7 @@ export default function DashboardPage() {
   const summary = useQuery(
     api.summaries.getSummaryByDay,
     isAuthenticated ? { dayKey } : "skip",
-  );
+  ) as DashboardSummary | undefined;
   const {
     results: memories,
     status: memoriesStatus,
@@ -201,11 +200,14 @@ export default function DashboardPage() {
     isAuthenticated ? { dayKey } : "skip",
     { initialNumItems: MEMORIES_PAGE_SIZE },
   );
-  const day = useQuery(api.days.getDay, isAuthenticated ? { dayKey } : "skip");
+  const day = useQuery(
+    api.days.getDay,
+    isAuthenticated ? { dayKey } : "skip",
+  ) as DashboardDay | undefined;
   const integrationDailyData = useQuery(
     api.integrations.listMyIntegrationDailyDataForDay,
     isAuthenticated ? { dayKey } : "skip",
-  );
+  ) as Array<DashboardIntegrationSource> | undefined;
 
   const memoriesWithThumbnail = memories as Array<
     MemoryData & { thumbnailUrl?: string | null }
@@ -264,7 +266,9 @@ export default function DashboardPage() {
     setIsGeneratingSummary(true);
 
     try {
-      const result = await generateSummaryForDay({ dayKey });
+      const result = (await generateSummaryForDay({
+        dayKey,
+      })) as GenerateSummaryForDayResult;
       const failureMessage = getSummaryGenerationFailureResultMessage(result);
 
       if (failureMessage) {
@@ -309,9 +313,9 @@ export default function DashboardPage() {
     ? (MOOD_EMOJI[moodFromMemories] ?? "😐")
     : "—";
 
-  const sourceRows = (integrationDailyData ?? []).slice().sort((a, b) => {
-    return b.syncedAt - a.syncedAt;
-  });
+  const sourceRows = (integrationDailyData ?? [])
+    .slice()
+    .sort((a, b) => b.syncedAt - a.syncedAt);
 
   const providerLabel: Record<string, string> = {
     location: "Location (coarse foreground)",

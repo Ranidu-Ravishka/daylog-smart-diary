@@ -32,6 +32,8 @@ type TableName =
   | "memoryMedia"
   | "days"
   | "summaryGenerationQuotas"
+  | "summaryGenerationQuotaReservations"
+  | "oauthMobileHandoffs"
   | "exportJobs"
   | "restoreJobs"
   | "daySummaries"
@@ -94,6 +96,16 @@ const INDEX_FIELDS: Record<TableName, Record<string, string[]>> = {
   summaryGenerationQuotas: {
     by_user_day: ["userId", "quotaDayKey"],
     by_quotaDayKey: ["quotaDayKey"],
+  },
+  summaryGenerationQuotaReservations: {
+    by_userId: ["userId"],
+    by_user_day_idempotency: ["userId", "quotaDayKey", "idempotencyKey"],
+    by_quotaDayKey: ["quotaDayKey"],
+  },
+  oauthMobileHandoffs: {
+    by_code: ["code"],
+    by_userId: ["userId"],
+    by_expiresAt: ["expiresAt"],
   },
   exportJobs: {
     by_user_requestedAt: ["userId", "requestedAt"],
@@ -461,6 +473,10 @@ export class InMemoryDb {
       adminDashboardMetrics: [...(seed?.adminDashboardMetrics ?? [])],
       featureFlags: [...(seed?.featureFlags ?? [])],
       userDeletionJobs: [...(seed?.userDeletionJobs ?? [])],
+      summaryGenerationQuotaReservations: [
+        ...(seed?.summaryGenerationQuotaReservations ?? []),
+      ],
+      oauthMobileHandoffs: [...(seed?.oauthMobileHandoffs ?? [])],
     };
   }
 

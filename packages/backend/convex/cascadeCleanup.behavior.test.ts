@@ -133,6 +133,7 @@ describe("cascade cleanup behavior", () => {
     expect(deleted).toEqual({
       deletedMemories: 1,
       deletedSummaries: 1,
+      deletedIntegrationDailyData: 0,
     });
     expect(storageDelete).toHaveBeenCalledWith("storage_010");
     expect(db.getTable("daySummaries").map((row) => row._id)).toEqual([
@@ -306,6 +307,8 @@ describe("cascade cleanup behavior", () => {
       deletedSummaryGenerationEvents: 0,
       deletedSummaryQualityEvaluations: 0,
       deletedSummaryGenerationQuotas: 1,
+      deletedSummaryGenerationQuotaReservations: 0,
+      deletedOAuthMobileHandoffs: 0,
     });
 
     expect(storageDelete).toHaveBeenCalledWith("storage_user_001");

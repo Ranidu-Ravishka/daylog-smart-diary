@@ -40,9 +40,15 @@ const DEV_FALLBACK_CONVEX_URL = "http://localhost:4334";
 const CONVEX_URL_ENV_VAR = "EXPO_PUBLIC_CONVEX_URL";
 const CONVEX_URL_ENV_ALIASES = ["NEXT_PUBLIC_CONVEX_URL", "CONVEX_URL"];
 const CONVEX_URL_CONFIG_KEY = "expo.extra.convexUrl";
+const CLERK_PUBLISHABLE_KEY_ENV_VAR = "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY";
 
 type ConvexBootstrap = {
   client: ConvexReactClient | null;
+  startupError: Error | null;
+};
+
+type ClerkBootstrap = {
+  publishableKey: string | null;
   startupError: Error | null;
 };
 
@@ -114,6 +120,45 @@ function bootstrapConvexClient(): ConvexBootstrap {
 }
 
 const convexBootstrap = bootstrapConvexClient();
+
+function resolveClerkPublishableKeyOrThrow(): string {
+  const publishableKey = toOptionalString(
+    process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY,
+  );
+
+  if (!publishableKey) {
+    throw new Error(
+      `Missing Clerk publishable key. Set ${CLERK_PUBLISHABLE_KEY_ENV_VAR} and restart the app.`,
+    );
+  }
+
+  return publishableKey;
+}
+
+function bootstrapClerkKey(): ClerkBootstrap {
+  try {
+    return {
+      publishableKey: resolveClerkPublishableKeyOrThrow(),
+      startupError: null,
+    };
+  } catch (error) {
+    const startupError =
+      error instanceof Error
+        ? error
+        : new Error("Unexpected Clerk startup misconfiguration.");
+
+    captureException("mobile_startup_clerk_bootstrap_failed", startupError, {
+      envName: CLERK_PUBLISHABLE_KEY_ENV_VAR,
+    });
+
+    return {
+      publishableKey: null,
+      startupError,
+    };
+  }
+}
+
+const clerkBootstrap = bootstrapClerkKey();
 
 export const unstable_settings = {
   anchor: "(tabs)",
@@ -284,10 +329,12 @@ function RootAuthBoundary({ children }: { children: React.ReactNode }) {
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
-  const startupError = convexBootstrap.startupError;
+  const startupError =
+    convexBootstrap.startupError ?? clerkBootstrap.startupError;
   const convexClient = convexBootstrap.client;
+  const clerkPublishableKey = clerkBootstrap.publishableKey;
 
-  if (startupError || !convexClient) {
+  if (startupError || !convexClient || !clerkPublishableKey) {
     const isDark = colorScheme === "dark";
 
     return (
@@ -305,9 +352,7 @@ export default function RootLayout() {
   }
 
   return (
-    <ClerkProvider
-      publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!}
-    >
+    <ClerkProvider publishableKey={clerkPublishableKey}>
       <ConvexAuthProvider client={convexClient}>
         <AppThemeProvider>
           <AppThemedShell>

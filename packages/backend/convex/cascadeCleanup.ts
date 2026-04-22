@@ -31,11 +31,14 @@ export type UserCascadeDeleteCounts = {
   deletedSummaryGenerationEvents: number;
   deletedSummaryQualityEvaluations: number;
   deletedSummaryGenerationQuotas: number;
+  deletedSummaryGenerationQuotaReservations: number;
+  deletedOAuthMobileHandoffs: number;
 };
 
 export type DayCascadeDeleteCounts = {
   deletedMemories: number;
   deletedSummaries: number;
+  deletedIntegrationDailyData: number;
 };
 
 export type UserCascadeDeleteProgress = UserCascadeDeleteCounts;
@@ -58,6 +61,8 @@ export const USER_CASCADE_DELETION_STAGES = [
   "auditLogs",
   "platformAuditEvents",
   "summaryGenerationQuotas",
+  "summaryGenerationQuotaReservations",
+  "oauthMobileHandoffs",
 ] as const;
 
 export type UserCascadeDeletionStage =
@@ -99,6 +104,8 @@ function emptyUserCascadeDeleteProgress(): UserCascadeDeleteProgress {
     deletedSummaryGenerationEvents: 0,
     deletedSummaryQualityEvaluations: 0,
     deletedSummaryGenerationQuotas: 0,
+    deletedSummaryGenerationQuotaReservations: 0,
+    deletedOAuthMobileHandoffs: 0,
   };
 }
 
@@ -136,6 +143,11 @@ function mergeUserCascadeDeleteProgress(
     deletedSummaryGenerationQuotas:
       base.deletedSummaryGenerationQuotas +
       delta.deletedSummaryGenerationQuotas,
+    deletedSummaryGenerationQuotaReservations:
+      base.deletedSummaryGenerationQuotaReservations +
+      delta.deletedSummaryGenerationQuotaReservations,
+    deletedOAuthMobileHandoffs:
+      base.deletedOAuthMobileHandoffs + delta.deletedOAuthMobileHandoffs,
   };
 }
 
@@ -160,6 +172,9 @@ function toUserCascadeDeleteCounts(
     deletedSummaryGenerationEvents: progress.deletedSummaryGenerationEvents,
     deletedSummaryQualityEvaluations: progress.deletedSummaryQualityEvaluations,
     deletedSummaryGenerationQuotas: progress.deletedSummaryGenerationQuotas,
+    deletedSummaryGenerationQuotaReservations:
+      progress.deletedSummaryGenerationQuotaReservations,
+    deletedOAuthMobileHandoffs: progress.deletedOAuthMobileHandoffs,
   };
 }
 
@@ -678,6 +693,60 @@ async function deleteSummaryQuotasByUserBatch(
   };
 }
 
+async function deleteSummaryQuotaReservationsByUserBatch(
+  ctx: CascadeCtx,
+  userId: Id<"user">,
+  cursor: string | null,
+  batchSize: number,
+): Promise<BatchDeleteResult> {
+  const page = await ctx.db
+    .query("summaryGenerationQuotaReservations")
+    .withIndex("by_userId", (q) => q.eq("userId", userId))
+    .paginate({
+      numItems: batchSize,
+      cursor,
+    });
+
+  let deleted = 0;
+  for (const reservation of page.page) {
+    await ctx.db.delete(reservation._id);
+    deleted += 1;
+  }
+
+  return {
+    deleted,
+    isDone: page.isDone,
+    nextCursor: page.isDone ? null : page.continueCursor,
+  };
+}
+
+async function deleteOAuthMobileHandoffsByUserBatch(
+  ctx: CascadeCtx,
+  userId: Id<"user">,
+  cursor: string | null,
+  batchSize: number,
+): Promise<BatchDeleteResult> {
+  const page = await ctx.db
+    .query("oauthMobileHandoffs")
+    .withIndex("by_userId", (q) => q.eq("userId", userId))
+    .paginate({
+      numItems: batchSize,
+      cursor,
+    });
+
+  let deleted = 0;
+  for (const handoff of page.page) {
+    await ctx.db.delete(handoff._id);
+    deleted += 1;
+  }
+
+  return {
+    deleted,
+    isDone: page.isDone,
+    nextCursor: page.isDone ? null : page.continueCursor,
+  };
+}
+
 export async function runUserCascadeDeletionStageBatch(
   ctx: CascadeCtx,
   input: UserCascadeBatchInput,
@@ -857,6 +926,26 @@ export async function runUserCascadeDeletionStageBatch(
       deleted.deletedSummaryGenerationQuotas = result.deleted;
       break;
     }
+    case "summaryGenerationQuotaReservations": {
+      result = await deleteSummaryQuotaReservationsByUserBatch(
+        ctx,
+        input.userId,
+        input.cursor,
+        batchSize,
+      );
+      deleted.deletedSummaryGenerationQuotaReservations = result.deleted;
+      break;
+    }
+    case "oauthMobileHandoffs": {
+      result = await deleteOAuthMobileHandoffsByUserBatch(
+        ctx,
+        input.userId,
+        input.cursor,
+        batchSize,
+      );
+      deleted.deletedOAuthMobileHandoffs = result.deleted;
+      break;
+    }
     default: {
       throw new Error("Unsupported user deletion stage");
     }
@@ -932,8 +1021,22 @@ export async function deleteDayCascadeData(
     deletedMemories += 1;
   }
 
+  const integrationDailyRows = await ctx.db
+    .query("integrationDailyData")
+    .withIndex("by_user_day", (q) =>
+      q.eq("userId", input.userId).eq("dayKey", input.dayKey),
+    )
+    .collect();
+
+  let deletedIntegrationDailyData = 0;
+  for (const row of integrationDailyRows) {
+    await ctx.db.delete(row._id);
+    deletedIntegrationDailyData += 1;
+  }
+
   return {
     deletedMemories,
     deletedSummaries,
+    deletedIntegrationDailyData,
   };
 }

@@ -16,12 +16,18 @@ export default function OAuthCompleteRoute() {
 
   useEffect(() => {
     const timeout = setTimeout(() => {
+      // NOTE: Default to "unknown" (never "success") when the redirect omits
+      // the status field. The profile screen treats anything other than an
+      // explicit "success" as a failure. Fabricating "success" here would
+      // mask broken upstream redirects and produce ghost integrations.
       router.replace({
         pathname: "/(tabs)/profile",
         params: {
           integrationProvider: params.integrationProvider ?? "provider",
-          integrationStatus: params.integrationStatus ?? "success",
-          integrationMessage: params.integrationMessage ?? "OAuth completed.",
+          integrationStatus: params.integrationStatus ?? "unknown",
+          integrationMessage:
+            params.integrationMessage ??
+            "OAuth flow completed but the provider did not report a status.",
         },
       });
     }, 120);

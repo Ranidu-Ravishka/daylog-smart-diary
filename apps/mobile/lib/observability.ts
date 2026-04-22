@@ -188,7 +188,22 @@ function writeStructuredLog(
     ...(serializedError ? { error: serializedError } : {}),
   };
 
-  const line = JSON.stringify(payload);
+  let line = "";
+  try {
+    line = JSON.stringify(payload);
+  } catch {
+    line = JSON.stringify({
+      schemaVersion: 1,
+      app: "daylog",
+      surface: "mobile",
+      level,
+      event,
+      timestamp: new Date().toISOString(),
+      status,
+      errorMessage,
+      context: { serializationFailed: true },
+    });
+  }
 
   if (level === "error") {
     console.error(line);

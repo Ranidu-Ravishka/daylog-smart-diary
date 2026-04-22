@@ -363,23 +363,66 @@ export const listMyIntegrationHealth = query({
       .withIndex("by_user_provider", (q) => q.eq("userId", user._id))
       .take(MAX_PROVIDER_HEALTH_SUMMARY_ROWS);
 
-    return await Promise.all(
-      integrations.map(async (integration) => {
-        const health = await ctx.db
-          .query("integrationProviderHealth")
-          .withIndex("by_provider", (q) =>
-            q.eq("provider", integration.provider),
-          )
-          .unique();
+    const recentUserEvents = await ctx.db
+      .query("integrationHealthEvents")
+      .withIndex("by_userId_at", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .take(MAX_PROVIDER_HEALTH_SUMMARY_ROWS);
 
-        return {
-          provider: integration.provider,
-          integrationStatus: integration.status,
-          integrationLastSyncAt: integration.lastSyncAt,
-          integrationLastError: integration.lastError,
-          health,
-        };
-      }),
-    );
+    return integrations.map((integration) => {
+      const providerEvents = recentUserEvents.filter(
+        (event) => event.provider === integration.provider,
+      );
+      const mostRecentEvent = providerEvents[0];
+      const hasRecentFailure = providerEvents.some(
+        (event) => event.outcome === "error",
+      );
+
+      // `providerEvents` is sorted desc (newest first). UI/reliability logic
+      // expects oldest→newest for `recentOutcomes[recentOutcomes.length - 1]`
+      // to represent the *latest* outcome, so reverse once.
+      const orderedEvents = [...providerEvents].reverse();
+      const recentOutcomes = orderedEvents
+        .slice(-RECENT_OUTCOME_WINDOW)
+        .map((event) => event.outcome);
+      const recentFailures = orderedEvents
+        .filter((event) => event.outcome === "error")
+        .slice(-MAX_RECENT_FAILURES)
+        .map((event) => ({
+          at: event.at,
+          error: event.error ?? "Provider sync failed",
+          dayKey: event.dayKey,
+          userId: event.userId,
+        }));
+
+      const lastSuccessEvent = orderedEvents
+        .slice()
+        .reverse()
+        .find((event) => event.outcome === "success");
+
+      const health = {
+        status:
+          integration.status === "connected"
+            ? hasRecentFailure
+              ? ("degraded" as const)
+              : ("connected" as const)
+            : ("failed" as const),
+        tokenValidityStatus: mostRecentEvent?.tokenValidityStatus ?? "unknown",
+        lastOutcome: mostRecentEvent?.outcome,
+        lastError: mostRecentEvent?.error,
+        lastSyncAt: lastSuccessEvent?.at ?? integration.lastSyncAt,
+        updatedAt: mostRecentEvent?.at ?? integration.lastSyncAt,
+        recentOutcomes,
+        recentFailures,
+      };
+
+      return {
+        provider: integration.provider,
+        integrationStatus: integration.status,
+        integrationLastSyncAt: integration.lastSyncAt,
+        integrationLastError: integration.lastError,
+        health,
+      };
+    });
   },
 });

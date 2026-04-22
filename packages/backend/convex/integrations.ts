@@ -27,6 +27,7 @@ import {
   getActiveIntegrationSecretKeyId,
 } from "./integrationSecretsCrypto";
 import { recordIntegrationHealthEventInDb } from "./integrationHealth";
+import type { PlatformAuditCategory } from "./platformAudit";
 import { captureException, logInfo, logWarn } from "./observability";
 import {
   getBackgroundLocationBatchFlushIntervalMinutes,
@@ -287,7 +288,7 @@ type LegacyUnsupportedProviderCursorMap = Partial<
 >;
 
 type PlatformAuditEventRecord = {
-  category: "retention" | "summary_quality" | "integration_health" | "deletion";
+  category: PlatformAuditCategory;
   action: string;
   actorType: "system" | "admin" | "user";
   actorUserId?: Id<"user">;
@@ -1248,101 +1249,262 @@ async function upsertIntegrationDailyDataDoc(
   return await typedDb.get(id);
 }
 
+type ConnectIntegrationArgs = {
+  provider: string;
+  scopes?: string[];
+  accessToken?: string;
+  refreshToken?: string;
+  accessTokenExpiresAt?: number;
+};
+
+async function connectIntegrationForUser(
+  ctx: MutationCtx,
+  userId: Id<"user">,
+  args: ConnectIntegrationArgs,
+) {
+  const provider = assertIntegrationProvider(args.provider);
+  const plugin = getRequiredIntegrationPlugin(provider);
+
+  logInfo("integration_connect.started", {
+    status: "started",
+    userId,
+    provider,
+    scopesCount: args.scopes?.length ?? 0,
+    hasAccessToken: Boolean(args.accessToken),
+    hasRefreshToken: Boolean(args.refreshToken),
+  });
+
+  if (plugin.connectionMode === "oauth" && !args.accessToken) {
+    throw new Error(
+      `Provider "${provider}" requires an OAuth access token. Start the OAuth flow before connecting.`,
+    );
+  }
+
+  const existing = await ctx.db
+    .query("integrations")
+    .withIndex("by_user_provider", (q) =>
+      q.eq("userId", userId).eq("provider", provider),
+    )
+    .unique();
+
+  // Reuse the existing opaque token reference on reconnect so we mutate the
+  // already-linked `integrationSecrets` row in place instead of orphaning it.
+  const existingOpaqueTokenRef =
+    existing?.tokenRef && isOpaqueTokenRef(existing.tokenRef)
+      ? existing.tokenRef
+      : undefined;
+
+  const nextTokenRef = args.accessToken
+    ? await upsertIntegrationSecret(ctx.db as never, {
+        userId,
+        provider,
+        accessToken: args.accessToken,
+        refreshToken: args.refreshToken,
+        accessTokenExpiresAt: args.accessTokenExpiresAt,
+        existingTokenRef: existingOpaqueTokenRef,
+      })
+    : undefined;
+
+  if (existing) {
+    await ctx.db.patch(existing._id, {
+      status: "connected" as const,
+      lastError: undefined,
+      scopes: args.scopes,
+      tokenRef: nextTokenRef ?? existing.tokenRef,
+      lastSyncAt: Date.now(),
+    });
+
+    logInfo("integration_connect.succeeded", {
+      status: "succeeded",
+      userId,
+      provider,
+      integrationId: existing._id,
+      mode: "reconnect",
+      tokenRefPersisted: Boolean(nextTokenRef ?? existing.tokenRef),
+    });
+
+    return await ctx.db.get(existing._id);
+  }
+
+  const id = await ctx.db.insert("integrations", {
+    userId,
+    provider,
+    status: "connected",
+    lastError: undefined,
+    scopes: args.scopes,
+    tokenRef: nextTokenRef,
+    lastSyncAt: Date.now(),
+  });
+
+  await applyDashboardMetricsDelta(ctx.db, {
+    totalIntegrations: 1,
+  });
+
+  logInfo("integration_connect.succeeded", {
+    status: "succeeded",
+    userId,
+    provider,
+    integrationId: id,
+    mode: "create",
+    tokenRefPersisted: Boolean(nextTokenRef),
+  });
+
+  return await ctx.db.get(id);
+}
+
 // ── Connect a new integration ───────────────────────────────
+// Public mutation intentionally excludes secret-bearing OAuth tokens.
 export const connectIntegration = mutation({
   args: {
     provider: v.string(),
     scopes: v.optional(v.array(v.string())),
-    accessToken: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    return await connectIntegrationForUser(ctx, user._id, args);
+  },
+});
+
+export const connectIntegrationWithOAuthTokensInternal = internalMutation({
+  args: {
+    userId: v.id("user"),
+    provider: v.string(),
+    scopes: v.optional(v.array(v.string())),
+    accessToken: v.string(),
     refreshToken: v.optional(v.string()),
     accessTokenExpiresAt: v.optional(v.number()),
   },
+  handler: async (ctx, args) => {
+    return await connectIntegrationForUser(ctx, args.userId, args);
+  },
+});
+
+// ── Mobile → web OAuth handoff ─────────────────────────────
+// The mobile app opens `WebBrowser.openAuthSessionAsync(...)` which uses an
+// isolated cookie jar. The web OAuth callback therefore cannot reliably
+// identify the mobile user via `auth()` — whatever Clerk session happens to
+// be in the in-app browser's cookies would be used, which in practice is
+// often a different (or no) account. The resulting integration is persisted
+// on the wrong `user` row and never appears on the mobile device.
+//
+// To fix this, the mobile app requests a short-lived opaque handoff code
+// *before* opening the browser (using the mobile's Clerk session). The web
+// OAuth callback forwards this code to the Convex HTTP action, which trades
+// it for the correct mobile `userId`. The code is single-use and
+// provider-scoped to prevent replay/confusion.
+const OAUTH_MOBILE_HANDOFF_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const OAUTH_MOBILE_HANDOFF_CODE_BYTES = 32; // 256-bit entropy
+
+function generateOAuthMobileHandoffCode(): string {
+  // Convex provides a globally-available `crypto` object (Web Crypto API).
+  const bytes = new Uint8Array(OAUTH_MOBILE_HANDOFF_CODE_BYTES);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
+    "",
+  );
+}
+
+export const beginOAuthMobileHandoff = mutation({
+  args: { provider: v.string() },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
     const provider = assertIntegrationProvider(args.provider);
     const plugin = getRequiredIntegrationPlugin(provider);
 
-    logInfo("integration_connect.started", {
-      status: "started",
-      userId: user._id,
-      provider,
-      scopesCount: args.scopes?.length ?? 0,
-      hasAccessToken: Boolean(args.accessToken),
-      hasRefreshToken: Boolean(args.refreshToken),
-    });
-
-    const accessToken = args.accessToken;
-
-    if (plugin.connectionMode === "oauth" && !accessToken) {
+    if (plugin.connectionMode !== "oauth") {
       throw new Error(
-        `Provider "${provider}" requires an OAuth access token. Start the OAuth flow before connecting.`,
+        `Provider "${provider}" does not use OAuth; handoff is not required.`,
       );
     }
 
-    const nextTokenRef = accessToken
-      ? await upsertIntegrationSecret(ctx.db as never, {
-          userId: user._id,
-          provider,
-          accessToken,
-          refreshToken: args.refreshToken,
-          accessTokenExpiresAt: args.accessTokenExpiresAt,
-        })
-      : undefined;
+    const now = Date.now();
+    const code = generateOAuthMobileHandoffCode();
+    await ctx.db.insert("oauthMobileHandoffs", {
+      code,
+      userId: user._id,
+      provider,
+      createdAt: now,
+      expiresAt: now + OAUTH_MOBILE_HANDOFF_TTL_MS,
+    });
 
-    // Check if this provider is already connected
-    const existing = await ctx.db
-      .query("integrations")
-      .withIndex("by_user_provider", (q) =>
-        q.eq("userId", user._id).eq("provider", provider),
-      )
+    logInfo("oauth_mobile_handoff.issued", {
+      area: "oauth_mobile_handoff",
+      userId: user._id,
+      provider,
+      codePrefix: code.slice(0, 8),
+      expiresAt: now + OAUTH_MOBILE_HANDOFF_TTL_MS,
+    });
+
+    return { handoffCode: code };
+  },
+});
+
+export const consumeOAuthMobileHandoffInternal = internalMutation({
+  args: { code: v.string() },
+  handler: async (ctx, args) => {
+    const normalized = args.code.trim();
+    if (!normalized) return null;
+
+    const row = await ctx.db
+      .query("oauthMobileHandoffs")
+      .withIndex("by_code", (q) => q.eq("code", normalized))
       .unique();
-
-    if (existing) {
-      // Re-connect / update
-      await ctx.db.patch(existing._id, {
-        status: "connected" as const,
-        lastError: undefined,
-        scopes: args.scopes,
-        tokenRef: nextTokenRef ?? existing.tokenRef,
-        lastSyncAt: Date.now(),
+    if (!row) {
+      logWarn("oauth_mobile_handoff.consume_missing", {
+        area: "oauth_mobile_handoff",
+        codePrefix: normalized.slice(0, 8),
       });
-
-      logInfo("integration_connect.succeeded", {
-        status: "succeeded",
-        userId: user._id,
-        provider,
-        integrationId: existing._id,
-        mode: "reconnect",
-        tokenRefPersisted: Boolean(nextTokenRef ?? existing.tokenRef),
-      });
-
-      return await ctx.db.get(existing._id);
+      return null;
     }
 
-    const id = await ctx.db.insert("integrations", {
-      userId: user._id,
-      provider,
-      status: "connected",
-      lastError: undefined,
-      scopes: args.scopes,
-      tokenRef: nextTokenRef,
-      lastSyncAt: Date.now(),
+    const now = Date.now();
+    if (row.consumedAt !== undefined) {
+      logWarn("oauth_mobile_handoff.consume_already_used", {
+        area: "oauth_mobile_handoff",
+        userId: row.userId,
+        provider: row.provider,
+        codePrefix: normalized.slice(0, 8),
+      });
+      return null;
+    }
+    if (row.expiresAt < now) {
+      logWarn("oauth_mobile_handoff.consume_expired", {
+        area: "oauth_mobile_handoff",
+        userId: row.userId,
+        provider: row.provider,
+        codePrefix: normalized.slice(0, 8),
+      });
+      return null;
+    }
+
+    await ctx.db.patch(row._id, { consumedAt: now });
+
+    logInfo("oauth_mobile_handoff.consumed", {
+      area: "oauth_mobile_handoff",
+      userId: row.userId,
+      provider: row.provider,
+      codePrefix: normalized.slice(0, 8),
     });
 
-    await applyDashboardMetricsDelta(ctx.db, {
-      totalIntegrations: 1,
-    });
+    return { userId: row.userId, provider: row.provider };
+  },
+});
 
-    logInfo("integration_connect.succeeded", {
-      status: "succeeded",
-      userId: user._id,
-      provider,
-      integrationId: id,
-      mode: "create",
-      tokenRefPersisted: Boolean(nextTokenRef),
-    });
+// Periodic purge of consumed/expired handoff rows (invoked by crons).
+export const purgeExpiredOAuthMobileHandoffsInternal = internalMutation({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const limit = Math.max(1, Math.min(1000, args.limit ?? 500));
+    const expired = await ctx.db
+      .query("oauthMobileHandoffs")
+      .withIndex("by_expiresAt", (q) => q.lt("expiresAt", now))
+      .take(limit);
 
-    return await ctx.db.get(id);
+    for (const row of expired) {
+      await ctx.db.delete(row._id);
+    }
+    return { deleted: expired.length };
   },
 });
 

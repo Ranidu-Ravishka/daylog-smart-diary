@@ -28,6 +28,7 @@ import {
 } from "./sensitiveDataFields";
 import {
   getUtcDayKey,
+  releaseSummaryGenerationSlotForUser,
   reserveSummaryGenerationSlotForUser,
   upsertSummaryForUserDay,
 } from "./summaries/services/summaryCoreService";
@@ -47,6 +48,7 @@ type SummaryDocRecord = Doc<"daySummaries"> & SummarySensitiveRecord;
 
 export {
   getUtcDayKey,
+  releaseSummaryGenerationSlotForUser,
   reserveSummaryGenerationSlotForUser,
   upsertSummaryForUserDay,
 };
@@ -220,8 +222,10 @@ export const getSummaryQuotaForDay = query({
 
 // ── Reserve one generation slot for today (UTC). Throws when quota exceeded. ──
 export const reserveSummaryGenerationSlot = mutation({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    idempotencyKey: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
     const user = await requireUser(ctx);
     const now = Date.now();
     const limit = getSummaryDailyGenerationLimit();
@@ -231,6 +235,30 @@ export const reserveSummaryGenerationSlot = mutation({
       user._id,
       now,
       limit,
+      args.idempotencyKey,
+    );
+  },
+});
+
+/**
+ * Release (refund) a previously-consumed quota reservation. Invoked as a
+ * compensating action when a summary generation succeeds at the model layer
+ * but fails during persistence, so the user is not penalized for a slot that
+ * produced no saved summary. Safe to call multiple times — refunds at most
+ * one slot per idempotency key.
+ */
+export const releaseSummaryGenerationSlotInternal = internalMutation({
+  args: {
+    userId: v.id("user"),
+    idempotencyKey: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    return await releaseSummaryGenerationSlotForUser(
+      ctx.db,
+      args.userId,
+      now,
+      args.idempotencyKey,
     );
   },
 });

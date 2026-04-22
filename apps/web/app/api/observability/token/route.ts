@@ -361,7 +361,10 @@ export async function POST(request: NextRequest) {
         headers: {
           "Cache-Control": "no-store, no-cache, max-age=0",
           "Retry-After": String(
-            Math.max(ipDecision.retryAfterSeconds, userDecision.retryAfterSeconds),
+            Math.max(
+              ipDecision.retryAfterSeconds,
+              userDecision.retryAfterSeconds,
+            ),
           ),
         },
       },

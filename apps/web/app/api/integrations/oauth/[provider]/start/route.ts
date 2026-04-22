@@ -17,10 +17,22 @@ const OAUTH_COOKIE_PREFIX = "daylog_oauth_state_";
 
 type OAuthStateCookiePayload = {
   state: string;
-  userId: string;
+  // `userId` is the *web* Clerk userId that started the flow. It is null
+  // when the flow was initiated by the mobile app (which authenticates via
+  // a server-brokered handoff code instead of a web Clerk session).
+  userId: string | null;
   provider: string;
   returnPath: string;
+  // Opaque one-time code minted by the mobile app's authenticated Convex
+  // session. When present, the callback uses it to identify the Convex user
+  // on integration persist instead of relying on the web Clerk session.
+  mobileHandoff?: string;
 };
+
+// Basic shape check for the opaque 32-byte hex code minted by Convex.
+function isValidMobileHandoffFormat(value: string): boolean {
+  return /^[a-f0-9]{64}$/i.test(value);
+}
 
 export const runtime = "nodejs";
 
@@ -48,16 +60,45 @@ export async function GET(
   const returnPath = safeReturnPath(
     request.nextUrl.searchParams.get("returnTo"),
   );
+  const rawMobileHandoff = request.nextUrl.searchParams
+    .get("mobileHandoff")
+    ?.trim();
+  const mobileHandoff =
+    rawMobileHandoff && isValidMobileHandoffFormat(rawMobileHandoff)
+      ? rawMobileHandoff
+      : undefined;
 
-  const { userId } = await auth();
-  if (!userId) {
-    logWarn("oauth_start_unauthenticated_redirect", {
+  // When a valid mobile handoff is provided, the flow is authenticated by
+  // the Convex-issued handoff code rather than a web Clerk session. This is
+  // critical for Expo's `WebBrowser.openAuthSessionAsync`, whose in-app
+  // browser has an isolated cookie jar that cannot carry the mobile user's
+  // Clerk identity. Without this path the web callback would persist the
+  // integration onto whatever (stale/different) Clerk session happens to
+  // exist in the browser, not the mobile user.
+  let webClerkUserId: string | null = null;
+  if (mobileHandoff) {
+    logInfo("oauth_start_mobile_handoff_accepted", {
       area: "oauth_start",
       provider,
       returnPath,
+      codePrefix: mobileHandoff.slice(0, 8),
     });
-    return NextResponse.redirect(new URL("/sign-in", request.url));
+  } else {
+    const { userId } = await auth();
+    if (!userId) {
+      logWarn("oauth_start_unauthenticated_redirect", {
+        area: "oauth_start",
+        provider,
+        returnPath,
+      });
+      return NextResponse.redirect(new URL("/sign-in", request.url));
+    }
+    webClerkUserId = userId;
   }
+
+  // Alias kept so the existing log and error-path statements below continue
+  // to report a stable correlation id even when `webClerkUserId` is null.
+  const userId = webClerkUserId ?? "mobile_handoff";
 
   if (isIntegrationProviderComingSoon(provider)) {
     const definition = getIntegrationProviderDefinition(provider);
@@ -152,9 +193,10 @@ export async function GET(
   const response = NextResponse.redirect(authUrl.toString());
   const payload: OAuthStateCookiePayload = {
     state,
-    userId,
+    userId: webClerkUserId,
     provider,
     returnPath,
+    mobileHandoff,
   };
 
   logInfo("oauth_start_provider_redirect_issued", {

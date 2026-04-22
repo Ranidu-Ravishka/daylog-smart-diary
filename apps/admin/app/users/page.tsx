@@ -1,6 +1,7 @@
 "use client";
 
 import AdminGuard from "@/components/admin-guard";
+import type { AdminDeleteUserResult } from "@/lib/types/adminQueries";
 import {
   buildActiveDeletionStatusByUserId,
   buildRowDeletionStatusByUserId,
@@ -659,12 +660,7 @@ export default function UsersPage() {
       try {
         const result = (await deleteUser({
           userId: row._id,
-        })) as {
-          queued?: boolean;
-          jobId?: string;
-          status?: DeletionJobStatus;
-          stage?: string;
-        };
+        })) as AdminDeleteUserResult;
 
         const jobId = result.jobId;
 

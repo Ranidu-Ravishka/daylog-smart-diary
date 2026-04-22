@@ -172,13 +172,7 @@ export const appendDayLogEntries = mutation({
         updates.rating = args.rating;
       }
 
-      if (manualNotesToAdd.length > 0) {
-        updates.manualNotes = nextManualNotes;
-      }
-
-      if (peopleTagsToAdd.length > 0) {
-        // No-op: encrypted patch below applies merged people tags.
-      }
+      // Sensitive day fields are applied through encrypted payload only.
 
       const shouldEncryptSensitiveFields =
         manualNotesToAdd.length > 0 ||
@@ -383,6 +377,7 @@ export const deleteDay = mutation({
         dayKey: day.dayKey,
         deletedMemories: deleted.deletedMemories,
         deletedSummaries: deleted.deletedSummaries,
+        deletedIntegrationDailyData: deleted.deletedIntegrationDailyData,
         durationMs: Date.now() - startedAt,
       });
 

@@ -171,16 +171,22 @@ export function IntegrationsSection({
       integration?.status ??
       healthSnapshot?.integrationStatus ??
       "disconnected";
-    const lastOutcome = health?.recentOutcomes.length
-      ? health.recentOutcomes[health.recentOutcomes.length - 1]
+    const recentOutcomes = Array.isArray(health?.recentOutcomes)
+      ? health.recentOutcomes
+      : [];
+    const recentFailures = Array.isArray(health?.recentFailures)
+      ? health.recentFailures
+      : [];
+    const lastOutcome = recentOutcomes.length
+      ? recentOutcomes[recentOutcomes.length - 1]
       : undefined;
     const syncState = deriveSyncReliabilityState({
       integrationStatus,
       healthStatus: health?.status,
       lastOutcome,
     });
-    const latestFailure = health?.recentFailures.length
-      ? health.recentFailures[health.recentFailures.length - 1]
+    const latestFailure = recentFailures.length
+      ? recentFailures[recentFailures.length - 1]
       : undefined;
 
     return {
@@ -189,7 +195,7 @@ export function IntegrationsSection({
       integrationStatus,
       syncState,
       healthUpdatedAt: health?.updatedAt,
-      recentFailures: health?.recentFailures ?? [],
+      recentFailures,
       lastSyncAt:
         health?.lastSyncAt ??
         healthSnapshot?.integrationLastSyncAt ??
@@ -386,16 +392,22 @@ export function IntegrationsSection({
               provider === "apple_health" && Boolean(appleHealthSetupIssue);
             const isSyncing =
               pending === "sync" || syncRun?.status === "in_progress";
-            const lastOutcome = health?.recentOutcomes.length
-              ? health.recentOutcomes[health.recentOutcomes.length - 1]
+            const recentOutcomes = Array.isArray(health?.recentOutcomes)
+              ? health.recentOutcomes
+              : [];
+            const recentFailures = Array.isArray(health?.recentFailures)
+              ? health.recentFailures
+              : [];
+            const lastOutcome = recentOutcomes.length
+              ? recentOutcomes[recentOutcomes.length - 1]
               : undefined;
             const syncState = deriveSyncReliabilityState({
               integrationStatus: status,
               healthStatus: health?.status,
               lastOutcome,
             });
-            const latestFailure = health?.recentFailures.length
-              ? health.recentFailures[health.recentFailures.length - 1]
+            const latestFailure = recentFailures.length
+              ? recentFailures[recentFailures.length - 1]
               : undefined;
             const warningMessage =
               syncState === "failure"

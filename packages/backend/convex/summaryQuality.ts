@@ -245,6 +245,7 @@ export const recordSummaryGenerationEvaluationInternal = internalMutation({
     sourcesUsed: v.optional(v.array(v.string())),
     failureReason: v.optional(v.string()),
     summaryId: v.optional(v.id("daySummaries")),
+    attemptChainId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     validateDayKey(args.dayKey);
@@ -264,6 +265,7 @@ export const recordSummaryGenerationEvaluationInternal = internalMutation({
       success: args.success,
       failureReason,
       summaryId: args.summaryId,
+      attemptChainId: args.attemptChainId,
       createdAt: now,
     });
 
@@ -326,6 +328,7 @@ export const recordSummaryGenerationEvaluationInternal = internalMutation({
       evaluated: true,
       lowQuality: evaluation.lowQuality,
       overallScore: evaluation.scores.overall,
+      flags: evaluation.flags,
     };
   },
 });
@@ -375,6 +378,107 @@ export const listSummaryGenerationEventsPaginated = query({
       .withIndex("by_createdAt")
       .order("desc")
       .paginate(args.paginationOpts);
+  },
+});
+
+export const listSummaryAttemptsByChainForAdmin = query({
+  args: {
+    attemptChainId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+    const chainId = args.attemptChainId.trim();
+    if (!chainId) {
+      throw new Error("attemptChainId is required");
+    }
+
+    const attempts = await ctx.db
+      .query("aiSummaryAttempts")
+      .withIndex("by_attemptChainId_attemptNumber", (q) =>
+        q.eq("attemptChainId", chainId),
+      )
+      .order("asc")
+      .collect();
+
+    // Never expose raw model output in admin list surfaces.
+    return attempts.map((attempt) => ({
+      ...attempt,
+      outputSummary: undefined,
+    }));
+  },
+});
+
+export const recordSummaryAttemptInternal = internalMutation({
+  args: {
+    userId: v.id("user"),
+    dayKey: v.string(),
+    attemptChainId: v.string(),
+    generationEventId: v.id("summaryGenerationEvents"),
+    attemptNumber: v.number(),
+    strategy: v.union(
+      v.literal("default"),
+      v.literal("concise"),
+      v.literal("factual_bias"),
+      v.literal("source_grounded"),
+      v.literal("structured_output"),
+    ),
+    inputHash: v.string(),
+    outputSummary: v.optional(v.string()),
+    qualityScore: v.optional(v.number()),
+    evaluationFlags: v.array(v.string()),
+    failureReason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    validateDayKey(args.dayKey);
+    return await ctx.db.insert("aiSummaryAttempts", {
+      userId: args.userId,
+      dayKey: args.dayKey,
+      attemptChainId: args.attemptChainId.trim(),
+      generationEventId: args.generationEventId,
+      attemptNumber: Math.max(1, Math.floor(args.attemptNumber)),
+      strategy: args.strategy,
+      inputHash: args.inputHash.slice(0, 128),
+      // Do not persist raw generated text in attempt telemetry records.
+      outputSummary: undefined,
+      qualityScore: args.qualityScore,
+      evaluationFlags: args.evaluationFlags.slice(0, 16),
+      failureReason: toFailureReason(args.failureReason),
+      createdAt: Date.now(),
+    });
+  },
+});
+
+export const markSummaryGenerationBestAttemptInternal = internalMutation({
+  args: {
+    generationEventId: v.id("summaryGenerationEvents"),
+    selectedBestAttemptId: v.id("aiSummaryAttempts"),
+  },
+  handler: async (ctx, args) => {
+    const event = await ctx.db.get(args.generationEventId);
+    if (!event) {
+      throw new Error("Summary generation event not found");
+    }
+    const attempt = await ctx.db.get(args.selectedBestAttemptId);
+    if (!attempt) {
+      throw new Error("Selected summary attempt not found");
+    }
+    if (attempt.generationEventId !== event._id) {
+      throw new Error("Selected attempt does not belong to generation event");
+    }
+    if (
+      event.attemptChainId &&
+      attempt.attemptChainId !== event.attemptChainId
+    ) {
+      throw new Error("Selected attempt chain mismatch");
+    }
+
+    await ctx.db.patch(event._id, {
+      selectedBestAttemptId: args.selectedBestAttemptId,
+    });
+
+    return {
+      success: true,
+    };
   },
 });
 

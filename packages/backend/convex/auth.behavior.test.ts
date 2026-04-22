@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Id } from "./_generated/dataModel";
-import { listAuditLogsPaginatedImpl } from "./admin";
+import { listAuditLogsPaginatedImpl } from "./admin/services/auditLogsService";
 import { requireAdmin, requireIdentityMatch, requireUser } from "./authz";
 import { createAuthCtx, createInMemoryDb } from "../test-utils/inMemoryConvex";
 

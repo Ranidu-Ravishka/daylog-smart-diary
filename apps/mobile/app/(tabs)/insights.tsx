@@ -153,11 +153,10 @@ const InsightsScreen = () => {
     isAuthenticated ? { limit: 30, refreshToken } : "skip",
   );
 
-  const isLoading =
-    isAuthLoading || (isAuthenticated && memories === undefined);
-
   const isRefreshDataReady =
     !isAuthenticated || (summaries !== undefined && memories !== undefined);
+
+  const isLoading = isAuthLoading || (isAuthenticated && !isRefreshDataReady);
 
   React.useEffect(() => {
     if (!isRefreshDataReady) return;
@@ -177,7 +176,7 @@ const InsightsScreen = () => {
 
     const interval = setInterval(() => {
       setRelativeNow(Date.now());
-    }, 1_000);
+    }, 30_000);
 
     return () => {
       clearInterval(interval);
@@ -198,33 +197,46 @@ const InsightsScreen = () => {
     return memories.filter(isMemoryDoc);
   }, [memories]);
 
-  if (isLoading) return <InsightsSkeleton />;
-
-  // Derive mood trends (last 7 days)
-  const dayLabels = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
-  const today = new Date();
-  const moodTrendsData = Array.from({ length: 7 }, (_, i) => {
-    const date = new Date(today);
-    date.setDate(date.getDate() - (6 - i));
-    const dayKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-    const dayOfWeek =
-      dayLabels[date.getDay() === 0 ? 6 : date.getDay() - 1] ?? "?";
-
-    const dayMemories = resolvedMemories.filter((m) => m.dayKey === dayKey);
-    let value: number | null = null;
-    if (dayMemories.length > 0) {
-      const moodScores = dayMemories
-        .filter((m) => m.mood)
-        .map((m) => MOOD_VALUES[m.mood ?? "neutral"] ?? 50);
-      if (moodScores.length > 0) {
-        value = Math.round(
-          moodScores.reduce((a: number, b: number) => a + b, 0) /
-            moodScores.length,
-        );
+  const memoriesByDayKey = React.useMemo(() => {
+    const grouped = new Map<string, MemoryDoc[]>();
+    for (const memory of resolvedMemories) {
+      const current = grouped.get(memory.dayKey);
+      if (current) {
+        current.push(memory);
+      } else {
+        grouped.set(memory.dayKey, [memory]);
       }
     }
-    return { value, day: dayOfWeek };
-  });
+    return grouped;
+  }, [resolvedMemories]);
+
+  // Derive mood trends (last 7 days)
+  const moodTrendsData = React.useMemo(() => {
+    const dayLabels = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+    const today = new Date();
+    return Array.from({ length: 7 }, (_, i) => {
+      const date = new Date(today);
+      date.setDate(date.getDate() - (6 - i));
+      const dayKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      const dayOfWeek =
+        dayLabels[date.getDay() === 0 ? 6 : date.getDay() - 1] ?? "?";
+
+      const dayMemories = memoriesByDayKey.get(dayKey) ?? [];
+      let value: number | null = null;
+      if (dayMemories.length > 0) {
+        const moodScores = dayMemories
+          .filter((m) => m.mood)
+          .map((m) => MOOD_VALUES[m.mood ?? "neutral"] ?? 50);
+        if (moodScores.length > 0) {
+          value = Math.round(
+            moodScores.reduce((a: number, b: number) => a + b, 0) /
+              moodScores.length,
+          );
+        }
+      }
+      return { value, day: dayOfWeek };
+    });
+  }, [memoriesByDayKey]);
 
   const moodValues = moodTrendsData
     .map((item) => item.value)
@@ -256,6 +268,8 @@ const InsightsScreen = () => {
   const maxMoodCount = topMoods.length > 0 ? topMoods[0]![1] : 1;
 
   const hasData = resolvedMemories.length > 0 || resolvedSummaries.length > 0;
+
+  if (isLoading) return <InsightsSkeleton />;
 
   if (!hasData) {
     return (

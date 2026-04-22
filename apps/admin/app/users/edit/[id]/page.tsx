@@ -3,6 +3,7 @@
 import AdminGuard from "@/components/admin-guard";
 import UserForm from "@/components/form/userForm";
 import { idQueryArg, toEntityId } from "@/lib/admin-ids";
+import type { ApiErrorResponse } from "@/lib/types/adminQueries";
 import { api } from "@repo/backend/convex";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useParams } from "next/navigation";
@@ -32,9 +33,9 @@ export default function EditUserPage() {
     });
 
     if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as {
-        error?: string;
-      } | null;
+      const payload = (await response
+        .json()
+        .catch(() => null)) as ApiErrorResponse | null;
       throw new Error(
         payload?.error ??
           "User was demoted, but session revocation failed. Ask the user to sign out manually.",

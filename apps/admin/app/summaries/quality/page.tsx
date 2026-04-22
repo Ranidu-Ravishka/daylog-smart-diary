@@ -39,6 +39,8 @@ type SummaryGenerationEventRow = {
   modelName: string;
   success: boolean;
   failureReason?: string;
+  attemptChainId?: string;
+  selectedBestAttemptId?: string;
   createdAt: number;
 };
 
@@ -356,6 +358,9 @@ export default function SummaryQualityPage() {
                           Model
                         </th>
                         <th className="px-4 py-3 text-left font-medium">
+                          Attempt Chain
+                        </th>
+                        <th className="px-4 py-3 text-left font-medium">
                           Failure
                         </th>
                       </tr>
@@ -372,6 +377,9 @@ export default function SummaryQualityPage() {
                             </td>
                             <td className="px-4 py-3 text-gray-700">
                               {row.modelProvider}:{row.modelName}
+                            </td>
+                            <td className="px-4 py-3 font-mono text-xs text-gray-700">
+                              {row.attemptChainId ?? "—"}
                             </td>
                             <td className="max-w-lg px-4 py-3 text-xs text-gray-700">
                               {row.failureReason ?? "Unknown failure"}
