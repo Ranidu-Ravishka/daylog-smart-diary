@@ -141,7 +141,7 @@ EXPO_PUBLIC_SENTRY_DSN=
 
 Convex deployment environment variables (set in Convex dashboard):
 
-```dotenv
+````dotenv
 CLERK_JWT_ISSUER_DOMAIN=
 CLERK_WEBHOOK_SECRET=
 EXPORT_SIGNING_SECRET=
@@ -175,9 +175,25 @@ SPOTIFY_CLIENT_SECRET=
 SENTRY_DSN=
 
 # Integration secret encryption (required for production OAuth token encryption)
-INTEGRATION_SECRETS_KEYRING_JSON=
-INTEGRATION_SECRETS_ACTIVE_KEY_ID=
-```
+# Preferred (KMS-backed): set a KMS key id to avoid plaintext key material in envs.
+# - `INTEGRATION_SECRETS_KMS_KEY_ID` — Preferred production KMS key identifier (for example an AWS KMS KeyId or ARN). When set, the backend will use KMS to wrap/unwrap DEKs.
+# - `INTEGRATION_SECRETS_KEY_RING_URI` — Optional provider-specific key ring identifier for other KMS providers.
+# - `INTEGRATION_SECRETS_AUDIT_LOG_PATH` — Optional local path where the backend will append audit events during rotation.
+# Local-dev fallback (developer machines only):
+# - `INTEGRATION_SECRETS_LOCAL_KEK_PATH` — Path to a 0600 file containing a base64-encoded 32-byte AES key; generate with `scripts/init-local-integration-kms.mjs`.
+# Legacy (migration only):
+# - `INTEGRATION_SECRETS_KEYRING_JSON` — JSON mapping of key ids to base64-encoded AES-256 keys (deprecated for new deployments).
+# - `INTEGRATION_SECRETS_ACTIVE_KEY_ID` — active key id for the legacy keyring (deprecated once migrated).
+
+If you are migrating from the legacy keyring to KMS, a rotation helper is available in `scripts/rotate-integration-kms.mjs` which will set the KMS env and invoke an internal Convex rotation mutation to re-encrypt existing DB records. Example:
+
+```bash
+node scripts/rotate-integration-kms.mjs --target <target> --new-key-id <KMS_KEY_ID> --admin-subject <admin-identity>
+````
+
+Use `--dry-run` to preview changes first. Keep the legacy keyring readable until rotation completes and you have validated decryption across your deployment.
+
+````
 
 Use environment-specific retention values from [DEPLOY_RUNBOOK.md](DEPLOY_RUNBOOK.md#2-environment-matrix).
 
@@ -211,7 +227,7 @@ Where to get each variable:
 
 ```bash
 pnpm dev:backend
-```
+````
 
 ### 5. Run web
 

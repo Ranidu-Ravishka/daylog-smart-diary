@@ -98,7 +98,9 @@ When changing architecture or runtime behavior:
 Before merging changes that affect production configuration or deployment, run this checklist:
 
 1. Add or update required repository secrets (do not commit secrets to source):
-  - `CLERK_JWT_ISSUER_DOMAIN`, `CLERK_WEBHOOK_SECRET`, `OPENAI_API_KEY`, `EXPORT_SIGNING_SECRET`, `INTEGRATION_SECRETS_KEYRING_JSON`, `INTEGRATION_SECRETS_ACTIVE_KEY_ID`.
+
+- `CLERK_JWT_ISSUER_DOMAIN`, `CLERK_WEBHOOK_SECRET`, `OPENAI_API_KEY`, `EXPORT_SIGNING_SECRET`, `INTEGRATION_SECRETS_KEYRING_JSON`, `INTEGRATION_SECRETS_ACTIVE_KEY_ID`.
+
 2. Run the validator locally to verify formats and keys:
 
 ```bash
