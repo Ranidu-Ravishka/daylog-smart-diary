@@ -3,6 +3,10 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { ConvexHttpClient } from "convex/browser";
 import { NextResponse } from "next/server";
 import { captureException, logInfo, logWarn } from "@/lib/observability";
+import {
+  evaluateAdminRateLimit,
+  resolveRateLimitIdentity,
+} from "@/server/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -97,6 +101,12 @@ export async function POST(request: Request) {
       status: "unauthorized",
     });
     return errorResponse("Unauthorized", 401);
+  }
+  const rateLimitDecision = evaluateAdminRateLimit(
+    resolveRateLimitIdentity(request, userId),
+  );
+  if (!rateLimitDecision.allowed) {
+    return errorResponse("Too many requests", 429);
   }
 
   const requestBody = (await request.json().catch(() => null)) as {

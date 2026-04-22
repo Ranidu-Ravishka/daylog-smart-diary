@@ -17,6 +17,12 @@ const OPAQUE_TOKEN_REF_PREFIX = "tokref_";
 const ACCESS_TOKEN_REFRESH_LEEWAY_MS = 60_000;
 const TOKEN_REFRESH_MAX_ATTEMPTS = 3;
 const TOKEN_REFRESH_BASE_BACKOFF_MS = 300;
+const TOKEN_REFRESH_CIRCUIT_THRESHOLD = 5;
+const TOKEN_REFRESH_CIRCUIT_COOLDOWN_MS = 60_000;
+const refreshCircuitState = new Map<
+  OAuthRefreshProvider,
+  { failures: number; openedUntil: number }
+>();
 
 export type IntegrationSecretRecord = {
   _id: Id<"integrationSecrets">;
@@ -108,6 +114,36 @@ function tokenRefreshBackoff(attempt: number): number {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function ensureRefreshCircuitAllows(provider: OAuthRefreshProvider): void {
+  const state = refreshCircuitState.get(provider);
+  if (!state) return;
+  if (state.openedUntil > Date.now()) {
+    throw new Error(
+      `Token refresh circuit open for provider "${provider}". Retry later.`,
+    );
+  }
+}
+
+function registerRefreshSuccess(provider: OAuthRefreshProvider): void {
+  refreshCircuitState.set(provider, {
+    failures: 0,
+    openedUntil: 0,
+  });
+}
+
+function registerRefreshFailure(provider: OAuthRefreshProvider): void {
+  const current = refreshCircuitState.get(provider) ?? {
+    failures: 0,
+    openedUntil: 0,
+  };
+  const failures = current.failures + 1;
+  const openedUntil =
+    failures >= TOKEN_REFRESH_CIRCUIT_THRESHOLD
+      ? Date.now() + TOKEN_REFRESH_CIRCUIT_COOLDOWN_MS
+      : current.openedUntil;
+  refreshCircuitState.set(provider, { failures, openedUntil });
 }
 
 async function refreshOAuthAccessToken(
@@ -259,13 +295,17 @@ export async function refreshOAuthAccessTokenWithRetry(
   provider: OAuthRefreshProvider,
   refreshToken: string,
 ): Promise<RefreshedTokenPayload> {
+  ensureRefreshCircuitAllows(provider);
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= TOKEN_REFRESH_MAX_ATTEMPTS; attempt++) {
     try {
-      return await refreshOAuthAccessToken(provider, refreshToken);
+      const refreshed = await refreshOAuthAccessToken(provider, refreshToken);
+      registerRefreshSuccess(provider);
+      return refreshed;
     } catch (error) {
       lastError = error;
+      registerRefreshFailure(provider);
 
       const shouldRetry =
         attempt < TOKEN_REFRESH_MAX_ATTEMPTS &&

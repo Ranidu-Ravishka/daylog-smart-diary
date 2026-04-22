@@ -22,11 +22,21 @@ export async function writeAuditLogImpl(
   args: { action: string; target?: string },
 ) {
   const admin = await requireAdmin(ctx);
+  const now = Date.now();
   const id = await ctx.db.insert("auditLogs", {
     actorUserId: admin._id,
     action: args.action,
     target: args.target,
-    at: Date.now(),
+    at: now,
+  });
+
+  await ctx.db.insert("platformAuditEvents", {
+    category: "integration_health",
+    action: `admin:${args.action}`,
+    actorType: "admin",
+    actorUserId: admin._id,
+    target: args.target,
+    at: now,
   });
 
   await applyDashboardMetricsDelta(ctx.db, {
@@ -40,10 +50,27 @@ export async function adminDeleteAuditLogImpl(
   ctx: MutationCtx,
   args: { auditLogId: Id<"auditLogs"> },
 ) {
-  await requireAdmin(ctx);
+  const admin = await requireAdmin(ctx);
+  const isProduction = (process.env.NODE_ENV ?? "").toLowerCase() === "production";
+
+  if (isProduction) {
+    // Fail-closed in production: audit logs are immutable.
+    throw new Error("Audit logs are immutable and cannot be deleted");
+  }
+
+  // Backward-compatible behavior for non-production/test environments.
   const log = await ctx.db.get(args.auditLogId);
   if (!log) throw new Error("Audit log not found");
   await ctx.db.delete(args.auditLogId);
+
+  await ctx.db.insert("platformAuditEvents", {
+    category: "integration_health",
+    action: "admin:delete_audit_log",
+    actorType: "admin",
+    actorUserId: admin._id,
+    target: String(args.auditLogId),
+    at: Date.now(),
+  });
 
   await applyDashboardMetricsDelta(ctx.db, {
     totalAuditLogs: -1,
