@@ -56,6 +56,8 @@ import type * as summaries from "../summaries.js";
 import type * as summaries_services_summaryCoreService from "../summaries/services/summaryCoreService.js";
 import type * as summaries_utilities_exportSigning from "../summaries/utilities/exportSigning.js";
 import type * as summaries_utilities_restoreExportUtils from "../summaries/utilities/restoreExportUtils.js";
+import type * as summaryCircuitBreaker from "../summaryCircuitBreaker.js";
+import type * as summaryFallback from "../summaryFallback.js";
 import type * as summaryGeneration from "../summaryGeneration.js";
 import type * as summaryQuality from "../summaryQuality.js";
 import type * as unsupportedProviders from "../unsupportedProviders.js";
@@ -119,6 +121,8 @@ declare const fullApi: ApiFromModules<{
   "summaries/services/summaryCoreService": typeof summaries_services_summaryCoreService;
   "summaries/utilities/exportSigning": typeof summaries_utilities_exportSigning;
   "summaries/utilities/restoreExportUtils": typeof summaries_utilities_restoreExportUtils;
+  summaryCircuitBreaker: typeof summaryCircuitBreaker;
+  summaryFallback: typeof summaryFallback;
   summaryGeneration: typeof summaryGeneration;
   summaryQuality: typeof summaryQuality;
   unsupportedProviders: typeof unsupportedProviders;

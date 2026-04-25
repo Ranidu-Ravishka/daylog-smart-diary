@@ -10,7 +10,9 @@ import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { requireUser } from "./authz";
 import { validateDayKey } from "./validators";
-import { logInfo } from "./observability";
+import { logInfo, logWarn } from "./observability";
+import { callOpenAiChatJson } from "./providerAdapters";
+import { convexServerEnv } from "./env";
 
 const getSummaryGenerationIdentityRef = makeFunctionReference<"query">(
   "summaries:getSummaryGenerationIdentity",
@@ -59,6 +61,54 @@ type TrendVector = {
 const FEATURE_VECTOR_VERSION = 1;
 const DEFAULT_WINDOW_DAYS = 14;
 const MAX_WINDOW_DAYS = 30;
+
+// In-memory TTL cache for insight narratives. The same underlying metrics
+// yield the same narrative, so if a user re-opens the Insights tab within
+// a few minutes, we short-circuit and avoid repeat LLM spend. Cache is
+// process-local (acceptable: repeat requests within a single process get
+// the benefit; cross-process is still cheap because the input hash changes
+// only when data changes).
+const INSIGHT_NARRATIVE_CACHE_TTL_MS = 5 * 60_000;
+const INSIGHT_NARRATIVE_CACHE_MAX_ENTRIES = 512;
+type InsightNarrativeCacheEntry = {
+  inputHash: string;
+  expiresAtMs: number;
+  value: unknown;
+};
+const insightNarrativeCache = new Map<string, InsightNarrativeCacheEntry>();
+
+function insightNarrativeCacheKey(
+  userId: Id<"user">,
+  windowDays: number,
+): string {
+  return `${userId}:${windowDays}`;
+}
+
+function hashInsightNarrativeInput(input: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+}
+
+function evictExpiredInsightNarrativeCache(nowMs: number): void {
+  if (insightNarrativeCache.size < INSIGHT_NARRATIVE_CACHE_MAX_ENTRIES) return;
+  for (const [key, entry] of insightNarrativeCache) {
+    if (entry.expiresAtMs <= nowMs) insightNarrativeCache.delete(key);
+  }
+  // Hard cap on cache size to bound memory under abuse / pathological traffic.
+  while (insightNarrativeCache.size >= INSIGHT_NARRATIVE_CACHE_MAX_ENTRIES) {
+    const oldestKey = insightNarrativeCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    insightNarrativeCache.delete(oldestKey);
+  }
+}
+
+export function __resetInsightNarrativeCacheForTests(): void {
+  insightNarrativeCache.clear();
+}
 
 function clampWindowDays(windowDays: number | undefined): number {
   if (typeof windowDays !== "number" || !Number.isFinite(windowDays)) {
@@ -880,5 +930,306 @@ export const getMyLatestNextBestDayRecommendation = query({
       .order("desc")
       .take(1);
     return latest[0] ?? null;
+  },
+});
+
+const INSIGHT_NARRATIVE_RESPONSE_FORMAT = {
+  type: "json_schema",
+  json_schema: {
+    name: "insight_narrative",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        narrative: { type: "string" },
+        highlights: {
+          type: "array",
+          items: { type: "string" },
+          maxItems: 4,
+        },
+        anomalies: {
+          type: "array",
+          items: { type: "string" },
+          maxItems: 4,
+        },
+        recommendedFocus: {
+          type: "array",
+          items: { type: "string" },
+          maxItems: 3,
+        },
+      },
+      required: ["narrative", "highlights", "anomalies", "recommendedFocus"],
+    },
+  },
+} as const;
+
+type InsightNarrativeResult = {
+  generatedAt: number;
+  windowDays: number;
+  sourceDays: number;
+  narrative: string;
+  highlights: string[];
+  anomalies: string[];
+  recommendedFocus: string[];
+  trend: TrendVector;
+  features: DailyFeatureVector;
+};
+
+function resolveInsightNarrativeKeys(): {
+  primaryKey: string;
+  candidateKeys: string[];
+  baseUrl?: string;
+} {
+  if (convexServerEnv.aiGatewayApiKey && convexServerEnv.aiGatewayBaseUrl) {
+    return {
+      primaryKey: convexServerEnv.aiGatewayApiKey,
+      candidateKeys: [convexServerEnv.aiGatewayApiKey],
+      baseUrl: convexServerEnv.aiGatewayBaseUrl,
+    };
+  }
+  const rotation = convexServerEnv.openAiApiKeyRotation ?? [];
+  const candidateKeys =
+    rotation.length > 0
+      ? [convexServerEnv.openAiApiKey, ...rotation]
+      : [convexServerEnv.openAiApiKey];
+  return {
+    primaryKey: convexServerEnv.openAiApiKey,
+    candidateKeys,
+    baseUrl: convexServerEnv.aiGatewayBaseUrl,
+  };
+}
+
+function summarizeFeatureVector(vector: DailyFeatureVector): string {
+  const parts: string[] = [];
+  if (typeof vector.rating === "number") {
+    parts.push(`rating ${vector.rating.toFixed(1)}`);
+  }
+  parts.push(
+    `${vector.memoryCount} memories`,
+    `${vector.highlightCount} highlights`,
+  );
+  if (typeof vector.steps === "number") {
+    parts.push(`${Math.round(vector.steps)} steps`);
+  }
+  if (typeof vector.sleepMinutes === "number") {
+    parts.push(`${Math.round(vector.sleepMinutes)} sleep min`);
+  }
+  if (typeof vector.screenTimeMinutes === "number") {
+    parts.push(`${Math.round(vector.screenTimeMinutes)} screen min`);
+  }
+  if (typeof vector.spendingTotal === "number") {
+    parts.push(`spend ${vector.spendingTotal.toFixed(2)}`);
+  }
+  if (typeof vector.meetingsCount === "number" && vector.meetingsCount > 0) {
+    parts.push(`${vector.meetingsCount} meetings`);
+  }
+  if (typeof vector.busyMinutes === "number" && vector.busyMinutes > 0) {
+    parts.push(`${Math.round(vector.busyMinutes)} busy min`);
+  }
+  if (typeof vector.callsCount === "number" && vector.callsCount > 0) {
+    parts.push(`${vector.callsCount} calls`);
+  }
+  return parts.join(", ");
+}
+
+export const generateInsightNarrative = action({
+  args: {
+    windowDays: v.optional(v.number()),
+  },
+  handler: async (ctx, args): Promise<InsightNarrativeResult> => {
+    const user = (await ctx.runQuery(getSummaryGenerationIdentityRef, {})) as {
+      userId: Id<"user">;
+    };
+    const windowDays = clampWindowDays(args.windowDays);
+
+    const recentDays = (await ctx.runQuery(api.days.listRecentDays, {
+      limit: windowDays,
+    })) as Array<{ dayKey: string }>;
+
+    if (recentDays.length === 0) {
+      throw new Error(
+        "No recent day data available to generate an insight narrative.",
+      );
+    }
+
+    const recentDayKeys = recentDays.map((d) => d.dayKey).slice(0, windowDays);
+    const { vectorsByDayKey } = await resolveVectorsForDayKeys({
+      ctx,
+      dayKeys: recentDayKeys,
+    });
+    const vectors = recentDayKeys
+      .map((dayKey) => vectorsByDayKey.get(dayKey))
+      .filter((vector): vector is DailyFeatureVector => vector !== undefined);
+
+    if (vectors.length === 0) {
+      throw new Error(
+        "No feature vectors available to generate an insight narrative.",
+      );
+    }
+
+    const latestVector = vectors[0];
+    if (!latestVector) {
+      throw new Error(
+        "Latest feature vector is missing for the narrative window.",
+      );
+    }
+    const trend = computeTrendVectors(vectors.slice().reverse());
+
+    const recentSnapshots = recentDayKeys
+      .map((dayKey, index) => {
+        const vector = vectors[index];
+        if (!vector) return null;
+        return `${dayKey}: ${summarizeFeatureVector(vector)}`;
+      })
+      .filter((line): line is string => line !== null);
+
+    const modelInput = JSON.stringify({
+      windowDays: recentDayKeys.length,
+      trend,
+      latestVector,
+      recentSnapshots,
+    });
+
+    const cacheKey = insightNarrativeCacheKey(
+      user.userId,
+      recentDayKeys.length,
+    );
+    const inputHash = hashInsightNarrativeInput(modelInput);
+    const nowMs = Date.now();
+    const cached = insightNarrativeCache.get(cacheKey);
+    if (
+      cached &&
+      cached.inputHash === inputHash &&
+      cached.expiresAtMs > nowMs
+    ) {
+      logInfo("personal_insight.narrative_cache_hit", {
+        userId: user.userId,
+        windowDays: recentDayKeys.length,
+        ageMs: INSIGHT_NARRATIVE_CACHE_TTL_MS - (cached.expiresAtMs - nowMs),
+      });
+      const safeCached = (cached.value ?? {}) as {
+        narrative?: unknown;
+        highlights?: unknown;
+        anomalies?: unknown;
+        recommendedFocus?: unknown;
+      };
+      const coerceStringArrayCached = (
+        input: unknown,
+        max: number,
+      ): string[] => {
+        if (!Array.isArray(input)) return [];
+        return input
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => item.trim())
+          .filter(Boolean)
+          .slice(0, max);
+      };
+      return {
+        generatedAt: nowMs,
+        windowDays: recentDayKeys.length,
+        sourceDays: vectors.length,
+        narrative:
+          typeof safeCached.narrative === "string" &&
+          safeCached.narrative.trim().length > 0
+            ? safeCached.narrative.trim()
+            : "Your recent days look steady — keep tracking to surface more signal.",
+        highlights: coerceStringArrayCached(safeCached.highlights, 4),
+        anomalies: coerceStringArrayCached(safeCached.anomalies, 4),
+        recommendedFocus: coerceStringArrayCached(
+          safeCached.recommendedFocus,
+          3,
+        ),
+        trend,
+        features: latestVector,
+      };
+    }
+
+    const { primaryKey, candidateKeys, baseUrl } =
+      resolveInsightNarrativeKeys();
+
+    let parsed: unknown;
+    try {
+      parsed = await callOpenAiChatJson<unknown>({
+        apiKey: primaryKey,
+        apiKeys: candidateKeys,
+        baseUrl,
+        operation: "insight_narrative",
+        model: "gpt-4o",
+        temperature: 0.25,
+        responseFormat: INSIGHT_NARRATIVE_RESPONSE_FORMAT,
+        emptyContentMessage: "Insight narrative output was empty.",
+        invalidJsonMessage: "Insight narrative output was not valid JSON.",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are an analyst that reviews multi-day behaviour metrics and writes a short, factual insight narrative. " +
+              "Only reference trends and values present in the JSON input. Do not invent data. " +
+              "Keep the narrative under 90 words. Highlights and anomalies must be short phrases.",
+          },
+          {
+            role: "user",
+            content: `Analyse these aggregated daily metrics and return the structured JSON. Input:\n${modelInput}`,
+          },
+        ],
+      });
+    } catch (error) {
+      logWarn("personal_insight.narrative_generation_failed", {
+        userId: user.userId,
+        windowDays: recentDayKeys.length,
+        errorMessage: error instanceof Error ? error.message : "unknown error",
+      });
+      throw error instanceof Error
+        ? error
+        : new Error("Insight narrative generation failed.");
+    }
+
+    const safe = (parsed ?? {}) as {
+      narrative?: unknown;
+      highlights?: unknown;
+      anomalies?: unknown;
+      recommendedFocus?: unknown;
+    };
+
+    const coerceStringArray = (input: unknown, max: number): string[] => {
+      if (!Array.isArray(input)) return [];
+      return input
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, max);
+    };
+
+    const result: InsightNarrativeResult = {
+      generatedAt: Date.now(),
+      windowDays: recentDayKeys.length,
+      sourceDays: vectors.length,
+      narrative:
+        typeof safe.narrative === "string" && safe.narrative.trim().length > 0
+          ? safe.narrative.trim()
+          : "Your recent days look steady — keep tracking to surface more signal.",
+      highlights: coerceStringArray(safe.highlights, 4),
+      anomalies: coerceStringArray(safe.anomalies, 4),
+      recommendedFocus: coerceStringArray(safe.recommendedFocus, 3),
+      trend,
+      features: latestVector,
+    };
+
+    evictExpiredInsightNarrativeCache(nowMs);
+    insightNarrativeCache.set(cacheKey, {
+      inputHash,
+      expiresAtMs: nowMs + INSIGHT_NARRATIVE_CACHE_TTL_MS,
+      value: parsed,
+    });
+
+    logInfo("personal_insight.narrative_generated", {
+      userId: user.userId,
+      windowDays: recentDayKeys.length,
+      sourceDays: vectors.length,
+      hasAnomalies: result.anomalies.length > 0,
+    });
+
+    return result;
   },
 });

@@ -102,6 +102,33 @@ function validateOpenAiApiKey(value: string): string | null {
   return null;
 }
 
+function parseOpenAiApiKeyRotation(
+  raw: string | undefined,
+  errors: EnvError[],
+): string[] {
+  if (!raw) return [];
+
+  return raw
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .filter((value) => {
+      if (isPlaceholderValue(value)) {
+        errors.push({
+          name: "OPENAI_API_KEYS",
+          reason: `contains placeholder value '${value}'`,
+        });
+        return false;
+      }
+      const reason = validateOpenAiApiKey(value);
+      if (reason) {
+        errors.push({ name: "OPENAI_API_KEYS", reason });
+        return false;
+      }
+      return true;
+    });
+}
+
 function parseBootstrapAdminIds(
   raw: string | undefined,
   errors: EnvError[],
@@ -155,6 +182,9 @@ export type ConvexServerEnv = {
   clerkWebhookSecret: string;
   exportSigningSecret?: string;
   openAiApiKey: string;
+  openAiApiKeyRotation: string[];
+  aiGatewayBaseUrl?: string;
+  aiGatewayApiKey?: string;
   adminBootstrapClerkUserIds: string[];
 };
 
@@ -183,6 +213,17 @@ function validateConvexServerEnv(): ConvexServerEnv {
     validate: validateOpenAiApiKey,
   });
 
+  const openAiApiKeyRotationRaw = readOptionalEnv("OPENAI_API_KEYS", errors);
+  const openAiApiKeyRotation = parseOpenAiApiKeyRotation(
+    openAiApiKeyRotationRaw,
+    errors,
+  );
+
+  const aiGatewayBaseUrl = readOptionalEnv("AI_GATEWAY_BASE_URL", errors, {
+    validate: validateHttpsUrl,
+  });
+  const aiGatewayApiKey = readOptionalEnv("AI_GATEWAY_API_KEY", errors);
+
   const adminBootstrapRaw = readOptionalEnv(
     "ADMIN_BOOTSTRAP_CLERK_USER_IDS",
     errors,
@@ -199,6 +240,9 @@ function validateConvexServerEnv(): ConvexServerEnv {
     clerkWebhookSecret,
     exportSigningSecret,
     openAiApiKey,
+    openAiApiKeyRotation,
+    aiGatewayBaseUrl,
+    aiGatewayApiKey,
     adminBootstrapClerkUserIds,
   };
 }

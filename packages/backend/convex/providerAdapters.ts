@@ -4,6 +4,7 @@ import {
   sanitizeProviderInput,
 } from "./integrationProviders";
 import { getDayWindow } from "../../ui/lib/day-window";
+import { logWarn } from "./observability";
 
 export type ProviderAdapter<Input, Output> = {
   id: string;
@@ -561,6 +562,8 @@ type SummaryModelAdapterInput = {
   dayKey: string;
   modelInput: string;
   apiKey: string;
+  apiKeys?: readonly string[];
+  baseUrl?: string;
   strategyGuidance?: string;
 };
 
@@ -645,93 +648,99 @@ function normalizeSummaryModelOutput(payload: unknown): SummaryModelOutput {
   };
 }
 
-const openAiSummaryAdapter: SummaryModelAdapter = {
-  id: "openai",
-  execute: async ({ dayKey, modelInput, apiKey, strategyGuidance }) => {
-    const responseJson = await executeWithProviderRetry<{
+const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+
+function normalizeOpenAiBaseUrl(baseUrl: string | undefined): string {
+  const raw = (baseUrl ?? DEFAULT_OPENAI_BASE_URL).trim();
+  if (!raw) return DEFAULT_OPENAI_BASE_URL;
+  return raw.replace(/\/+$/, "");
+}
+
+function resolveOpenAiCandidateKeys(
+  apiKey: string,
+  apiKeys: readonly string[] | undefined,
+  operation: string,
+): string[] {
+  const source = apiKeys && apiKeys.length > 0 ? apiKeys : [apiKey];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const key of source) {
+    const trimmed = typeof key === "string" ? key.trim() : "";
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    result.push(trimmed);
+  }
+  if (result.length === 0) {
+    throw new ProviderAdapterError({
+      provider: "openai",
+      operation,
+      retryable: false,
+      message: "No OpenAI API keys are configured.",
+    });
+  }
+  return result;
+}
+
+export type OpenAiChatMessage = {
+  role: "system" | "user" | "assistant";
+  content: string;
+};
+
+export type OpenAiChatJsonRequest = {
+  apiKey: string;
+  apiKeys?: readonly string[];
+  baseUrl?: string;
+  model: string;
+  temperature?: number;
+  messages: readonly OpenAiChatMessage[];
+  responseFormat: unknown;
+  operation: string;
+  emptyContentMessage?: string;
+  invalidJsonMessage?: string;
+};
+
+export async function callOpenAiChatJson<T>(
+  request: OpenAiChatJsonRequest,
+): Promise<T> {
+  const endpoint = `${normalizeOpenAiBaseUrl(request.baseUrl)}/chat/completions`;
+  const candidateKeys = resolveOpenAiCandidateKeys(
+    request.apiKey,
+    request.apiKeys,
+    request.operation,
+  );
+
+  const executeOnce = async (keyForAttempt: string) =>
+    executeWithProviderRetry<{
       choices?: Array<{ message?: { content?: string } }>;
     }>({
       maxAttempts: 3,
       baseBackoffMs: 400,
       isRetryable: isRetryableProviderAdapterError,
       execute: async () => {
-        const response = await fetch(
-          "https://api.openai.com/v1/chat/completions",
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${apiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              model: "gpt-4o",
-              temperature: 0.3,
-              response_format: {
-                type: "json_schema",
-                json_schema: {
-                  name: "day_summary",
-                  strict: true,
-                  schema: {
-                    type: "object",
-                    additionalProperties: false,
-                    properties: {
-                      story: { type: "string" },
-                      highlights: {
-                        type: "array",
-                        items: { type: "string" },
-                        maxItems: 6,
-                      },
-                      metrics: {
-                        type: "object",
-                        additionalProperties: false,
-                        properties: {
-                          steps: { type: "number" },
-                          sleepMinutes: { type: "number" },
-                          screenTimeMinutes: { type: "number" },
-                          spendingTotal: { type: "number" },
-                        },
-                      },
-                      sourcesUsed: {
-                        type: "array",
-                        items: { type: "string" },
-                        maxItems: 8,
-                      },
-                    },
-                    required: ["story", "highlights", "sourcesUsed"],
-                  },
-                },
-              },
-              messages: [
-                {
-                  role: "system",
-                  content:
-                    "You are a concise wellbeing journaling assistant. Create an honest, grounded summary with no invented facts. Keep the narrative under 120 words and highlights short." +
-                    (strategyGuidance
-                      ? ` Follow this remediation strategy: ${strategyGuidance}`
-                      : ""),
-                },
-                {
-                  role: "user",
-                  content: `Generate a summary for ${dayKey}. Use only this JSON input:\n${modelInput}`,
-                },
-              ],
-            }),
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${keyForAttempt}`,
+            "Content-Type": "application/json",
           },
-        );
+          body: JSON.stringify({
+            model: request.model,
+            temperature: request.temperature ?? 0.3,
+            response_format: request.responseFormat,
+            messages: request.messages,
+          }),
+        });
 
         if (!response.ok) {
           const status = response.status;
-
-          // Drain the response body without propagating provider payloads to callers.
           try {
             await response.text();
           } catch {
             // Ignore body read failures; the status code is enough for safe handling.
           }
-
           throw new ProviderAdapterError({
             provider: "openai",
-            operation: "summary_generation",
+            operation: request.operation,
             statusCode: status,
             retryable: isRetryableSummaryStatus(status),
             message: getSafeOpenAiErrorMessage(status),
@@ -744,27 +753,156 @@ const openAiSummaryAdapter: SummaryModelAdapter = {
       },
     });
 
-    const content = responseJson.choices?.[0]?.message?.content;
-    if (!content) {
-      throw new ProviderAdapterError({
-        provider: "openai",
-        operation: "summary_generation",
-        retryable: false,
-        message: "OpenAI summary output was empty.",
-      });
-    }
+  let responseJson: {
+    choices?: Array<{ message?: { content?: string } }>;
+  } | null = null;
+  let lastError: unknown = null;
 
-    let parsed: unknown;
+  for (let index = 0; index < candidateKeys.length; index++) {
+    const candidate = candidateKeys[index];
+    if (!candidate) continue;
+    const isLastCandidate = index === candidateKeys.length - 1;
+
     try {
-      parsed = JSON.parse(content);
-    } catch {
-      throw new ProviderAdapterError({
+      responseJson = await executeOnce(candidate);
+      lastError = null;
+      break;
+    } catch (error) {
+      lastError = error;
+      const statusCode =
+        error instanceof ProviderAdapterError ? error.statusCode : undefined;
+      // Emit a structured failure event per candidate key attempt so the
+      // observability pipeline can aggregate by status + operation and
+      // trigger anomaly alerts (e.g. "ai_failure_rate > 20% for 5m").
+      logWarn("ai_call.attempt_failed", {
+        area: "ai",
+        operation: request.operation,
         provider: "openai",
-        operation: "summary_generation",
-        retryable: false,
-        message: "OpenAI summary output was not valid JSON.",
+        statusCode,
+        candidateIndex: index,
+        candidateCount: candidateKeys.length,
+        isLastCandidate,
+        errorMessage:
+          error instanceof Error ? error.message.slice(0, 200) : "unknown",
       });
+      const shouldFallOver =
+        error instanceof ProviderAdapterError &&
+        (error.statusCode === 401 ||
+          error.statusCode === 403 ||
+          error.statusCode === 429);
+      if (shouldFallOver && !isLastCandidate) continue;
+      throw error;
     }
+  }
+
+  if (!responseJson) {
+    throw lastError instanceof Error
+      ? lastError
+      : new ProviderAdapterError({
+          provider: "openai",
+          operation: request.operation,
+          retryable: false,
+          message: "OpenAI request failed for all candidate keys.",
+        });
+  }
+
+  const content = responseJson.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new ProviderAdapterError({
+      provider: "openai",
+      operation: request.operation,
+      retryable: false,
+      message: request.emptyContentMessage ?? "OpenAI output was empty.",
+    });
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    throw new ProviderAdapterError({
+      provider: "openai",
+      operation: request.operation,
+      retryable: false,
+      message:
+        request.invalidJsonMessage ?? "OpenAI output was not valid JSON.",
+    });
+  }
+
+  return parsed as T;
+}
+
+const SUMMARY_RESPONSE_FORMAT = {
+  type: "json_schema",
+  json_schema: {
+    name: "day_summary",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        story: { type: "string" },
+        highlights: {
+          type: "array",
+          items: { type: "string" },
+          maxItems: 6,
+        },
+        metrics: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            steps: { type: "number" },
+            sleepMinutes: { type: "number" },
+            screenTimeMinutes: { type: "number" },
+            spendingTotal: { type: "number" },
+          },
+        },
+        sourcesUsed: {
+          type: "array",
+          items: { type: "string" },
+          maxItems: 8,
+        },
+      },
+      required: ["story", "highlights", "sourcesUsed"],
+    },
+  },
+} as const;
+
+const openAiSummaryAdapter: SummaryModelAdapter = {
+  id: "openai",
+  execute: async ({
+    dayKey,
+    modelInput,
+    apiKey,
+    apiKeys,
+    baseUrl,
+    strategyGuidance,
+  }) => {
+    const parsed = await callOpenAiChatJson<unknown>({
+      apiKey,
+      apiKeys,
+      baseUrl,
+      operation: "summary_generation",
+      emptyContentMessage: "OpenAI summary output was empty.",
+      invalidJsonMessage: "OpenAI summary output was not valid JSON.",
+      model: "gpt-4o",
+      temperature: 0.3,
+      responseFormat: SUMMARY_RESPONSE_FORMAT,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a concise wellbeing journaling assistant. Create an honest, grounded summary with no invented facts. Keep the narrative under 120 words and highlights short." +
+            (strategyGuidance
+              ? ` Follow this remediation strategy: ${strategyGuidance}`
+              : ""),
+        },
+        {
+          role: "user",
+          content: `Generate a summary for ${dayKey}. Use only this JSON input:\n${modelInput}`,
+        },
+      ],
+    });
 
     return normalizeSummaryModelOutput(parsed);
   },

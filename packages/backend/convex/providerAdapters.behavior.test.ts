@@ -288,6 +288,100 @@ describe("provider adapter runtime behavior", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("falls over to the next key when the first key is rate limited (429)", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        text: vi.fn().mockResolvedValue("rate-limited-primary"),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        text: vi.fn().mockResolvedValue("rate-limited-primary-retry"),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        text: vi.fn().mockResolvedValue("rate-limited-primary-final"),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  story: "Fallback worked",
+                  highlights: ["Key rotation"],
+                  sourcesUsed: ["Memories"],
+                }),
+              },
+            },
+          ],
+        }),
+      });
+
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const adapter = resolveSummaryModelAdapter("openai");
+    const pending = adapter.execute({
+      dayKey: "2026-04-06",
+      modelInput: "{}",
+      apiKey: "sk-primary",
+      apiKeys: ["sk-primary", "sk-secondary"],
+    });
+
+    await vi.runAllTimersAsync();
+    const result = await pending;
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls[0]?.[1]?.headers?.Authorization).toBe(
+      "Bearer sk-primary",
+    );
+    expect(fetchMock.mock.calls[3]?.[1]?.headers?.Authorization).toBe(
+      "Bearer sk-secondary",
+    );
+    expect(result.story).toBe("Fallback worked");
+  });
+
+  it("honors a custom baseUrl (AI Gateway) for the chat completion endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                story: "Gateway routed",
+                highlights: ["via gateway"],
+                sourcesUsed: ["Memories"],
+              }),
+            },
+          },
+        ],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const adapter = resolveSummaryModelAdapter("openai");
+    const result = await adapter.execute({
+      dayKey: "2026-04-06",
+      modelInput: "{}",
+      apiKey: "sk-gateway",
+      baseUrl: "https://ai-gateway.example.com/v1/",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://ai-gateway.example.com/v1/chat/completions",
+    );
+    expect(result.story).toBe("Gateway routed");
+  });
+
   it("throws explicit output errors for empty and invalid OpenAI payloads", async () => {
     const adapter = resolveSummaryModelAdapter("openai");
 

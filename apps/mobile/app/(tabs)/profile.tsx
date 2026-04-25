@@ -73,6 +73,11 @@ import {
   collectAppleHealthDailyDataForDay,
   getAppleHealthSetupIssue,
 } from "../../lib/apple-health-sync";
+import {
+  computeAppleCalendarDeltaForDay,
+  getAppleCalendarSetupIssue,
+  recordAppleCalendarSyncCommitted,
+} from "../../lib/apple-calendar-sync";
 import { getBackgroundLocationEnablementStatus } from "../../lib/background-location-tracker";
 import { evaluateLifeContextFeaturePermission } from "../../lib/life-context-toggle-handler";
 import {
@@ -1984,6 +1989,18 @@ const SettingsScreen = () => {
           }
         }
 
+        if (provider === "apple_calendar") {
+          const calendarSetupIssue = getAppleCalendarSetupIssue();
+          if (calendarSetupIssue) {
+            Alert.alert("Apple Calendar setup", calendarSetupIssue);
+            setIntegrationFeedback({
+              type: "error",
+              message: calendarSetupIssue,
+            });
+            return;
+          }
+        }
+
         if (isOAuthProvider(provider)) {
           const webAppUrl =
             process.env.EXPO_PUBLIC_WEB_APP_URL ?? "http://localhost:3000";
@@ -2274,6 +2291,102 @@ const SettingsScreen = () => {
           setIntegrationFeedback({
             type: "success",
             message: "Apple Health data synced from this device.",
+          });
+
+          return;
+        }
+
+        if (provider === "apple_calendar") {
+          const calendarSetupIssue = getAppleCalendarSetupIssue();
+          if (calendarSetupIssue) {
+            logWarn("mobile_integration_sync_skipped", {
+              status: "skipped",
+              provider,
+              dayKey: todayDayKey,
+              reason: "apple_calendar_setup_issue",
+              errorMessage: calendarSetupIssue,
+            });
+            Alert.alert("Apple Calendar setup", calendarSetupIssue);
+            setIntegrationFeedback({
+              type: "error",
+              message: calendarSetupIssue,
+            });
+            return;
+          }
+
+          const calendarDelta = await computeAppleCalendarDeltaForDay(
+            todayDayKey,
+            userTimeZone,
+          );
+          const calendarData = calendarDelta.payload;
+
+          if (!calendarDelta.changed) {
+            logInfo("mobile_integration_sync_skipped_unchanged", {
+              status: "skipped",
+              provider,
+              dayKey: todayDayKey,
+              reason: calendarDelta.reason,
+              contentHash: calendarDelta.contentHash,
+            });
+            setIntegrationFeedback({
+              type: "success",
+              message: `Apple Calendar already up to date — ${calendarData.context.meetingsCount} event(s) today.`,
+            });
+            return;
+          }
+
+          await upsertMyIntegrationDailyData({
+            provider: "calendar",
+            dayKey: todayDayKey,
+            summary: calendarData.summary,
+            signals: calendarData.signals,
+            context: {
+              schemaVersion: 1,
+              calendar: {
+                meetingsCount:
+                  calendarData.context.meetingsCount > 0
+                    ? calendarData.context.meetingsCount
+                    : undefined,
+                busyMinutes:
+                  calendarData.context.busyMinutes > 0
+                    ? calendarData.context.busyMinutes
+                    : undefined,
+                eventTitles:
+                  calendarData.context.eventTitles.length > 0
+                    ? calendarData.context.eventTitles
+                    : undefined,
+              },
+            },
+          });
+
+          await syncMyIntegrationForDay({
+            provider,
+            dayKey: todayDayKey,
+            timeZone: userTimeZone,
+          });
+
+          // Only record the commit marker after both the upsert AND the
+          // derived sync succeeded. If either step threw, we leave the
+          // stored hash untouched so the next attempt retries the upload.
+          await recordAppleCalendarSyncCommitted(
+            todayDayKey,
+            userTimeZone,
+            calendarDelta.contentHash,
+            calendarData.context.meetingsCount,
+          );
+
+          logInfo("mobile_integration_sync_succeeded", {
+            status: "succeeded",
+            provider,
+            dayKey: todayDayKey,
+            source: "apple_calendar",
+            deltaReason: calendarDelta.reason,
+            contentHash: calendarDelta.contentHash,
+          });
+
+          setIntegrationFeedback({
+            type: "success",
+            message: `Apple Calendar synced — ${calendarData.context.meetingsCount} event(s) today.`,
           });
 
           return;

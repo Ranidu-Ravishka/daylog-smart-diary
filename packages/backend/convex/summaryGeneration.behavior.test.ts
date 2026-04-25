@@ -135,6 +135,7 @@ describe("summary generation behavior", () => {
           aiSummaryEnabled: true,
         },
       })
+      .mockResolvedValueOnce(null) // cache miss: no existing summary
       .mockResolvedValueOnce([
         {
           title: "Memory one",
@@ -191,11 +192,11 @@ describe("summary generation behavior", () => {
       generatedAt: 123,
     });
 
-    expect(runQuery.mock.calls[1]?.[1]).toEqual({
+    expect(runQuery.mock.calls[2]?.[1]).toEqual({
       dayKey: "2026-04-02",
       limit: 50,
     });
-    expect(runQuery.mock.calls[3]?.[1]).toEqual({
+    expect(runQuery.mock.calls[4]?.[1]).toEqual({
       dayKey: "2026-04-02",
       limit: 32,
     });
@@ -244,6 +245,7 @@ describe("summary generation behavior", () => {
           aiSummaryEnabled: true,
         },
       })
+      .mockResolvedValueOnce(null) // cache miss
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce([
@@ -351,6 +353,7 @@ describe("summary generation behavior", () => {
           aiSummaryEnabled: true,
         },
       })
+      .mockResolvedValueOnce(null) // cache miss
       .mockResolvedValueOnce(oversizedMemories)
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce([])
@@ -388,11 +391,11 @@ describe("summary generation behavior", () => {
       generatedAt: 789,
     });
 
-    expect(runQuery.mock.calls[1]?.[1]).toEqual({
+    expect(runQuery.mock.calls[2]?.[1]).toEqual({
       dayKey: "2026-04-04",
       limit: 50,
     });
-    expect(runQuery.mock.calls[3]?.[1]).toEqual({
+    expect(runQuery.mock.calls[4]?.[1]).toEqual({
       dayKey: "2026-04-04",
       limit: 32,
     });
@@ -433,6 +436,7 @@ describe("summary generation behavior", () => {
           aiSummaryEnabled: true,
         },
       })
+      .mockResolvedValueOnce(null) // cache miss
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce([]);
@@ -467,11 +471,15 @@ describe("summary generation behavior", () => {
           aiSummaryEnabled: true,
         },
       })
+      .mockResolvedValueOnce(null) // cache miss
       .mockResolvedValueOnce([{ title: "Memory", happenedAt: 1 }])
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ userId: "user_001" });
 
+    // After AI failure, the action now falls back to a deterministic
+    // rule-based summary (never empty UI), persists it via upsertSummary,
+    // and refunds the quota slot. We assert the resilient success shape.
     const runMutation = vi
       .fn()
       .mockResolvedValueOnce({ success: true })
@@ -479,23 +487,26 @@ describe("summary generation behavior", () => {
         generationEventId: "event_fail_001",
         evaluated: false,
       })
-      .mockResolvedValueOnce("attempt_fail_001");
+      .mockResolvedValueOnce("attempt_fail_001")
+      .mockResolvedValueOnce({ _id: "summary_fallback", generatedAt: 999 })
+      .mockResolvedValueOnce({ refunded: true });
 
-    await expect(
-      generateSummaryForDay(
-        {
-          runQuery: failingRunQuery,
-          runMutation,
-        },
-        { dayKey: "2026-04-02" },
-      ),
-    ).resolves.toEqual({
-      success: false,
-      errorCode: "model_generation_failed",
-      message: "OpenAI request failed (400)",
+    const fallbackResult = await generateSummaryForDay(
+      {
+        runQuery: failingRunQuery,
+        runMutation,
+      },
+      { dayKey: "2026-04-02" },
+    );
+
+    expect(fallbackResult).toMatchObject({
+      success: true,
+      fallback: true,
+      summaryId: "summary_fallback",
+      generatedAt: 999,
     });
 
-    expect(runMutation).toHaveBeenCalledTimes(3);
+    expect(runMutation).toHaveBeenCalledTimes(5);
   });
 
   it("returns unavailable when ai summary feature flag is disabled", async () => {
@@ -586,6 +597,7 @@ describe("summary generation behavior", () => {
           aiSummaryAutopilotEnabled: true,
         },
       })
+      .mockResolvedValueOnce(null) // cache miss
       .mockResolvedValueOnce([{ title: "Memory", happenedAt: 1 }])
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce([])

@@ -114,6 +114,19 @@ vi.mock("@/lib/apple-health-sync", () => ({
   getAppleHealthSetupIssue: vi.fn(() => "not_enabled"),
 }));
 
+vi.mock("@/lib/apple-calendar-sync", () => ({
+  collectAppleCalendarDailyDataForDay: vi.fn(async () => ({
+    summary: "",
+    signals: [],
+    context: {
+      meetingsCount: 0,
+      busyMinutes: 0,
+      eventTitles: [],
+    },
+  })),
+  getAppleCalendarSetupIssue: vi.fn(() => "not_enabled"),
+}));
+
 vi.mock("@/lib/background-location-tracker", () => ({
   acknowledgeBackgroundLocationFlush: vi.fn(async () => ({
     acknowledged: true,

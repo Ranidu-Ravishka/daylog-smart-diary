@@ -18,6 +18,10 @@ import {
   getAppleHealthSetupIssue,
 } from "@/lib/apple-health-sync";
 import {
+  collectAppleCalendarDailyDataForDay,
+  getAppleCalendarSetupIssue,
+} from "@/lib/apple-calendar-sync";
+import {
   acknowledgeBackgroundLocationFlush,
   getBackgroundLocationTelemetry,
   prepareBackgroundLocationFlushBatches,
@@ -293,16 +297,63 @@ export function useIntegrationSync({
           }
 
           const remindersCount = reminderRuntime.scheduledCount;
-          const summary =
+
+          let meetingsCount: number | undefined;
+          let busyMinutes: number | undefined;
+          let eventTitles: string[] | undefined;
+          let calendarEventsSignals: string[] = [];
+          let calendarSummaryFragment: string | null = null;
+
+          if (Platform.OS === "ios") {
+            const calendarSetupIssue = getAppleCalendarSetupIssue();
+            if (!calendarSetupIssue) {
+              try {
+                const calendarData = await collectAppleCalendarDailyDataForDay(
+                  dayKey,
+                  userTimeZone,
+                );
+
+                if (cancelled) {
+                  return;
+                }
+
+                meetingsCount =
+                  calendarData.context.meetingsCount > 0
+                    ? calendarData.context.meetingsCount
+                    : undefined;
+                busyMinutes =
+                  calendarData.context.busyMinutes > 0
+                    ? calendarData.context.busyMinutes
+                    : undefined;
+                eventTitles =
+                  calendarData.context.eventTitles.length > 0
+                    ? calendarData.context.eventTitles
+                    : undefined;
+
+                calendarEventsSignals = calendarData.signals;
+                calendarSummaryFragment = calendarData.summary;
+              } catch (error) {
+                pipelineErrors.push(`calendar_events:${toErrorMessage(error)}`);
+              }
+            }
+          }
+
+          const summaryParts: string[] = [];
+          if (calendarSummaryFragment) {
+            summaryParts.push(calendarSummaryFragment);
+          }
+          summaryParts.push(
             remindersCount > 0
               ? `DayLog reminders active with ${remindersCount} scheduled notification(s).`
-              : "No DayLog reminders scheduled for this day.";
+              : "No DayLog reminders scheduled for this day.",
+          );
 
           await upsertMyContextualDailyData({
             type: "calendar",
             dayKey,
-            summary,
+            summary: summaryParts.join(" "),
             signals: dedupeSignals([
+              ...calendarEventsSignals,
               reminderRuntime.permissionStatus === "granted"
                 ? "Notification permission granted"
                 : "Notification permission not granted",
@@ -313,6 +364,9 @@ export function useIntegrationSync({
             context: {
               schemaVersion: 1,
               calendar: {
+                meetingsCount,
+                busyMinutes,
+                eventTitles,
                 remindersCount: remindersCount > 0 ? remindersCount : undefined,
               },
             },

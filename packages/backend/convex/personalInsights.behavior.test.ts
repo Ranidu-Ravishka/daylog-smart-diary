@@ -1,9 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { getFunctionName } from "convex/server";
-import {
-  refreshMyDailyFeatureVector,
-  getMyNextBestDayRecommendation,
-} from "./personalInsights";
+
+let refreshMyDailyFeatureVector: (typeof import("./personalInsights"))["refreshMyDailyFeatureVector"];
+let getMyNextBestDayRecommendation: (typeof import("./personalInsights"))["getMyNextBestDayRecommendation"];
+
+beforeAll(async () => {
+  process.env.CLERK_JWT_ISSUER_DOMAIN ??= "https://clerk.daylog.dev";
+  process.env.CLERK_WEBHOOK_SECRET ??= "whsec_test_valid_key_1234567890";
+  process.env.OPENAI_API_KEY ??= "sk-test-valid-key-1234567890";
+
+  ({ refreshMyDailyFeatureVector, getMyNextBestDayRecommendation } =
+    await import("./personalInsights"));
+});
 
 type ConvexHandler<TArgs, TResult> = {
   _handler: (ctx: unknown, args: TArgs) => Promise<TResult>;
