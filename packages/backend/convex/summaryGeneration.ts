@@ -6,6 +6,16 @@ import { validateDayKey } from "./validators";
 import { convexServerEnv } from "./env";
 import { resolveSummaryModelAdapter } from "./providerAdapters";
 import { captureException, logInfo, logWarn } from "./observability";
+import {
+  buildRuleBasedSummary,
+  type FallbackSummaryOutput,
+} from "./summaryFallback";
+import {
+  assertCircuitPermitsCall,
+  CircuitOpenError,
+  recordCircuitFailure,
+  recordCircuitSuccess,
+} from "./summaryCircuitBreaker";
 
 const getMyResolvedFeatureFlagsRef = makeFunctionReference<"query">(
   "featureFlags:getMyResolvedFeatureFlags",
@@ -354,12 +364,17 @@ type SummaryGenerationResult =
       success: true;
       summaryId?: string;
       generatedAt?: number;
+      cached?: boolean;
+      fallback?: boolean;
+      circuitOpen?: boolean;
     }
   | {
       success: false;
       errorCode: "no_input_data" | "model_generation_failed";
       message: string;
     };
+
+const SUMMARY_CACHE_TTL_MS = 10 * 60_000;
 
 type SummaryRemediationStrategy =
   | "default"
@@ -511,22 +526,56 @@ function toUserFacingSummaryGenerationErrorMessage(error: unknown): string {
   return message;
 }
 
+function resolveSummaryApiKeyCandidates(): {
+  primaryKey: string;
+  candidateKeys: string[];
+  baseUrl?: string;
+} {
+  if (convexServerEnv.aiGatewayApiKey && convexServerEnv.aiGatewayBaseUrl) {
+    return {
+      primaryKey: convexServerEnv.aiGatewayApiKey,
+      candidateKeys: [convexServerEnv.aiGatewayApiKey],
+      baseUrl: convexServerEnv.aiGatewayBaseUrl,
+    };
+  }
+
+  const rotation = convexServerEnv.openAiApiKeyRotation ?? [];
+  const candidateKeys =
+    rotation.length > 0
+      ? [convexServerEnv.openAiApiKey, ...rotation]
+      : [convexServerEnv.openAiApiKey];
+
+  return {
+    primaryKey: convexServerEnv.openAiApiKey,
+    candidateKeys,
+    baseUrl: convexServerEnv.aiGatewayBaseUrl,
+  };
+}
+
 export async function generateSummaryWithOpenAi(
   dayKey: string,
   modelInput: string,
   strategy: SummaryRemediationStrategy = "default",
 ) {
-  const openAiKey = convexServerEnv.openAiApiKey;
+  const { primaryKey, candidateKeys, baseUrl } =
+    resolveSummaryApiKeyCandidates();
   const adapter = resolveSummaryModelAdapter("openai");
 
+  assertCircuitPermitsCall();
+
   try {
-    return await adapter.execute({
+    const result = await adapter.execute({
       dayKey,
       modelInput,
-      apiKey: openAiKey,
+      apiKey: primaryKey,
+      apiKeys: candidateKeys,
+      baseUrl,
       strategyGuidance: PROMPT_STRATEGY_GUIDANCE[strategy],
     });
+    recordCircuitSuccess();
+    return result;
   } catch (error) {
+    recordCircuitFailure();
     if (error instanceof Error) {
       throw new Error(error.message);
     }
@@ -566,6 +615,14 @@ export const generateSummaryFromModel = internalAction({
 export const generateSummaryForDay = action({
   args: {
     dayKey: v.string(),
+    // Client-supplied idempotency key. If the same clientRequestId is sent
+    // again (e.g. double-tap, retry after network blip) within the cache
+    // TTL, we short-circuit with the cached summary to avoid burning quota
+    // and triggering duplicate LLM calls.
+    clientRequestId: v.optional(v.string()),
+    // Opt-out of the cache short-circuit. Used when the user intentionally
+    // wants to regenerate a stale summary.
+    forceRefresh: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<SummaryGenerationResult> => {
     const startedAt = Date.now();
@@ -595,9 +652,52 @@ export const generateSummaryForDay = action({
       };
     }
 
+    if (!args.forceRefresh) {
+      try {
+        const cachedSummary = (await ctx.runQuery(
+          api.summaries.getSummaryByDay,
+          {
+            dayKey: args.dayKey,
+          },
+        )) as {
+          _id?: string;
+          generatedAt?: number;
+        } | null;
+
+        if (
+          cachedSummary?.generatedAt &&
+          Date.now() - cachedSummary.generatedAt < SUMMARY_CACHE_TTL_MS
+        ) {
+          logInfo("summary_generation.cache_hit", {
+            status: "cache_hit",
+            dayKey: args.dayKey,
+            clientRequestId: args.clientRequestId,
+            ageMs: Date.now() - cachedSummary.generatedAt,
+          });
+          return {
+            success: true,
+            summaryId: cachedSummary._id,
+            generatedAt: cachedSummary.generatedAt,
+            cached: true,
+          };
+        }
+      } catch (cacheError) {
+        // Cache-lookup failure is non-fatal: it just means we fall through
+        // to a fresh generation. Log and continue so a flaky DB never
+        // wedges the whole summary flow.
+        logWarn("summary_generation.cache_lookup_failed", {
+          status: "degraded",
+          dayKey: args.dayKey,
+          errorMessage:
+            cacheError instanceof Error ? cacheError.message : "unknown",
+        });
+      }
+    }
+
     logInfo("summary_generation.started", {
       status: "started",
       dayKey: args.dayKey,
+      clientRequestId: args.clientRequestId,
     });
 
     const memories = (await ctx.runQuery(
@@ -683,11 +783,19 @@ export const generateSummaryForDay = action({
       },
     });
 
-    const attemptChainId = buildAttemptChainId(
-      generationIdentity.userId,
-      args.dayKey,
-      startedAt,
-    );
+    // When the client supplies a stable idempotency key (e.g. a UUID
+    // generated per user intent), reuse it as the attemptChainId so the
+    // underlying quota reservation layer dedupes naturally. Retries of the
+    // same intent (network blips, double-taps) never double-spend quota.
+    const clientRequestId = args.clientRequestId?.trim();
+    const attemptChainId =
+      clientRequestId && clientRequestId.length > 0
+        ? `${generationIdentity.userId}:${args.dayKey}:${clientRequestId}`
+        : buildAttemptChainId(
+            generationIdentity.userId,
+            args.dayKey,
+            startedAt,
+          );
     const autopilotEnabled = Boolean(
       runtimeFlags.flags?.aiSummaryAutopilotEnabled,
     );
@@ -913,11 +1021,98 @@ export const generateSummaryForDay = action({
     );
 
     if (successfulAttempts.length === 0) {
-      return {
-        success: false,
-        errorCode: "model_generation_failed",
-        message: toUserFacingSummaryGenerationErrorMessage(latestError),
-      };
+      // The AI path (key rotation + retries + gateway) is fully exhausted.
+      // Rather than surface an error and leave the UI empty, synthesize a
+      // deterministic, rule-based summary from the exact same structured
+      // input the LLM would have seen. This guarantees graceful
+      // degradation under sustained upstream failure or circuit-breaker
+      // open state, and is clearly labelled via sourcesUsed so users can
+      // distinguish it from an AI-generated story.
+      const circuitOpen = latestError instanceof CircuitOpenError;
+      const fallbackSummary: FallbackSummaryOutput = buildRuleBasedSummary({
+        dayKey: args.dayKey,
+        memories: summaryMemoryInput,
+        dayMetadata: {
+          rating: day?.rating,
+          manualNotes: day?.manualNotes ?? [],
+          peopleTags: day?.peopleTags ?? [],
+        },
+        integrationContext: {
+          providers: integrationContext.providers,
+          keySignals: integrationContext.keySignals,
+          mergedMetrics: integrationContext.mergedMetrics,
+          sources: integrationContext.sources,
+        },
+      });
+
+      logWarn("summary_generation.rule_based_fallback", {
+        status: "degraded",
+        dayKey: args.dayKey,
+        userId: generationIdentity.userId,
+        attemptChainId,
+        attemptsEvaluated: attempts.length,
+        circuitOpen,
+        reason: circuitOpen
+          ? "circuit_open"
+          : latestError instanceof Error
+            ? latestError.message.slice(0, 200)
+            : "all_attempts_failed",
+      });
+
+      try {
+        const savedFallback = (await ctx.runMutation(upsertSummaryRef, {
+          dayKey: args.dayKey,
+          story: fallbackSummary.story,
+          highlights: fallbackSummary.highlights,
+          metrics: fallbackSummary.metrics,
+          sourcesUsed: fallbackSummary.sourcesUsed,
+        })) as { _id?: string; generatedAt?: number } | undefined;
+
+        // Refund the quota slot — the user got a deterministic fallback
+        // (zero LLM tokens billed), so they should not be penalized against
+        // their daily AI quota. Best-effort; if it fails we still return.
+        try {
+          await ctx.runMutation(releaseSummaryGenerationSlotInternalRef, {
+            userId: generationIdentity.userId,
+            idempotencyKey: attemptChainId,
+          });
+        } catch (refundError) {
+          logWarn("summary_generation.fallback_quota_refund_failed", {
+            event: "quota_refund_failed",
+            dayKey: args.dayKey,
+            userId: generationIdentity.userId,
+            attemptChainId,
+            errorMessage:
+              refundError instanceof Error
+                ? refundError.message
+                : String(refundError),
+          });
+        }
+
+        return {
+          success: true,
+          summaryId: savedFallback?._id,
+          generatedAt: savedFallback?.generatedAt,
+          fallback: true,
+          circuitOpen,
+        };
+      } catch (persistError) {
+        captureException(
+          "summary_generation.rule_based_fallback_persist_failed",
+          persistError,
+          {
+            status: "failed",
+            dayKey: args.dayKey,
+            userId: generationIdentity.userId,
+            attemptChainId,
+          },
+        );
+        return {
+          success: false,
+          errorCode: "model_generation_failed",
+          message: toUserFacingSummaryGenerationErrorMessage(latestError),
+        };
+      }
     }
 
     const sortedAttempts = successfulAttempts.slice().sort((left, right) => {

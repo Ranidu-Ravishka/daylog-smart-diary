@@ -18,6 +18,7 @@ import {
 import { AppCard } from "@/components/ui/app-card";
 import { SectionHeader } from "@/components/ui/section-header";
 import { getAppleHealthSetupIssue } from "@/lib/apple-health-sync";
+import { getAppleCalendarSetupIssue } from "@/lib/apple-calendar-sync";
 import { Spacing, type ThemeColors } from "@/constants/theme";
 import type { ProfileStyles } from "./profile-styles";
 import type {
@@ -390,6 +391,12 @@ export function IntegrationsSection({
               provider === "apple_health" ? getAppleHealthSetupIssue() : null;
             const isAppleHealthSetupBlocked =
               provider === "apple_health" && Boolean(appleHealthSetupIssue);
+            const appleCalendarSetupIssue =
+              provider === "apple_calendar"
+                ? getAppleCalendarSetupIssue()
+                : null;
+            const isAppleCalendarSetupBlocked =
+              provider === "apple_calendar" && Boolean(appleCalendarSetupIssue);
             const isSyncing =
               pending === "sync" || syncRun?.status === "in_progress";
             const recentOutcomes = Array.isArray(health?.recentOutcomes)
@@ -424,7 +431,11 @@ export function IntegrationsSection({
                   ? Platform.OS === "ios"
                     ? "setup required"
                     : "iOS only"
-                  : status;
+                  : isAppleCalendarSetupBlocked
+                    ? Platform.OS === "ios"
+                      ? "setup required"
+                      : "iOS only"
+                    : status;
             const syncStateLabel =
               syncState === "success"
                 ? "success"
@@ -495,6 +506,17 @@ export function IntegrationsSection({
                             How to enable
                           </Text>
                         </TouchableOpacity>
+                      </View>
+                    ) : null}
+
+                    {provider === "apple_calendar" ? (
+                      <View style={styles.appleHealthHintCard}>
+                        <Text style={styles.appleHealthHintText}>
+                          {Platform.OS === "ios"
+                            ? (appleCalendarSetupIssue ??
+                              "Events from your device calendars are read securely on-device and summarised to your daily context.")
+                            : "Apple Calendar sync is only available on iOS devices."}
+                        </Text>
                       </View>
                     ) : null}
 

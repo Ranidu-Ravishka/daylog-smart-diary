@@ -47,6 +47,30 @@ function createMediaClientRequestId(
   return `${memoryClientRequestId}_media_${imageIndex}`;
 }
 
+const CREATE_MEMORY_TIMEOUT_MS = 20_000;
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<T> {
+  let timerId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timerId = setTimeout(() => {
+          reject(new Error(timeoutMessage));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timerId !== undefined) {
+      clearTimeout(timerId);
+    }
+  }
+}
+
 type SelectedImage = {
   uri: string;
   width?: number;
@@ -61,7 +85,7 @@ export default function AddMemoryScreen() {
   const { colors: c } = useAppTheme();
   const styles = useMemo(() => createStyles(c), [c]);
   const router = useRouter();
-  const { isAuthenticated } = useConvexAuth();
+  const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
   const createMemory = useMutation(api.memories.createMemory);
   const createUploadUrl = useMutation(
     api.memories.generateMemoryMediaUploadUrl,
@@ -165,6 +189,16 @@ export default function AddMemoryScreen() {
     const trimmedTitle = title.trim();
     if (!trimmedTitle) return;
 
+    if (isAuthLoading) {
+      setError("Still signing you in. Please try again in a moment.");
+      return;
+    }
+
+    if (!isAuthenticated) {
+      setError("You need to be signed in to save a memory.");
+      return;
+    }
+
     const happenedAt = Date.now();
     const dayKey = getTodayDayKey();
     const clientRequestId = `mobile_mem_${happenedAt}_${Math.floor(
@@ -184,14 +218,18 @@ export default function AddMemoryScreen() {
     setError(null);
 
     try {
-      const memory = await createMemory({
-        clientRequestId,
-        title: trimmedTitle,
-        description: description.trim() || undefined,
-        mood,
-        happenedAt,
-        dayKey,
-      });
+      const memory = await withTimeout(
+        createMemory({
+          clientRequestId,
+          title: trimmedTitle,
+          description: description.trim() || undefined,
+          mood,
+          happenedAt,
+          dayKey,
+        }),
+        CREATE_MEMORY_TIMEOUT_MS,
+        "Save timed out. Please check your connection and try again.",
+      );
 
       if (memory && selectedImages.length > 0) {
         for (let i = 0; i < selectedImages.length; i++) {
@@ -324,7 +362,11 @@ export default function AddMemoryScreen() {
     { id: "loved", emoji: "❤️", label: "Loved" },
   ];
 
-  const canSubmit = title.trim().length > 0 && !isSubmitting;
+  const canSubmit =
+    title.trim().length > 0 &&
+    !isSubmitting &&
+    !isAuthLoading &&
+    isAuthenticated;
 
   return (
     <SafeAreaView style={styles.safe}>

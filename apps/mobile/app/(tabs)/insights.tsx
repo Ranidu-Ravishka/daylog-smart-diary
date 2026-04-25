@@ -6,11 +6,14 @@ import {
   ScrollView,
   RefreshControl,
   Dimensions,
+  ActivityIndicator,
+  TouchableOpacity,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useQuery, useConvexAuth } from "convex/react";
+import { useQuery, useConvexAuth, useAction } from "convex/react";
 import { api } from "@repo/backend/convex";
+import { captureException } from "@/lib/observability";
 import { MOOD_EMOJI } from "@repo/ui/lib/constants";
 import {
   Spacing,
@@ -152,6 +155,45 @@ const InsightsScreen = () => {
     api.memories.listRecentMemories,
     isAuthenticated ? { limit: 30, refreshToken } : "skip",
   );
+  const generateInsightNarrative = useAction(
+    api.personalInsights.generateInsightNarrative,
+  );
+  const [aiNarrative, setAiNarrative] = useState<{
+    narrative: string;
+    highlights: string[];
+    anomalies: string[];
+    recommendedFocus: string[];
+    generatedAt: number;
+  } | null>(null);
+  const [aiNarrativeLoading, setAiNarrativeLoading] = useState(false);
+  const [aiNarrativeError, setAiNarrativeError] = useState<string | null>(null);
+
+  const handleGenerateAiNarrative = useCallback(async () => {
+    if (!isAuthenticated || aiNarrativeLoading) return;
+    setAiNarrativeLoading(true);
+    setAiNarrativeError(null);
+    try {
+      const result = await generateInsightNarrative({ windowDays: 14 });
+      setAiNarrative({
+        narrative: result.narrative,
+        highlights: result.highlights,
+        anomalies: result.anomalies,
+        recommendedFocus: result.recommendedFocus,
+        generatedAt: result.generatedAt,
+      });
+    } catch (error) {
+      captureException("mobile_insight_narrative_failed", error, {
+        status: "failed",
+      });
+      setAiNarrativeError(
+        error instanceof Error
+          ? error.message
+          : "Failed to generate AI narrative.",
+      );
+    } finally {
+      setAiNarrativeLoading(false);
+    }
+  }, [generateInsightNarrative, isAuthenticated, aiNarrativeLoading]);
 
   const isRefreshDataReady =
     !isAuthenticated || (summaries !== undefined && memories !== undefined);
@@ -439,6 +481,98 @@ const InsightsScreen = () => {
           </View>
         </View>
 
+        {/* ── AI Narrative ────────────────────────────── */}
+        <View style={styles.section}>
+          <SectionHeader
+            title="AI Narrative"
+            action={
+              aiNarrative
+                ? `Updated ${formatRelativeElapsed(aiNarrative.generatedAt, relativeNow)}`
+                : "AI-generated"
+            }
+          />
+          <AppCard>
+            {aiNarrative ? (
+              <>
+                <Text style={styles.aiNarrativeBody}>
+                  {aiNarrative.narrative}
+                </Text>
+                {aiNarrative.highlights.length > 0 && (
+                  <View style={styles.aiNarrativeSection}>
+                    <Text style={styles.aiNarrativeSubtitle}>Highlights</Text>
+                    {aiNarrative.highlights.map((item, index) => (
+                      <Text
+                        key={`hl-${index}`}
+                        style={styles.aiNarrativeBullet}
+                      >
+                        • {item}
+                      </Text>
+                    ))}
+                  </View>
+                )}
+                {aiNarrative.anomalies.length > 0 && (
+                  <View style={styles.aiNarrativeSection}>
+                    <Text style={styles.aiNarrativeSubtitle}>Anomalies</Text>
+                    {aiNarrative.anomalies.map((item, index) => (
+                      <Text
+                        key={`an-${index}`}
+                        style={styles.aiNarrativeBullet}
+                      >
+                        • {item}
+                      </Text>
+                    ))}
+                  </View>
+                )}
+                {aiNarrative.recommendedFocus.length > 0 && (
+                  <View style={styles.aiNarrativeSection}>
+                    <Text style={styles.aiNarrativeSubtitle}>
+                      Focus for tomorrow
+                    </Text>
+                    {aiNarrative.recommendedFocus.map((item, index) => (
+                      <Text
+                        key={`rec-${index}`}
+                        style={styles.aiNarrativeBullet}
+                      >
+                        • {item}
+                      </Text>
+                    ))}
+                  </View>
+                )}
+              </>
+            ) : (
+              <Text style={styles.aiNarrativeBody}>
+                Generate an AI-written summary of your last 14 days with trend
+                and anomaly detection.
+              </Text>
+            )}
+
+            {aiNarrativeError ? (
+              <Text style={styles.aiNarrativeError}>{aiNarrativeError}</Text>
+            ) : null}
+
+            <TouchableOpacity
+              style={[
+                styles.aiNarrativeButton,
+                aiNarrativeLoading && styles.aiNarrativeButtonDisabled,
+              ]}
+              onPress={handleGenerateAiNarrative}
+              disabled={aiNarrativeLoading}
+              activeOpacity={0.8}
+            >
+              {aiNarrativeLoading ? (
+                <ActivityIndicator color={c.inverseText} />
+              ) : (
+                <>
+                  <Ionicons name="sparkles" size={16} color={c.inverseText} />
+                  <Text style={styles.aiNarrativeButtonText}>
+                    {aiNarrative ? "Regenerate" : "Generate AI narrative"}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </AppCard>
+        </View>
+
         {/* ── Mood Trends ─────────────────────────────── */}
         <View style={styles.section}>
           <SectionHeader
@@ -582,6 +716,50 @@ function createStyles(c: ThemeColors) {
     section: {
       paddingHorizontal: Spacing.xl,
       marginBottom: Spacing["2xl"],
+    },
+
+    // AI Narrative
+    aiNarrativeBody: {
+      ...Typography.body,
+      color: c.text,
+    },
+    aiNarrativeSection: {
+      marginTop: Spacing.md,
+    },
+    aiNarrativeSubtitle: {
+      ...Typography.caption1,
+      color: c.textSecondary,
+      marginBottom: Spacing.xs,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+    },
+    aiNarrativeBullet: {
+      ...Typography.callout,
+      color: c.text,
+      marginBottom: 2,
+    },
+    aiNarrativeError: {
+      ...Typography.caption1,
+      color: c.error,
+      marginTop: Spacing.md,
+    },
+    aiNarrativeButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: Spacing.sm,
+      backgroundColor: c.tint,
+      borderRadius: Radius.md,
+      paddingVertical: Spacing.md,
+      paddingHorizontal: Spacing.lg,
+      marginTop: Spacing.lg,
+    },
+    aiNarrativeButtonDisabled: {
+      opacity: 0.7,
+    },
+    aiNarrativeButtonText: {
+      ...Typography.bodyMedium,
+      color: c.inverseText,
     },
     emptyStateWrap: {
       minHeight: 320,
