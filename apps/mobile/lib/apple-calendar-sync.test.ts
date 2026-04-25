@@ -67,9 +67,23 @@ describe("apple-calendar-sync delta", () => {
     mockExpoCalendar.events = [];
   });
 
+  async function loadModuleWithMockedBridge(): Promise<Mod> {
+    const mod = await loadModule();
+    mod.__testing.setExpoCalendarModuleOverride({
+      requestCalendarPermissionsAsync: vi.fn(async () => ({
+        status: "granted",
+      })),
+      getCalendarsAsync: vi.fn(async () => [{ id: "cal-1" }]),
+      getEventsAsync: vi.fn(async () => mockExpoCalendar.events as never[]),
+      EntityTypes: mockExpoCalendar.entityTypes,
+      Availability: mockExpoCalendar.availability,
+    });
+    return mod;
+  }
+
   it("treats the first sync as changed", async () => {
     mockExpoCalendar.events = [buildEvent()];
-    const mod = await loadModule();
+    const mod = await loadModuleWithMockedBridge();
 
     const delta = await mod.computeAppleCalendarDeltaForDay("2026-04-24");
     expect(delta.changed).toBe(true);
@@ -79,7 +93,7 @@ describe("apple-calendar-sync delta", () => {
 
   it("returns unchanged when the event set and timezone are identical across syncs", async () => {
     mockExpoCalendar.events = [buildEvent()];
-    const mod = await loadModule();
+    const mod = await loadModuleWithMockedBridge();
 
     const first = await mod.computeAppleCalendarDeltaForDay("2026-04-24");
     expect(first.changed).toBe(true);
@@ -99,7 +113,7 @@ describe("apple-calendar-sync delta", () => {
   });
 
   it("detects deletions when an event disappears from the set", async () => {
-    const mod = await loadModule();
+    const mod = await loadModuleWithMockedBridge();
 
     mockExpoCalendar.events = [
       buildEvent({ id: "a" }),
@@ -123,7 +137,7 @@ describe("apple-calendar-sync delta", () => {
   });
 
   it("detects content changes when an event title is renamed", async () => {
-    const mod = await loadModule();
+    const mod = await loadModuleWithMockedBridge();
 
     mockExpoCalendar.events = [buildEvent({ id: "a", title: "Original" })];
     const first = await mod.computeAppleCalendarDeltaForDay("2026-04-24");
@@ -143,7 +157,7 @@ describe("apple-calendar-sync delta", () => {
   });
 
   it("treats timezone switch as changed even if events are identical", async () => {
-    const mod = await loadModule();
+    const mod = await loadModuleWithMockedBridge();
 
     mockExpoCalendar.events = [buildEvent()];
     const first = await mod.computeAppleCalendarDeltaForDay(

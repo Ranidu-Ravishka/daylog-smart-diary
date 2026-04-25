@@ -63,8 +63,12 @@ type ExpoCalendarModuleLike = {
 };
 
 let cachedExpoCalendarModule: ExpoCalendarModuleLike | null = null;
+let testExpoCalendarModuleOverride: ExpoCalendarModuleLike | null = null;
 
 function getExpoCalendarModule(): ExpoCalendarModuleLike | null {
+  if (testExpoCalendarModuleOverride) {
+    return testExpoCalendarModuleOverride;
+  }
   if (cachedExpoCalendarModule) {
     return cachedExpoCalendarModule;
   }
@@ -516,6 +520,13 @@ export const __testing = {
   toMillis,
   buildEventFingerprint,
   computeEventSetContentHash,
+  setExpoCalendarModuleOverride(module: ExpoCalendarModuleLike | null) {
+    testExpoCalendarModuleOverride = module;
+  },
+  resetExpoCalendarModuleCache() {
+    cachedExpoCalendarModule = null;
+    testExpoCalendarModuleOverride = null;
+  },
   MAX_EVENT_TITLES,
   MAX_EVENT_TITLE_LENGTH,
   MAX_ALL_DAY_BUSY_MINUTES,
