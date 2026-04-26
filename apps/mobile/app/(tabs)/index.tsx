@@ -28,6 +28,7 @@ import { AppCard } from "@/components/ui/app-card";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
 import { EmptyState } from "@/components/ui/empty-state";
+import { UserAvatar } from "@/components/ui/user-avatar";
 
 function getTodayDayKey(): string {
   const now = new Date();
@@ -116,6 +117,10 @@ const HomeScreen = () => {
   const [refreshToken, setRefreshToken] = React.useState(0);
   const [lastSyncAt, setLastSyncAt] = React.useState<number | null>(null);
   const [relativeNow, setRelativeNow] = React.useState(() => Date.now());
+  const currentProfile = useQuery(
+    api.users.getMyProfile,
+    isAuthenticated ? {} : "skip",
+  );
 
   const recentMemories = useQuery(
     api.memories.listRecentMemories,
@@ -194,7 +199,7 @@ const HomeScreen = () => {
 
     const interval = setInterval(() => {
       setRelativeNow(Date.now());
-    }, 1_000);
+    }, 10_000);
 
     return () => {
       clearInterval(interval);
@@ -219,6 +224,9 @@ const HomeScreen = () => {
     (m: { dayKey: string }) => m.dayKey === todayKey,
   );
   const userName = user?.firstName ?? "there";
+  const userAvatarName = user?.fullName ?? user?.firstName ?? "User";
+  const userAvatarUrl =
+    currentProfile?.profileImageUrl ?? user?.imageUrl ?? undefined;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -241,30 +249,34 @@ const HomeScreen = () => {
             <Text style={styles.syncText}>{syncStatusText}</Text>
           </View>
           <TouchableOpacity
-            style={styles.avatarBtn}
             onPress={() => router.push("/profile")}
             activeOpacity={0.7}
           >
-            <Ionicons name="person" size={18} color={c.tint} />
+            <UserAvatar
+              colors={c}
+              name={userAvatarName}
+              imageUrl={userAvatarUrl}
+              size={40}
+            />
           </TouchableOpacity>
         </View>
 
         {/* ── Stats ─────────────────────────────────────── */}
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
-            <Ionicons name="book-outline" size={20} color={c.tint} />
+            <Ionicons name="book-outline" size={20} color={c.text} />
             <Text style={styles.statValue}>{todayMemories.length}</Text>
             <Text style={styles.statLabel}>Memories</Text>
           </View>
           <View style={styles.statCard}>
-            <Ionicons name="star-outline" size={20} color={c.warning} />
+            <Ionicons name="star-outline" size={20} color={c.text} />
             <Text style={styles.statValue}>
               {todayDay?.rating ? `${todayDay.rating}/5` : "—"}
             </Text>
             <Text style={styles.statLabel}>Rating</Text>
           </View>
           <View style={styles.statCard}>
-            <Ionicons name="walk-outline" size={20} color={c.success} />
+            <Ionicons name="walk-outline" size={20} color={c.text} />
             <Text style={styles.statValue}>
               {todaySummary?.metrics?.steps?.toLocaleString() ?? "—"}
             </Text>
@@ -342,7 +354,7 @@ const HomeScreen = () => {
                 activeOpacity={0.7}
               >
                 <View style={styles.actionIcon}>
-                  <Ionicons name={a.icon} size={22} color={c.tint} />
+                  <Ionicons name={a.icon} size={22} color={c.text} />
                 </View>
                 <Text style={styles.actionLabel}>{a.label}</Text>
               </TouchableOpacity>
@@ -474,6 +486,8 @@ function createStyles(c: ThemeColors) {
       borderRadius: Radius.lg,
       padding: Spacing.lg,
       alignItems: "center",
+      borderWidth: 1,
+      borderColor: c.border,
       ...Shadows.sm,
     },
     statValue: {
@@ -530,13 +544,16 @@ function createStyles(c: ThemeColors) {
       height: 52,
       borderRadius: 16,
       backgroundColor: c.tintLight,
+      borderWidth: 1,
+      borderColor: c.border,
       alignItems: "center",
       justifyContent: "center",
       marginBottom: Spacing.sm,
     },
     actionLabel: {
       ...Typography.caption1,
-      color: c.textSecondary,
+      color: c.text,
+      fontWeight: "600",
     },
 
     // Memory list

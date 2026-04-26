@@ -245,6 +245,15 @@ export default defineSchema(
       firstName: v.optional(v.string()),
       lastName: v.optional(v.string()),
       imageUrl: v.optional(v.string()),
+      profileImageStorageId: v.optional(v.string()),
+      profileImageSource: v.optional(
+        v.union(
+          v.literal("clerk"),
+          v.literal("apple"),
+          v.literal("google"),
+          v.literal("manual"),
+        ),
+      ),
       accountStatus: v.optional(userAccountStatusValidator),
       accountDeletionRequestedAt: v.optional(v.number()),
       planTier: v.optional(
@@ -304,6 +313,9 @@ export default defineSchema(
       title: v.optional(v.string()),
       description: v.optional(v.string()),
       mood: v.optional(v.string()),
+      tags: v.optional(v.array(v.string())),
+      location: v.optional(v.string()),
+      linkedPeople: v.optional(v.array(v.string())),
       titleEncrypted: v.optional(encryptedSensitiveFieldValidator),
       descriptionEncrypted: v.optional(encryptedSensitiveFieldValidator),
       moodEncrypted: v.optional(encryptedSensitiveFieldValidator),

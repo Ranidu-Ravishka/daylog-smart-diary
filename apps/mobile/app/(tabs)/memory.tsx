@@ -8,7 +8,6 @@ import {
   ScrollView,
   RefreshControl,
   Alert,
-  Image,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from "react-native";
@@ -38,18 +37,23 @@ import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
 import { EmptyState } from "@/components/ui/empty-state";
 import { AppButton } from "@/components/ui/app-button";
 import {
+  MemoryDetailSheet,
+  type MemoryPatchPayload,
+} from "@/components/memory/memory-detail-sheet";
+import { MemoryCarousel } from "@/components/memory/memory-carousel";
+import { PeopleYouMetSection } from "@/components/memory/people-you-met-section";
+import type { MemoryItem } from "@/components/memory/types";
+import {
   enqueueOfflineAppendDayLog,
   isLikelyTransientNetworkError,
 } from "@/lib/offline-outbox";
+import {
+  collectAppleCalendarTimelineForDay,
+  type AppleCalendarTimelineEvent,
+} from "@/lib/apple-calendar-sync";
 import { captureException, logInfo, logWarn } from "@/lib/observability";
 
-type MemoryDoc = {
-  _id: GenericId<"memories">;
-  title: string;
-  description?: string;
-  mood?: string;
-  thumbnailUrl?: string | null;
-};
+type MemoryDoc = MemoryItem;
 
 const MEMORIES_PAGE_SIZE = 20;
 const SCROLL_LOAD_MORE_THRESHOLD_PX = 320;
@@ -59,6 +63,11 @@ type IntegrationDailyDataDoc = {
   provider: string;
   summary?: string;
   signals?: string[];
+  context?: {
+    calendar?: {
+      eventTitles?: string[];
+    };
+  };
   syncedAt: number;
 };
 
@@ -73,7 +82,14 @@ function isMemoryDoc(value: unknown): value is MemoryDoc {
     (candidate.mood === undefined || typeof candidate.mood === "string") &&
     (candidate.thumbnailUrl === undefined ||
       candidate.thumbnailUrl === null ||
-      typeof candidate.thumbnailUrl === "string")
+      typeof candidate.thumbnailUrl === "string") &&
+    (candidate.happenedAt === undefined ||
+      typeof candidate.happenedAt === "number") &&
+    (candidate.tags === undefined || Array.isArray(candidate.tags)) &&
+    (candidate.location === undefined ||
+      typeof candidate.location === "string") &&
+    (candidate.linkedPeople === undefined ||
+      Array.isArray(candidate.linkedPeople))
   );
 }
 
@@ -110,6 +126,13 @@ function getTodayDayKey(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
+function shiftDayKey(dayKey: string, deltaDays: number): string {
+  const [year, month, day] = dayKey.split("-").map((value) => Number(value));
+  const date = new Date(year, Math.max(0, month - 1), day);
+  date.setDate(date.getDate() + deltaDays);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 function formatRelativeElapsed(lastSyncAt: number, now: number): string {
   const elapsedSeconds = Math.max(0, Math.floor((now - lastSyncAt) / 1000));
   if (elapsedSeconds < 60) return `${elapsedSeconds}s ago`;
@@ -134,6 +157,15 @@ function formatLastSyncTime(lastSyncAt: number | null, now: number): string {
   });
 
   return `Last sync: ${absolute} • Updated ${formatRelativeElapsed(lastSyncAt, now)}`;
+}
+
+function formatDurationLabel(durationMinutes: number): string {
+  if (durationMinutes < 60) {
+    return `${durationMinutes}m`;
+  }
+  const hours = Math.floor(durationMinutes / 60);
+  const remainder = durationMinutes % 60;
+  return remainder > 0 ? `${hours}h ${remainder}m` : `${hours}h`;
 }
 
 function redactPotentialSecrets(value: string): string {
@@ -227,7 +259,7 @@ const DailyDetailView = () => {
   const styles = React.useMemo(() => createStyles(c), [c]);
   const router = useRouter();
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
-  const dayKey = getTodayDayKey();
+  const [dayKey, setDayKey] = useState(getTodayDayKey());
   const scrollRef = React.useRef<ScrollView>(null);
   const manualNotesSectionYRef = React.useRef(0);
   const manualEntryInputRef = React.useRef<TextInput>(null);
@@ -248,7 +280,7 @@ const DailyDetailView = () => {
     isAuthenticated ? { dayKey, refreshToken } : "skip",
     { initialNumItems: MEMORIES_PAGE_SIZE },
   );
-  const resolvedMemories = React.useMemo(() => {
+  const resolvedMemories: MemoryDoc[] = React.useMemo(() => {
     if (!Array.isArray(rawPaginatedMemories)) return [];
     return rawPaginatedMemories.filter(isMemoryDoc);
   }, [rawPaginatedMemories]);
@@ -310,6 +342,8 @@ const DailyDetailView = () => {
 
   const upsertDay = useMutation(api.days.upsertDay);
   const appendDayLogEntries = useMutation(api.days.appendDayLogEntries);
+  const updateMemory = useMutation(api.memories.updateMemory);
+  const deleteMemory = useMutation(api.memories.deleteMemory);
 
   const [manualEntry, setManualEntry] = useState("");
   const [personInput, setPersonInput] = useState("");
@@ -320,6 +354,21 @@ const DailyDetailView = () => {
   >(null);
   const [refreshing, setRefreshing] = useState(false);
   const [optimisticRating, setOptimisticRating] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [selectedMemory, setSelectedMemory] = useState<MemoryDoc | null>(null);
+  const [isMemorySaving, setIsMemorySaving] = useState(false);
+  const [isMemoryDeleting, setIsMemoryDeleting] = useState(false);
+  const [calendarTimelineEnabled, setCalendarTimelineEnabled] = useState(false);
+  const [calendarTimelineEvents, setCalendarTimelineEvents] = useState<
+    AppleCalendarTimelineEvent[]
+  >([]);
+  const [isCalendarTimelineLoading, setIsCalendarTimelineLoading] =
+    useState(false);
+  const [calendarTimelineError, setCalendarTimelineError] = useState<
+    string | null
+  >(null);
+  const [calendarTimelineCached, setCalendarTimelineCached] = useState(false);
 
   const onRefresh = useCallback(() => {
     if (refreshing) return;
@@ -370,7 +419,7 @@ const DailyDetailView = () => {
 
     const interval = setInterval(() => {
       setRelativeNow(Date.now());
-    }, 1_000);
+    }, 10_000);
 
     return () => {
       clearInterval(interval);
@@ -472,6 +521,66 @@ const DailyDetailView = () => {
     }
   }, [appendDayLogEntries, dayKey, personInput]);
 
+  const handleMarkKnownPerson = useCallback(
+    async (name: string) => {
+      try {
+        await appendDayLogEntries({
+          dayKey,
+          peopleTagsToAdd: [name],
+        });
+      } catch (err) {
+        if (isLikelyTransientNetworkError(err)) {
+          await enqueueOfflineAppendDayLog({
+            dayKey,
+            peopleTagsToAdd: [name],
+          });
+          Alert.alert(
+            "Saved Offline",
+            "Marked person as known. It will sync when online.",
+          );
+          return;
+        }
+        Alert.alert("Error", "Could not mark this person as known.");
+      }
+    },
+    [appendDayLogEntries, dayKey],
+  );
+
+  React.useEffect(() => {
+    if (!calendarTimelineEnabled) {
+      return;
+    }
+
+    let active = true;
+    setIsCalendarTimelineLoading(true);
+    setCalendarTimelineError(null);
+
+    collectAppleCalendarTimelineForDay(dayKey)
+      .then((result) => {
+        if (!active) return;
+        setCalendarTimelineEvents(result.events);
+        setCalendarTimelineCached(result.cached);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        const message =
+          error instanceof Error && error.message
+            ? error.message
+            : "Could not load calendar events for this day.";
+        setCalendarTimelineEvents([]);
+        setCalendarTimelineCached(false);
+        setCalendarTimelineError(message);
+      })
+      .finally(() => {
+        if (!active) return;
+        setIsCalendarTimelineLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [calendarTimelineEnabled, dayKey]);
+
   const handleRemovePerson = useCallback(
     async (index: number) => {
       try {
@@ -497,7 +606,10 @@ const DailyDetailView = () => {
     resolvedMemories.length > 0 ||
     hasDayMetadataForSummary ||
     integrationDailyData.length > 0;
-  const isSummaryActionDisabled = isGeneratingSummary || !hasSummaryInputs;
+  const hasRemainingSummaryQuota =
+    summaryQuota === undefined ? true : summaryQuota.remaining > 0;
+  const isSummaryActionDisabled =
+    isGeneratingSummary || !hasSummaryInputs || !hasRemainingSummaryQuota;
 
   const handleGenerateSummary = useCallback(async () => {
     if (!hasSummaryInputs) {
@@ -508,6 +620,12 @@ const DailyDetailView = () => {
       });
       setSummaryGenerationError(
         "Add at least one memory, day note/rating/tag, or synced integration data before generating a summary.",
+      );
+      return;
+    }
+    if (!hasRemainingSummaryQuota) {
+      setSummaryGenerationError(
+        "Daily summary quota reached. Please try again tomorrow.",
       );
       return;
     }
@@ -553,6 +671,7 @@ const DailyDetailView = () => {
   }, [
     dayKey,
     generateSummaryForDay,
+    hasRemainingSummaryQuota,
     hasDayMetadataForSummary,
     hasSummaryInputs,
     integrationDailyData.length,
@@ -568,10 +687,24 @@ const DailyDetailView = () => {
     }, 260);
   }, []);
 
-  if (isLoading) return <MemorySkeleton />;
-
   const moodFromMemories =
     resolvedMemories.length > 0 ? (resolvedMemories[0]?.mood ?? null) : null;
+  const availableTags = React.useMemo(() => {
+    const merged = resolvedMemories.flatMap((memory) => memory.tags ?? []);
+    return Array.from(new Set(merged)).slice(0, 12);
+  }, [resolvedMemories]);
+  const filteredMemories = React.useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return resolvedMemories.filter((memory) => {
+      const matchesQuery =
+        query.length === 0 ||
+        (memory.title ?? "").toLowerCase().includes(query) ||
+        (memory.description ?? "").toLowerCase().includes(query);
+      const matchesTag =
+        selectedTag === null || (memory.tags ?? []).includes(selectedTag);
+      return matchesQuery && matchesTag;
+    });
+  }, [resolvedMemories, searchQuery, selectedTag]);
 
   const sourcesUsed = summary?.sourcesUsed ?? [];
   const hasDataSources =
@@ -579,6 +712,50 @@ const DailyDetailView = () => {
   const syncStatusText = refreshing
     ? "Syncing..."
     : formatLastSyncTime(lastSyncAt, relativeNow);
+
+  const handleSaveMemory = useCallback(
+    async (memory: MemoryDoc, patch: MemoryPatchPayload) => {
+      setIsMemorySaving(true);
+      try {
+        await updateMemory({
+          memoryId: memory._id as GenericId<"memories">,
+          title: patch.title,
+          description: patch.description,
+          location: patch.location,
+          tags: patch.tags,
+          linkedPeople: patch.linkedPeople,
+        });
+      } catch (error) {
+        captureException("mobile_memory_update_failed", error, {
+          memoryId: memory._id,
+        });
+        Alert.alert("Error", "Failed to update memory.");
+      } finally {
+        setIsMemorySaving(false);
+      }
+    },
+    [updateMemory],
+  );
+
+  const handleDeleteMemory = useCallback(
+    async (memory: MemoryDoc) => {
+      setIsMemoryDeleting(true);
+      try {
+        await deleteMemory({ memoryId: memory._id as GenericId<"memories"> });
+        setSelectedMemory(null);
+      } catch (error) {
+        captureException("mobile_memory_delete_failed", error, {
+          memoryId: memory._id,
+        });
+        Alert.alert("Error", "Failed to delete memory.");
+      } finally {
+        setIsMemoryDeleting(false);
+      }
+    },
+    [deleteMemory],
+  );
+
+  if (isLoading) return <MemorySkeleton />;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -599,7 +776,23 @@ const DailyDetailView = () => {
         {/* ── Header ──────────────────────────────────── */}
         <View style={styles.headerRow}>
           <Text style={styles.pageTitle}>Today{"'s"} Detail</Text>
-          <Text style={styles.dateText}>{dayKey}</Text>
+          <View style={styles.dayNavRow}>
+            <TouchableOpacity
+              onPress={() => setDayKey((prev) => shiftDayKey(prev, -1))}
+              accessibilityRole="button"
+              accessibilityLabel="Previous day"
+            >
+              <Ionicons name="chevron-back" size={18} color={c.tint} />
+            </TouchableOpacity>
+            <Text style={styles.dateText}>{dayKey}</Text>
+            <TouchableOpacity
+              onPress={() => setDayKey((prev) => shiftDayKey(prev, 1))}
+              accessibilityRole="button"
+              accessibilityLabel="Next day"
+            >
+              <Ionicons name="chevron-forward" size={18} color={c.tint} />
+            </TouchableOpacity>
+          </View>
           <Text style={styles.syncText}>{syncStatusText}</Text>
         </View>
 
@@ -704,6 +897,11 @@ const DailyDetailView = () => {
                   synced integration data yet.
                 </Text>
               ) : null}
+              {!hasRemainingSummaryQuota ? (
+                <Text style={styles.summaryBlockedHintText}>
+                  You have reached today&apos;s summary limit.
+                </Text>
+              ) : null}
 
               {summaryGenerationError ? (
                 <Text style={styles.summaryErrorText}>
@@ -714,42 +912,144 @@ const DailyDetailView = () => {
           </AppCard>
         </View>
 
+        {/* ── Daily Timeline ───────────────────────────── */}
+        <View style={styles.section}>
+          <SectionHeader title="Daily Timeline" />
+          <AppCard>
+            {!calendarTimelineEnabled ? (
+              <View style={{ gap: Spacing.sm }}>
+                <Text style={styles.timelineHintText}>
+                  Load a clean timeline of your calendar events for this day.
+                </Text>
+                <AppButton
+                  title="Load Timeline"
+                  onPress={() => setCalendarTimelineEnabled(true)}
+                  variant="secondary"
+                  size="md"
+                  icon={
+                    <Ionicons
+                      name="calendar-outline"
+                      size={16}
+                      color={c.tint}
+                    />
+                  }
+                />
+              </View>
+            ) : isCalendarTimelineLoading ? (
+              <Text style={styles.timelineHintText}>Loading timeline...</Text>
+            ) : calendarTimelineError ? (
+              <Text style={styles.summaryErrorText}>
+                {calendarTimelineError}
+              </Text>
+            ) : calendarTimelineEvents.length === 0 ? (
+              <Text style={styles.timelineHintText}>
+                No calendar events scheduled for this day.
+              </Text>
+            ) : (
+              <View style={styles.timelineList}>
+                {calendarTimelineEvents.map((event) => (
+                  <View
+                    key={`${event.id}-${event.startAt}`}
+                    style={styles.timelineItem}
+                  >
+                    <View style={styles.timelineRail}>
+                      <View style={styles.timelineDot} />
+                      <View style={styles.timelineLine} />
+                    </View>
+                    <View style={styles.timelineCard}>
+                      <Text style={styles.timelineTimeLabel}>
+                        {event.timeLabel}
+                      </Text>
+                      <Text style={styles.timelineTitleText}>
+                        {event.title}
+                      </Text>
+                      <Text style={styles.timelineMetaText}>
+                        {event.isAllDay
+                          ? "All-day event"
+                          : `Duration ${formatDurationLabel(event.durationMinutes)}`}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+                <Text style={styles.timelineCacheText}>
+                  {calendarTimelineCached
+                    ? "Showing cached events for this day."
+                    : "Timeline synced from your calendar."}
+                </Text>
+              </View>
+            )}
+          </AppCard>
+        </View>
+
         {/* ── Today's Memories ─────────────────────────── */}
         {resolvedMemories.length > 0 ? (
           <View style={styles.section}>
             <SectionHeader title="Today's Memories" />
-            <AppCard padded={false}>
-              {resolvedMemories.map((mem, idx) => (
-                <View
-                  key={mem._id}
+            <TextInput
+              style={styles.input}
+              placeholder="Search memories..."
+              placeholderTextColor={c.textTertiary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {availableTags.length > 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.filterChipsWrap}
+                contentContainerStyle={{ gap: Spacing.xs }}
+              >
+                <TouchableOpacity
                   style={[
-                    styles.memoryRow,
-                    idx < resolvedMemories.length - 1 && styles.memoryBorder,
+                    styles.filterChip,
+                    selectedTag === null && styles.filterChipSelected,
                   ]}
+                  onPress={() => setSelectedTag(null)}
                 >
-                  <View style={styles.moodDot}>
-                    <Text style={{ fontSize: 14 }}>
-                      {MOOD_EMOJI[mem.mood ?? ""] ?? "📝"}
+                  <Text
+                    style={[
+                      styles.filterChipText,
+                      selectedTag === null && styles.filterChipTextSelected,
+                    ]}
+                  >
+                    All
+                  </Text>
+                </TouchableOpacity>
+                {availableTags.map((tag) => (
+                  <TouchableOpacity
+                    key={tag}
+                    style={[
+                      styles.filterChip,
+                      selectedTag === tag && styles.filterChipSelected,
+                    ]}
+                    onPress={() => setSelectedTag(tag)}
+                  >
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        selectedTag === tag && styles.filterChipTextSelected,
+                      ]}
+                    >
+                      #{tag}
                     </Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.memoryTitle}>{mem.title}</Text>
-                    {mem.description && (
-                      <Text style={styles.memoryDesc} numberOfLines={2}>
-                        {mem.description}
-                      </Text>
-                    )}
-                  </View>
-                  {mem.thumbnailUrl ? (
-                    <Image
-                      source={{
-                        uri: mem.thumbnailUrl,
-                      }}
-                      style={styles.memoryThumb}
-                    />
-                  ) : null}
-                </View>
-              ))}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            ) : null}
+            <AppCard padded={false}>
+              {filteredMemories.length > 0 ? (
+                <MemoryCarousel
+                  colors={c}
+                  memories={filteredMemories}
+                  onOpen={(memory) => setSelectedMemory(memory)}
+                />
+              ) : (
+                <EmptyState
+                  icon="search-outline"
+                  title="No matching memories"
+                  subtitle="Try a different search or tag filter."
+                />
+              )}
             </AppCard>
             {isLoadingMoreMemories ? (
               <Text style={styles.loadMoreText}>Loading more memories...</Text>
@@ -867,43 +1167,18 @@ const DailyDetailView = () => {
 
         {/* ── People Tags ──────────────────────────────── */}
         <View style={styles.section}>
-          <SectionHeader title="People You Met" />
-          <AppCard>
-            <View style={styles.personInputRow}>
-              <TextInput
-                style={[styles.input, { flex: 1, marginBottom: 0 }]}
-                placeholder="Name..."
-                placeholderTextColor={c.textTertiary}
-                value={personInput}
-                onChangeText={setPersonInput}
-                editable={!isSaving}
-                onSubmitEditing={handleAddPerson}
-              />
-              <AppButton
-                title="Add"
-                onPress={handleAddPerson}
-                variant="secondary"
-                size="sm"
-                disabled={!personInput.trim() || isSaving}
-                style={{ marginLeft: Spacing.sm }}
-              />
-            </View>
-            {peopleTags.length > 0 && (
-              <View style={styles.tagsWrap}>
-                {peopleTags.map((person: string, index: number) => (
-                  <TouchableOpacity
-                    key={index}
-                    style={styles.personTag}
-                    onLongPress={() => handleRemovePerson(index)}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons name="person-outline" size={12} color={c.tint} />
-                    <Text style={styles.personTagText}>{person}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-          </AppCard>
+          <PeopleYouMetSection
+            colors={c}
+            isAuthenticated={isAuthenticated}
+            isSaving={isSaving}
+            personInput={personInput}
+            peopleTags={peopleTags}
+            integrationDailyData={integrationDailyData}
+            onPersonInputChange={setPersonInput}
+            onAddPerson={handleAddPerson}
+            onRemovePerson={handleRemovePerson}
+            onMarkKnownPerson={handleMarkKnownPerson}
+          />
         </View>
 
         {/* ── Rate Your Day ────────────────────────────── */}
@@ -944,6 +1219,16 @@ const DailyDetailView = () => {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+      <MemoryDetailSheet
+        visible={Boolean(selectedMemory)}
+        memory={selectedMemory}
+        colors={c}
+        isSaving={isMemorySaving}
+        isDeleting={isMemoryDeleting}
+        onClose={() => setSelectedMemory(null)}
+        onSave={handleSaveMemory}
+        onDelete={handleDeleteMemory}
+      />
     </SafeAreaView>
   );
 };
@@ -976,6 +1261,11 @@ function createStyles(c: ThemeColors) {
       color: c.textSecondary,
       marginTop: 2,
     },
+    dayNavRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: Spacing.sm,
+    },
     syncText: {
       ...Typography.caption2,
       color: c.textSecondary,
@@ -995,6 +1285,8 @@ function createStyles(c: ThemeColors) {
       alignItems: "center",
       gap: 4,
       backgroundColor: c.tintLight,
+      borderWidth: 1,
+      borderColor: c.border,
       borderRadius: Radius.full,
       paddingHorizontal: Spacing.md,
       paddingVertical: Spacing.xs,
@@ -1008,6 +1300,30 @@ function createStyles(c: ThemeColors) {
     section: {
       paddingHorizontal: Spacing.xl,
       marginBottom: Spacing["2xl"],
+    },
+    filterChipsWrap: {
+      marginTop: Spacing.sm,
+      marginBottom: Spacing.md,
+    },
+    filterChip: {
+      borderRadius: Radius.full,
+      borderWidth: 1,
+      borderColor: c.border,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.xs,
+      backgroundColor: c.surface,
+    },
+    filterChipSelected: {
+      borderColor: c.tint,
+      backgroundColor: c.tintLight,
+    },
+    filterChipText: {
+      ...Typography.caption1,
+      color: c.textSecondary,
+    },
+    filterChipTextSelected: {
+      color: c.tint,
+      fontWeight: "600",
     },
 
     // Story
@@ -1032,6 +1348,63 @@ function createStyles(c: ThemeColors) {
       ...Typography.caption2,
       color: c.error,
     },
+    timelineHintText: {
+      ...Typography.caption1,
+      color: c.textSecondary,
+    },
+    timelineList: {
+      gap: Spacing.sm,
+    },
+    timelineItem: {
+      flexDirection: "row",
+      alignItems: "stretch",
+      gap: Spacing.sm,
+    },
+    timelineRail: {
+      width: 16,
+      alignItems: "center",
+    },
+    timelineDot: {
+      width: 8,
+      height: 8,
+      borderRadius: Radius.full,
+      backgroundColor: c.text,
+      marginTop: 8,
+    },
+    timelineLine: {
+      width: 1,
+      flex: 1,
+      marginTop: 4,
+      backgroundColor: c.border,
+    },
+    timelineCard: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: Radius.lg,
+      backgroundColor: c.surface,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.sm,
+      gap: 2,
+    },
+    timelineTimeLabel: {
+      ...Typography.caption1,
+      color: c.text,
+      fontWeight: "600",
+    },
+    timelineTitleText: {
+      ...Typography.bodyMedium,
+      color: c.text,
+    },
+    timelineMetaText: {
+      ...Typography.caption2,
+      color: c.textSecondary,
+    },
+    timelineCacheText: {
+      ...Typography.caption2,
+      color: c.textTertiary,
+      marginTop: Spacing.xs,
+    },
     highlightsWrap: {
       flexDirection: "row",
       flexWrap: "wrap",
@@ -1040,6 +1413,8 @@ function createStyles(c: ThemeColors) {
     },
     highlightChip: {
       backgroundColor: c.tintLight,
+      borderWidth: 1,
+      borderColor: c.border,
       borderRadius: Radius.full,
       paddingHorizontal: Spacing.md,
       paddingVertical: Spacing.xs,
@@ -1112,6 +1487,8 @@ function createStyles(c: ThemeColors) {
       alignItems: "center",
       gap: 4,
       backgroundColor: c.surfaceSecondary,
+      borderWidth: 1,
+      borderColor: c.border,
       borderRadius: Radius.full,
       paddingHorizontal: Spacing.md,
       paddingVertical: Spacing.xs,
@@ -1141,38 +1518,15 @@ function createStyles(c: ThemeColors) {
       flex: 1,
     },
     input: {
-      backgroundColor: c.inputBg,
+      backgroundColor: c.surface,
       borderRadius: Radius.md,
+      borderWidth: 1,
+      borderColor: c.border,
       paddingHorizontal: Spacing.lg,
       paddingVertical: Spacing.md,
       minHeight: 44,
       ...Typography.body,
       color: c.text,
-    },
-
-    // People
-    personInputRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      marginBottom: Spacing.md,
-    },
-    tagsWrap: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: Spacing.sm,
-    },
-    personTag: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 4,
-      backgroundColor: c.tintLight,
-      borderRadius: Radius.full,
-      paddingHorizontal: Spacing.md,
-      paddingVertical: Spacing.xs + 2,
-    },
-    personTagText: {
-      ...Typography.caption1,
-      color: c.tint,
     },
 
     // Stars

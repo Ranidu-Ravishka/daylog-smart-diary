@@ -5,6 +5,7 @@ import { MEMORY_MOOD_OPTIONS, SETTINGS_DEFAULTS } from "@repo/ui/lib/constants";
 import { Spacing, type ThemeColors } from "@/constants/theme";
 import { AppCard } from "@/components/ui/app-card";
 import { SectionHeader } from "@/components/ui/section-header";
+import { UserAvatar } from "@/components/ui/user-avatar";
 import type { OutboxLastSyncResult, PreferencesSnapshot } from "./types";
 import type { ProfileStyles } from "./profile-styles";
 import { ProfileToggleRow } from "./profile-toggle-row";
@@ -14,6 +15,19 @@ type ProfileOverviewSectionProps = {
   colors: ThemeColors;
   userName: string;
   userEmail: string;
+  userImageUrl?: string | null;
+  isUpdatingProfileImage: boolean;
+  providerImageOptions: {
+    key: "apple" | "google";
+    label: string;
+    imageUrl: string;
+  }[];
+  onUploadProfileImage: () => void;
+  onUseProviderProfileImage: (
+    provider: "apple" | "google",
+    imageUrl: string,
+  ) => void;
+  onResetProfileImage: () => void;
   isPreferencesMissing: boolean;
   darkMode: boolean;
   onToggleDarkMode: () => void;
@@ -47,6 +61,12 @@ export function ProfileOverviewSection({
   colors,
   userName,
   userEmail,
+  userImageUrl,
+  isUpdatingProfileImage,
+  providerImageOptions,
+  onUploadProfileImage,
+  onUseProviderProfileImage,
+  onResetProfileImage,
   isPreferencesMissing,
   darkMode,
   onToggleDarkMode,
@@ -80,14 +100,63 @@ export function ProfileOverviewSection({
         <SectionHeader title="Profile Overview" />
         <AppCard>
           <View style={styles.profileRow}>
-            <View style={styles.avatar}>
-              <Ionicons name="person" size={24} color={colors.tint} />
+            <View style={{ marginRight: Spacing.lg }}>
+              <UserAvatar
+                colors={colors}
+                name={userName}
+                imageUrl={userImageUrl}
+                size={56}
+                editable
+                onPress={onUploadProfileImage}
+              />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.profileName}>{userName}</Text>
               <Text style={styles.profileEmail}>{userEmail}</Text>
             </View>
           </View>
+          <View
+            style={[styles.integrationActionsRow, { marginTop: Spacing.md }]}
+          >
+            <TouchableOpacity
+              style={styles.integrationPrimaryBtn}
+              onPress={onUploadProfileImage}
+              disabled={isUpdatingProfileImage}
+            >
+              <Text style={styles.integrationPrimaryBtnText}>
+                {isUpdatingProfileImage ? "Updating..." : "Upload photo"}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.integrationSecondaryBtn}
+              onPress={onResetProfileImage}
+              disabled={isUpdatingProfileImage}
+            >
+              <Text style={styles.integrationSecondaryBtnText}>
+                Use default
+              </Text>
+            </TouchableOpacity>
+          </View>
+          {providerImageOptions.length > 0 ? (
+            <View
+              style={[styles.integrationActionsRow, { marginTop: Spacing.sm }]}
+            >
+              {providerImageOptions.map((option) => (
+                <TouchableOpacity
+                  key={option.key}
+                  style={styles.integrationSecondaryBtn}
+                  onPress={() =>
+                    onUseProviderProfileImage(option.key, option.imageUrl)
+                  }
+                  disabled={isUpdatingProfileImage}
+                >
+                  <Text style={styles.integrationSecondaryBtnText}>
+                    Use {option.label} image
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : null}
         </AppCard>
       </View>
 

@@ -89,6 +89,70 @@ describe("users behavior", () => {
     expect(db.getTable("user")).toHaveLength(2);
   });
 
+  it("updates profile image via manual upload and provider fallback", async () => {
+    const db = createInMemoryDb(baseSeed());
+    const generateProfileImageUploadUrl = handler<
+      Record<string, never>,
+      { uploadUrl: string }
+    >(usersModule.generateProfileImageUploadUrl);
+    const setProfileImageFromUpload = handler<
+      { storageId: string },
+      { profileImageUrl: string | null; profileImageSource: "manual" }
+    >(usersModule.setProfileImageFromUpload);
+    const setProfileImageFromProvider = handler<
+      { imageUrl: string; source: "apple" | "google" | "clerk" },
+      {
+        profileImageUrl: string;
+        profileImageSource: "apple" | "google" | "clerk";
+      }
+    >(usersModule.setProfileImageFromProvider);
+    const getMyProfile = handler<
+      Record<string, never>,
+      {
+        profileImageUrl: string | null;
+        profileImageSource: "apple" | "google" | "clerk" | "manual" | null;
+      }
+    >(usersModule.getMyProfile);
+
+    const storage = {
+      generateUploadUrl: vi.fn(async () => "https://upload.test/url"),
+      getMetadata: vi.fn(async () => ({
+        size: 128 * 1024,
+        contentType: "image/jpeg",
+      })),
+      getUrl: vi.fn(
+        async (storageId: string) => `https://cdn.test/${storageId}`,
+      ),
+      delete: vi.fn(async () => undefined),
+    };
+
+    const ctx = {
+      ...createAuthCtx(db, "clerk_member_001"),
+      storage,
+    };
+
+    const upload = await generateProfileImageUploadUrl(ctx, {});
+    expect(upload.uploadUrl).toContain("upload.test");
+
+    const manual = await setProfileImageFromUpload(ctx, {
+      storageId: "storage_profile_001",
+    });
+    expect(manual.profileImageSource).toBe("manual");
+    expect(manual.profileImageUrl).toContain("storage_profile_001");
+
+    const provider = await setProfileImageFromProvider(ctx, {
+      source: "google",
+      imageUrl: "https://images.example.com/google.png",
+    });
+    expect(provider.profileImageSource).toBe("google");
+
+    const profile = await getMyProfile(ctx, {});
+    expect(profile.profileImageSource).toBe("google");
+    expect(profile.profileImageUrl).toBe(
+      "https://images.example.com/google.png",
+    );
+  });
+
   it("enforces identity checks and admin boundaries", async () => {
     const db = createInMemoryDb(baseSeed());
 

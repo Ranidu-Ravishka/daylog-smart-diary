@@ -113,15 +113,20 @@ export default function TabLayout() {
             tabBarLabelStyle: {
               marginTop: 4,
               fontSize: 11,
-              fontWeight: "500",
+              fontWeight: "600",
             },
             tabBarStyle: {
-              height: 68,
+              position: "absolute",
+              left: 16,
+              right: 16,
+              bottom: 10,
+              height: 70,
               paddingTop: 6,
-              paddingBottom: 6,
+              paddingBottom: 8,
               backgroundColor: theme.surface,
-              borderTopWidth: 0.5,
-              borderTopColor: theme.divider,
+              borderTopWidth: 1,
+              borderTopColor: theme.border,
+              borderRadius: 20,
             },
           }}
         >

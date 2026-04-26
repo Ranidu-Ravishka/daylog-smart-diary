@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
   Spacing,
@@ -39,13 +39,16 @@ export function EmptyState({
         </Text>
       )}
       {actionLabel && onAction && (
-        <TouchableOpacity
-          style={[styles.button, { backgroundColor: c.tint }]}
+        <Pressable
+          style={({ pressed }) => [
+            styles.button,
+            { backgroundColor: c.tint },
+            pressed && styles.buttonPressed,
+          ]}
           onPress={onAction}
-          activeOpacity={0.8}
         >
           <Text style={styles.buttonText}>{actionLabel}</Text>
-        </TouchableOpacity>
+        </Pressable>
       )}
     </View>
   );
@@ -82,6 +85,11 @@ function createStyles(c: ThemeColors) {
       paddingVertical: Spacing.md,
       paddingHorizontal: Spacing["2xl"],
       borderRadius: Radius.md,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    buttonPressed: {
+      opacity: 0.84,
     },
     buttonText: {
       ...Typography.bodyMedium,

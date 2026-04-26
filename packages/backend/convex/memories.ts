@@ -102,6 +102,23 @@ type AddMemoryMediaArgs = {
   clientMediaId?: string;
 };
 
+function normalizeStringArray(
+  values: string[] | undefined,
+): string[] | undefined {
+  if (!values || values.length === 0) return undefined;
+  const normalized = Array.from(
+    new Set(values.map((value) => value.trim()).filter(Boolean)),
+  );
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeOptionalString(
+  value: string | undefined,
+): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 function normalizeClientMediaId(
   clientMediaId: string | undefined,
 ): string | undefined {
@@ -285,6 +302,9 @@ export const createMemory = mutation({
     mood: v.optional(v.string()),
     happenedAt: v.number(),
     dayKey: v.string(),
+    tags: v.optional(v.array(v.string())),
+    location: v.optional(v.string()),
+    linkedPeople: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
@@ -299,6 +319,9 @@ export const createMemory = mutation({
 
     try {
       validateDayKey(args.dayKey);
+      const normalizedTags = normalizeStringArray(args.tags);
+      const normalizedLocation = normalizeOptionalString(args.location);
+      const normalizedLinkedPeople = normalizeStringArray(args.linkedPeople);
       assertMemoryTextLimits({
         title: args.title,
         description: args.description,
@@ -327,7 +350,12 @@ export const createMemory = mutation({
             (existingSensitive.mood ?? undefined) ===
               (args.mood ?? undefined) &&
             existing.happenedAt === args.happenedAt &&
-            existing.dayKey === args.dayKey;
+            existing.dayKey === args.dayKey &&
+            JSON.stringify(existing.tags ?? []) ===
+              JSON.stringify(normalizedTags ?? []) &&
+            (existing.location ?? undefined) === normalizedLocation &&
+            JSON.stringify(existing.linkedPeople ?? []) ===
+              JSON.stringify(normalizedLinkedPeople ?? []);
 
           if (!samePayload) {
             throw new Error(
@@ -361,6 +389,9 @@ export const createMemory = mutation({
         ...encryptedPayload,
         happenedAt: args.happenedAt,
         dayKey: args.dayKey,
+        tags: normalizedTags,
+        location: normalizedLocation,
+        linkedPeople: normalizedLinkedPeople,
       });
 
       await applyDashboardMetricsDelta(ctx.db, {
@@ -570,6 +601,9 @@ export const updateMemory = mutation({
     mood: v.optional(v.string()),
     happenedAt: v.optional(v.number()),
     dayKey: v.optional(v.string()),
+    tags: v.optional(v.array(v.string())),
+    location: v.optional(v.string()),
+    linkedPeople: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
@@ -599,6 +633,15 @@ export const updateMemory = mutation({
     if (args.dayKey !== undefined) {
       validateDayKey(args.dayKey);
       updates.dayKey = args.dayKey;
+    }
+    if (args.tags !== undefined) {
+      updates.tags = normalizeStringArray(args.tags);
+    }
+    if (args.location !== undefined) {
+      updates.location = normalizeOptionalString(args.location);
+    }
+    if (args.linkedPeople !== undefined) {
+      updates.linkedPeople = normalizeStringArray(args.linkedPeople);
     }
 
     const shouldEncryptSensitiveFields =

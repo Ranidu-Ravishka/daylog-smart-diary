@@ -3,19 +3,28 @@ import {
   DarkTheme,
   DefaultTheme,
   ThemeProvider,
+  type Theme as NavigationTheme,
 } from "@react-navigation/native";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import "react-native-reanimated";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Animated,
+  Easing,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 
 import { ConvexReactClient, useConvexAuth, useMutation } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
 
 import { ClerkProvider, useAuth, useUser } from "@clerk/clerk-expo";
 import { api } from "@repo/backend/convex";
+import { MotionTokens } from "@/constants/motion";
 import { Colors } from "@/constants/theme";
 import { AppThemeProvider, useAppTheme } from "@/components/theme-provider";
 import { useColorScheme } from "@/hooks/use-color-scheme";
@@ -272,11 +281,53 @@ function StartupConfigErrorScreen({
 }
 
 function AppThemedShell({ children }: { children: React.ReactNode }) {
-  const { isDark } = useAppTheme();
+  const { isDark, colors } = useAppTheme();
+  const overlayOpacity = useRef(new Animated.Value(0)).current;
+  const previousBackground = useRef(colors.background);
+  const [overlayColor, setOverlayColor] = useState(colors.background);
+
+  useEffect(() => {
+    setOverlayColor(previousBackground.current);
+    previousBackground.current = colors.background;
+    overlayOpacity.setValue(1);
+    Animated.timing(overlayOpacity, {
+      toValue: 0,
+      duration: MotionTokens.duration.themeTransition,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [colors.background, overlayOpacity]);
+
+  const navigationTheme: NavigationTheme = {
+    ...(isDark ? DarkTheme : DefaultTheme),
+    colors: {
+      ...(isDark ? DarkTheme.colors : DefaultTheme.colors),
+      background: colors.background,
+      card: colors.surface,
+      text: colors.text,
+      border: colors.border,
+      primary: colors.tint,
+      notification: colors.tint,
+    },
+  };
 
   return (
-    <ThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
-      {children}
+    <ThemeProvider value={navigationTheme}>
+      <View
+        style={[
+          styles.themedShellContainer,
+          { backgroundColor: colors.background },
+        ]}
+      >
+        {children}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFillObject,
+            { backgroundColor: overlayColor, opacity: overlayOpacity },
+          ]}
+        />
+      </View>
       <StatusBar style={isDark ? "light" : "dark"} />
     </ThemeProvider>
   );
@@ -416,5 +467,8 @@ const styles = StyleSheet.create({
   configErrorHint: {
     fontSize: 13,
     lineHeight: 20,
+  },
+  themedShellContainer: {
+    flex: 1,
   },
 });
