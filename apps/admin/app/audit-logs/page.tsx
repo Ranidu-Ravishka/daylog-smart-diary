@@ -7,6 +7,9 @@ import { api } from "@repo/backend/convex";
 import { makeFunctionReference } from "convex/server";
 import { useConvexAuth, usePaginatedQuery, useQuery } from "convex/react";
 import { useMemo, useState } from "react";
+import { PageContainer } from "@/components/page-container";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function AuditLogsPage() {
   const listAuditLogsPaginatedRef = makeFunctionReference<"query">(
@@ -82,158 +85,163 @@ export default function AuditLogsPage() {
 
   return (
     <AdminGuard>
-      <div className="min-h-screen bg-gray-50 py-10">
-        <div className="max-w-5xl mx-auto px-6">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h1 className="text-2xl font-semibold text-gray-900">
-                Audit Logs
-              </h1>
-              <p className="text-sm text-gray-500 mt-1">
-                Recent entries from the <code>auditLogs</code> table
-                (read-only).
-              </p>
-            </div>
-          </div>
+      <PageContainer
+        className="max-w-6xl"
+        title="Audit logs"
+        description={
+          <>
+            Recent entries from the{" "}
+            <code className="rounded-md bg-muted px-1.5 py-0.5 text-xs">
+              auditLogs
+            </code>{" "}
+            table (read-only).
+          </>
+        }
+      >
+        <div className="mb-4 grid gap-3 rounded-xl border border-border bg-card p-4 shadow-sm md:grid-cols-5">
+          <label className="text-xs text-muted-foreground">
+            Actor
+            <select
+              className="mt-1 w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+              value={userFilter}
+              onChange={(event) => setUserFilter(event.target.value)}
+            >
+              <option value="all">All actors</option>
+              {actorUserIds.map((id) => (
+                <option key={id} value={id}>
+                  {userById.get(id)?.email || id}
+                </option>
+              ))}
+            </select>
+          </label>
 
-          <div className="mb-4 grid gap-3 rounded-xl border border-gray-200 bg-white p-4 md:grid-cols-5">
-            <label className="text-xs text-gray-600">
-              Actor
-              <select
-                className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
-                value={userFilter}
-                onChange={(event) => setUserFilter(event.target.value)}
-              >
-                <option value="all">All actors</option>
-                {actorUserIds.map((id) => (
-                  <option key={id} value={id}>
-                    {userById.get(id)?.email || id}
-                  </option>
-                ))}
-              </select>
-            </label>
+          <label className="text-xs text-muted-foreground">
+            Action
+            <select
+              className="mt-1 w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+              value={actionFilter}
+              onChange={(event) => setActionFilter(event.target.value)}
+            >
+              <option value="all">All actions</option>
+              {actionOptions.map((action) => (
+                <option key={action} value={action}>
+                  {action}
+                </option>
+              ))}
+            </select>
+          </label>
 
-            <label className="text-xs text-gray-600">
-              Action
-              <select
-                className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
-                value={actionFilter}
-                onChange={(event) => setActionFilter(event.target.value)}
-              >
-                <option value="all">All actions</option>
-                {actionOptions.map((action) => (
-                  <option key={action} value={action}>
-                    {action}
-                  </option>
-                ))}
-              </select>
-            </label>
+          <label className="text-xs text-muted-foreground">
+            Start date
+            <input
+              type="date"
+              className="mt-1 w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+              value={startDate}
+              onChange={(event) => setStartDate(event.target.value)}
+            />
+          </label>
 
-            <label className="text-xs text-gray-600">
-              Start date
-              <input
-                type="date"
-                className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
-                value={startDate}
-                onChange={(event) => setStartDate(event.target.value)}
-              />
-            </label>
+          <label className="text-xs text-muted-foreground">
+            End date
+            <input
+              type="date"
+              className="mt-1 w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+              value={endDate}
+              onChange={(event) => setEndDate(event.target.value)}
+            />
+          </label>
 
-            <label className="text-xs text-gray-600">
-              End date
-              <input
-                type="date"
-                className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
-                value={endDate}
-                onChange={(event) => setEndDate(event.target.value)}
-              />
-            </label>
-
-            <div className="flex items-end">
-              <button
-                onClick={() => {
-                  setUserFilter("all");
-                  setActionFilter("all");
-                  setStartDate("");
-                  setEndDate("");
-                }}
-                className="w-full rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                Clear Filters
-              </button>
-            </div>
-          </div>
-
-          <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-            {status === "LoadingFirstPage" ? (
-              <div className="p-6 text-sm text-gray-600">
-                Loading audit logs…
-              </div>
-            ) : logs.length === 0 ? (
-              <div className="p-6 text-sm text-gray-600">
-                No audit logs match the current filters.
-              </div>
-            ) : (
-              <>
-                <div className="overflow-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="text-left font-medium px-4 py-3">
-                          Action
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Target
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Actor (User ID)
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Timestamp
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {logs.map((row) => (
-                        <tr key={row._id} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 text-gray-900">
-                            {row.action}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {row.target ?? "—"}
-                          </td>
-                          <td className="px-4 py-3 font-mono text-xs text-gray-800">
-                            <div>{String(row.actorUserId)}</div>
-                            {userById.get(String(row.actorUserId))?.email && (
-                              <div className="text-[11px] text-gray-500">
-                                {userById.get(String(row.actorUserId))?.email}
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {new Date(row.at).toLocaleString()}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {status === "CanLoadMore" && (
-                  <div className="border-t border-gray-100 p-4">
-                    <button
-                      onClick={() => loadMore(50)}
-                      className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
-                    >
-                      Load more audit logs
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
+          <div className="flex items-end">
+            <Button
+              type="button"
+              variant="secondary"
+              className="w-full"
+              onClick={() => {
+                setUserFilter("all");
+                setActionFilter("all");
+                setStartDate("");
+                setEndDate("");
+              }}
+            >
+              Clear filters
+            </Button>
           </div>
         </div>
-      </div>
+
+        <div className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+          {status === "LoadingFirstPage" ? (
+            <div className="space-y-0 p-4">
+              <Skeleton className="h-10 w-full rounded-lg" />
+              <Skeleton className="mt-2 h-10 w-full rounded-lg" />
+              <Skeleton className="mt-2 h-10 w-full rounded-lg" />
+              <Skeleton className="mt-2 h-10 w-full rounded-lg" />
+            </div>
+          ) : logs.length === 0 ? (
+            <div className="p-6 text-sm text-muted-foreground">
+              No audit logs match the current filters.
+            </div>
+          ) : (
+            <>
+              <div className="max-w-full overflow-x-auto overscroll-x-contain">
+                <table className="min-w-[860px] w-full text-sm">
+                  <thead className="bg-muted/50 text-muted-foreground">
+                    <tr>
+                      <th className="text-left font-medium px-4 py-3">
+                        Action
+                      </th>
+                      <th className="text-left font-medium px-4 py-3">
+                        Target
+                      </th>
+                      <th className="text-left font-medium px-4 py-3">
+                        Actor (User ID)
+                      </th>
+                      <th className="text-left font-medium px-4 py-3">
+                        Timestamp
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {logs.map((row) => (
+                      <tr key={row._id} className="hover:bg-muted/50">
+                        <td className="px-4 py-3 text-foreground">
+                          {row.action}
+                        </td>
+                        <td className="max-w-[180px] px-4 py-3 text-muted-foreground">
+                          {row.target ?? "—"}
+                        </td>
+                        <td className="max-w-[320px] px-4 py-3 font-mono text-xs text-foreground">
+                          <div>{String(row.actorUserId)}</div>
+                          {userById.get(String(row.actorUserId))?.email && (
+                            <div className="text-[11px] text-muted-foreground">
+                              {userById.get(String(row.actorUserId))?.email}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {new Date(row.at).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {status === "CanLoadMore" && (
+                <div className="border-t border-border p-4">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => loadMore(50)}
+                  >
+                    Load more audit logs
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </PageContainer>
     </AdminGuard>
   );
 }

@@ -12,6 +12,10 @@ import {
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
+import { PageContainerWide } from "@/components/page-container";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+
 type SummaryQualityRow = {
   _id: string;
   userId: string;
@@ -134,278 +138,278 @@ export default function SummaryQualityPage() {
 
   return (
     <AdminGuard>
-      <div className="min-h-screen bg-gray-50 py-10">
-        <div className="mx-auto max-w-6xl px-6">
-          <div className="mb-6 flex items-start justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-semibold text-gray-900">
-                Summary Quality Queue
-              </h1>
-              <p className="mt-1 text-sm text-gray-500">
-                Review low-quality summaries, inspect scoring dimensions, and
-                monitor generation failures.
-              </p>
-            </div>
-
-            <div className="flex gap-2">
-              <Link
-                href="/summaries"
-                className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
-              >
-                Back to Summaries
-              </Link>
-              <button
-                onClick={onBackfill}
-                disabled={backfillBusy}
-                className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {backfillBusy ? "Backfilling…" : "Backfill Evaluations"}
-              </button>
-            </div>
-          </div>
-
-          {feedback && (
-            <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-              {feedback}
-            </div>
-          )}
-
-          {errorMessage && (
-            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {errorMessage}
-            </div>
-          )}
-
-          <div className="mb-4 flex items-center gap-2">
-            <button
-              onClick={() => {
-                setOnlyLowQuality(true);
-                setSelectedEvaluationId(null);
-              }}
-              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${onlyLowQuality ? "bg-blue-600 text-white" : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"}`}
+      <PageContainerWide
+        title="Summary quality"
+        description="Review low-quality summaries, inspect scoring dimensions, and monitor generation failures."
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" size="sm" asChild>
+              <Link href="/summaries">Back to summaries</Link>
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={() => void onBackfill()}
+              disabled={backfillBusy}
             >
-              Low Quality Only
-            </button>
-            <button
-              onClick={() => {
-                setOnlyLowQuality(false);
-                setSelectedEvaluationId(null);
-              }}
-              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${!onlyLowQuality ? "bg-blue-600 text-white" : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"}`}
-            >
-              All Evaluations
-            </button>
+              {backfillBusy ? "Backfilling…" : "Backfill evaluations"}
+            </Button>
           </div>
-
-          <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-            <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-              {evaluationsStatus === "LoadingFirstPage" ? (
-                <div className="p-6 text-sm text-gray-600">
-                  Loading quality evaluations…
-                </div>
-              ) : evaluations.length === 0 ? (
-                <div className="p-6 text-sm text-gray-600">
-                  No evaluations found for this filter.
-                </div>
-              ) : (
-                <>
-                  <div className="overflow-auto">
-                    <table className="min-w-full text-sm">
-                      <thead className="bg-gray-50 text-gray-600">
-                        <tr>
-                          <th className="px-4 py-3 text-left font-medium">
-                            Day
-                          </th>
-                          <th className="px-4 py-3 text-left font-medium">
-                            Overall
-                          </th>
-                          <th className="px-4 py-3 text-left font-medium">
-                            Words
-                          </th>
-                          <th className="px-4 py-3 text-left font-medium">
-                            Duplication
-                          </th>
-                          <th className="px-4 py-3 text-left font-medium">
-                            Flags
-                          </th>
-                          <th className="px-4 py-3 text-left font-medium">
-                            Evaluated
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {(evaluations as SummaryQualityRow[]).map((row) => (
-                          <tr
-                            key={row._id}
-                            className={`cursor-pointer hover:bg-gray-50 ${selectedEvaluationId === row._id ? "bg-blue-50/50" : ""}`}
-                            onClick={() => setSelectedEvaluationId(row._id)}
-                          >
-                            <td className="px-4 py-3 font-mono text-xs text-gray-800">
-                              {row.dayKey}
-                            </td>
-                            <td className="px-4 py-3 text-gray-700">
-                              {scorePct(row.scores.overall)}
-                            </td>
-                            <td className="px-4 py-3 text-gray-700">
-                              {row.wordCount}
-                            </td>
-                            <td className="px-4 py-3 text-gray-700">
-                              {scorePct(row.duplicateLineRatio)}
-                            </td>
-                            <td className="max-w-xs px-4 py-3 text-xs text-gray-700">
-                              {row.flags.join(", ") || "—"}
-                            </td>
-                            <td className="px-4 py-3 text-gray-600">
-                              {new Date(row.evaluatedAt).toLocaleString()}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {evaluationsStatus === "CanLoadMore" && (
-                    <div className="border-t border-gray-100 p-4">
-                      <button
-                        onClick={() => loadMoreEvaluations(25)}
-                        className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
-                      >
-                        Load more evaluations
-                      </button>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-
-            <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-              <h2 className="mb-3 text-base font-semibold text-gray-900">
-                Evaluation Detail
-              </h2>
-              {!selectedEvaluation ? (
-                <p className="text-sm text-gray-600">
-                  Select an evaluation row to inspect scoring details.
-                </p>
-              ) : (
-                <div className="space-y-3 text-sm">
-                  <div>
-                    <p className="text-xs text-gray-500">Overall Score</p>
-                    <p className="text-gray-900 font-semibold">
-                      {scorePct(selectedEvaluation.scores.overall)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Length Score</p>
-                    <p className="text-gray-800">
-                      {scorePct(selectedEvaluation.scores.length)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Coherence Score</p>
-                    <p className="text-gray-800">
-                      {scorePct(selectedEvaluation.scores.coherence)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Duplication Score</p>
-                    <p className="text-gray-800">
-                      {scorePct(selectedEvaluation.scores.duplication)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Failure Risk</p>
-                    <p className="text-gray-800">
-                      {scorePct(selectedEvaluation.scores.failure)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Flags</p>
-                    <p className="text-gray-800">
-                      {selectedEvaluation.flags.join(", ") || "None"}
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
+        }
+      >
+        {feedback && (
+          <div className="mb-4 rounded-lg border border-border bg-muted px-4 py-3 text-sm text-foreground">
+            {feedback}
           </div>
+        )}
 
-          <div className="mt-6 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-            <div className="border-b border-gray-100 px-4 py-3">
-              <h3 className="text-sm font-semibold text-gray-900">
-                Recent Generation Failures
-              </h3>
-            </div>
+        {errorMessage && (
+          <div className="mb-4 rounded-lg border border-border bg-muted px-4 py-3 text-sm text-foreground">
+            {errorMessage}
+          </div>
+        )}
 
-            {failedEventsStatus === "LoadingFirstPage" ? (
-              <div className="p-6 text-sm text-gray-600">
-                Loading generation failures…
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant={onlyLowQuality ? "primary" : "secondary"}
+            onClick={() => {
+              setOnlyLowQuality(true);
+              setSelectedEvaluationId(null);
+            }}
+          >
+            Low quality only
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={!onlyLowQuality ? "primary" : "secondary"}
+            onClick={() => {
+              setOnlyLowQuality(false);
+              setSelectedEvaluationId(null);
+            }}
+          >
+            All evaluations
+          </Button>
+        </div>
+
+        <div className="grid min-w-0 max-w-full gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+          <div className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+            {evaluationsStatus === "LoadingFirstPage" ? (
+              <div className="space-y-2 p-4">
+                <Skeleton className="h-10 w-full rounded-lg" />
+                <Skeleton className="h-10 w-full rounded-lg" />
+                <Skeleton className="h-10 w-full rounded-lg" />
               </div>
-            ) : failedEvents.length === 0 ? (
-              <div className="p-6 text-sm text-gray-600">
-                No generation failures found.
+            ) : evaluations.length === 0 ? (
+              <div className="p-6 text-sm text-muted-foreground">
+                No evaluations found for this filter.
               </div>
             ) : (
               <>
-                <div className="overflow-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
+                <div className="max-w-full overflow-x-auto overscroll-x-contain">
+                  <table className="min-w-[840px] w-full text-sm">
+                    <thead className="bg-muted/50 text-muted-foreground">
                       <tr>
-                        <th className="px-4 py-3 text-left font-medium">
-                          Created
-                        </th>
                         <th className="px-4 py-3 text-left font-medium">Day</th>
                         <th className="px-4 py-3 text-left font-medium">
-                          Model
+                          Overall
                         </th>
                         <th className="px-4 py-3 text-left font-medium">
-                          Attempt Chain
+                          Words
                         </th>
                         <th className="px-4 py-3 text-left font-medium">
-                          Failure
+                          Duplication
+                        </th>
+                        <th className="px-4 py-3 text-left font-medium">
+                          Flags
+                        </th>
+                        <th className="px-4 py-3 text-left font-medium">
+                          Evaluated
                         </th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {(failedEvents as SummaryGenerationEventRow[]).map(
-                        (row) => (
-                          <tr key={row._id} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 text-gray-700">
-                              {new Date(row.createdAt).toLocaleString()}
-                            </td>
-                            <td className="px-4 py-3 font-mono text-xs text-gray-800">
-                              {row.dayKey}
-                            </td>
-                            <td className="px-4 py-3 text-gray-700">
-                              {row.modelProvider}:{row.modelName}
-                            </td>
-                            <td className="px-4 py-3 font-mono text-xs text-gray-700">
-                              {row.attemptChainId ?? "—"}
-                            </td>
-                            <td className="max-w-lg px-4 py-3 text-xs text-gray-700">
-                              {row.failureReason ?? "Unknown failure"}
-                            </td>
-                          </tr>
-                        ),
-                      )}
+                    <tbody className="divide-y divide-border">
+                      {(evaluations as SummaryQualityRow[]).map((row) => (
+                        <tr
+                          key={row._id}
+                          className={`cursor-pointer hover:bg-muted/50 ${selectedEvaluationId === row._id ? "bg-muted/80" : ""}`}
+                          onClick={() => setSelectedEvaluationId(row._id)}
+                        >
+                          <td className="px-4 py-3 font-mono text-xs text-foreground">
+                            {row.dayKey}
+                          </td>
+                          <td className="px-4 py-3 text-foreground">
+                            {scorePct(row.scores.overall)}
+                          </td>
+                          <td className="px-4 py-3 text-foreground">
+                            {row.wordCount}
+                          </td>
+                          <td className="px-4 py-3 text-foreground">
+                            {scorePct(row.duplicateLineRatio)}
+                          </td>
+                          <td className="max-w-[240px] wrap-break-word px-4 py-3 text-xs text-foreground">
+                            {row.flags.join(", ") || "—"}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {new Date(row.evaluatedAt).toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
 
-                {failedEventsStatus === "CanLoadMore" && (
-                  <div className="border-t border-gray-100 p-4">
-                    <button
-                      onClick={() => loadMoreFailedEvents(20)}
-                      className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
+                {evaluationsStatus === "CanLoadMore" && (
+                  <div className="border-t border-border p-4">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => loadMoreEvaluations(25)}
                     >
-                      Load more failures
-                    </button>
+                      Load more evaluations
+                    </Button>
                   </div>
                 )}
               </>
             )}
           </div>
+
+          <div className="min-w-0 max-w-full rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
+            <h2 className="mb-3 text-base font-semibold text-foreground">
+              Evaluation detail
+            </h2>
+            {!selectedEvaluation ? (
+              <p className="text-sm text-muted-foreground">
+                Select an evaluation row to inspect scoring details.
+              </p>
+            ) : (
+              <div className="space-y-3 text-sm">
+                <div>
+                  <p className="text-xs text-muted-foreground">Overall Score</p>
+                  <p className="text-foreground font-semibold">
+                    {scorePct(selectedEvaluation.scores.overall)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Length Score</p>
+                  <p className="text-foreground">
+                    {scorePct(selectedEvaluation.scores.length)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">
+                    Coherence Score
+                  </p>
+                  <p className="text-foreground">
+                    {scorePct(selectedEvaluation.scores.coherence)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">
+                    Duplication Score
+                  </p>
+                  <p className="text-foreground">
+                    {scorePct(selectedEvaluation.scores.duplication)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Failure Risk</p>
+                  <p className="text-foreground">
+                    {scorePct(selectedEvaluation.scores.failure)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Flags</p>
+                  <p className="text-foreground">
+                    {selectedEvaluation.flags.join(", ") || "None"}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+
+        <div className="mt-6 min-w-0 max-w-full overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+          <div className="border-b border-border px-4 py-3">
+            <h3 className="text-sm font-semibold text-foreground">
+              Recent generation failures
+            </h3>
+          </div>
+
+          {failedEventsStatus === "LoadingFirstPage" ? (
+            <div className="space-y-2 p-4">
+              <Skeleton className="h-10 w-full rounded-lg" />
+              <Skeleton className="h-10 w-full rounded-lg" />
+            </div>
+          ) : failedEvents.length === 0 ? (
+            <div className="p-6 text-sm text-muted-foreground">
+              No generation failures found.
+            </div>
+          ) : (
+            <>
+              <div className="max-w-full overflow-x-auto overscroll-x-contain">
+                <table className="min-w-[900px] w-full text-sm">
+                  <thead className="bg-muted/50 text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-medium">
+                        Created
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium">Day</th>
+                      <th className="px-4 py-3 text-left font-medium">Model</th>
+                      <th className="px-4 py-3 text-left font-medium">
+                        Attempt Chain
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium">
+                        Failure
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {(failedEvents as SummaryGenerationEventRow[]).map(
+                      (row) => (
+                        <tr key={row._id} className="hover:bg-muted/50">
+                          <td className="px-4 py-3 text-foreground">
+                            {new Date(row.createdAt).toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3 font-mono text-xs text-foreground">
+                            {row.dayKey}
+                          </td>
+                          <td className="px-4 py-3 text-foreground">
+                            {row.modelProvider}:{row.modelName}
+                          </td>
+                          <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+                            {row.attemptChainId ?? "—"}
+                          </td>
+                          <td className="max-w-[320px] wrap-break-word px-4 py-3 text-xs text-foreground">
+                            {row.failureReason ?? "Unknown failure"}
+                          </td>
+                        </tr>
+                      ),
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {failedEventsStatus === "CanLoadMore" && (
+                <div className="border-t border-border p-4">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => loadMoreFailedEvents(20)}
+                  >
+                    Load more failures
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </PageContainerWide>
     </AdminGuard>
   );
 }

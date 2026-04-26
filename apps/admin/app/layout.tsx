@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import { ClerkProvider } from "@clerk/nextjs";
-import { ConvexClientProvider } from "./providers";
-import Navigations from "@/components/navigations";
+import { AppProviders } from "./providers";
+import { AppChrome } from "@/components/app-chrome";
+import { Toaster } from "sonner";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -28,14 +29,25 @@ export default function RootLayout({
   const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
   const app = (
-    <ConvexClientProvider>
-      <Navigations />
-      {children}
-    </ConvexClientProvider>
+    <AppProviders>
+      <AppChrome>{children}</AppChrome>
+      <Toaster
+        position="top-right"
+        closeButton
+        toastOptions={{
+          classNames: {
+            toast: "bg-card text-card-foreground border-border",
+            title: "text-foreground",
+            description: "text-muted-foreground",
+            closeButton: "text-muted-foreground hover:text-foreground",
+          },
+        }}
+      />
+    </AppProviders>
   );
 
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body
         suppressHydrationWarning
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}

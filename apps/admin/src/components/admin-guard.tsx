@@ -6,6 +6,8 @@ import { ReactNode, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { logWarn } from "@/lib/observability";
 
+import { Skeleton } from "@/components/ui/skeleton";
+
 /**
  * Wraps any admin-only page.
  *
@@ -45,32 +47,42 @@ export default function AdminGuard({ children }: { children: ReactNode }) {
     }
   }, [authLoading, isAuthenticated, isAdmin, pathname, router]);
 
-  // ── Auth still loading ──────────────────────────────────
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <p className="text-sm text-gray-500">Checking authentication…</p>
+      <div className="flex min-h-[50vh] flex-col gap-6 p-6">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-48" />
+          <Skeleton className="h-4 w-72" />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-28 rounded-2xl" />
+          ))}
+        </div>
       </div>
     );
   }
 
-  // ── Waiting for admin status query ──────────────────────
   if (isAdmin === undefined) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <p className="text-sm text-gray-500">Verifying admin access…</p>
+      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 p-6">
+        <Skeleton className="size-10 rounded-full" />
+        <Skeleton className="h-4 w-56" />
+        <p className="text-sm text-muted-foreground ">
+          Verifying admin access…
+        </p>
       </div>
     );
   }
 
   if (!isAuthenticated || isAdmin === false) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <p className="text-sm text-gray-500">Redirecting…</p>
+      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-2 p-6">
+        <Skeleton className="h-4 w-40" />
+        <p className="text-sm text-muted-foreground ">Redirecting…</p>
       </div>
     );
   }
 
-  // ── Admin confirmed ✓ ───────────────────────────────────
   return <>{children}</>;
 }

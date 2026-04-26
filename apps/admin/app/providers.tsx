@@ -15,6 +15,8 @@ import {
   clearSentryUserContext,
   setSentryUserContext,
 } from "@/lib/observability";
+import { QueryProvider } from "@/components/query-provider";
+import { ThemeProvider } from "@/components/theme-provider";
 
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
 const convex = convexUrl ? new ConvexReactClient(convexUrl) : null;
@@ -86,5 +88,15 @@ export function ConvexClientProvider({ children }: { children: ReactNode }) {
       <SyncClerkUserToConvex />
       {children}
     </ConvexProviderWithClerk>
+  );
+}
+
+export function AppProviders({ children }: { children: ReactNode }) {
+  return (
+    <QueryProvider>
+      <ThemeProvider>
+        <ConvexClientProvider>{children}</ConvexClientProvider>
+      </ThemeProvider>
+    </QueryProvider>
   );
 }

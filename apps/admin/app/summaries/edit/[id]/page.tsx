@@ -26,18 +26,20 @@ export default function EditSummaryPage() {
 
   if (!summaryId) {
     return (
-      <div className="p-6 text-sm text-red-600">
+      <div className="p-6 text-sm text-foreground ">
         Missing summary ID parameter.
       </div>
     );
   }
 
   if (existing === undefined) {
-    return <div className="p-6 text-sm text-gray-600">Loading...</div>;
+    return <div className="p-6 text-sm text-muted-foreground">Loading...</div>;
   }
 
   if (existing === null) {
-    return <div className="p-6 text-sm text-red-600">Summary not found.</div>;
+    return (
+      <div className="p-6 text-sm text-foreground ">Summary not found.</div>
+    );
   }
 
   return (

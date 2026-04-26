@@ -18,6 +18,10 @@ import {
 } from "convex/react";
 import { useEffect, useMemo, useState } from "react";
 
+import { PageContainerWide } from "@/components/page-container";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+
 type RetentionPolicyRow = {
   key: string;
   retentionDays: number;
@@ -234,110 +238,127 @@ export default function RetentionPage() {
 
   return (
     <AdminGuard>
-      <div className="min-h-screen bg-gray-50 py-10">
-        <div className="mx-auto max-w-6xl px-6">
-          <div className="mb-6 flex items-start justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-semibold text-gray-900">
-                Data Retention
-              </h1>
-              <p className="mt-1 text-sm text-gray-500">
-                Govern lifecycle windows and run cleanup jobs with full audit
-                visibility.
-              </p>
-            </div>
+      <PageContainerWide
+        title="Data retention"
+        description="Govern lifecycle windows and run cleanup jobs with full audit visibility."
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => void executeCleanup(true)}
+              disabled={cleanupBusy !== null}
+            >
+              {cleanupBusy === "dry" ? "Running dry run…" : "Run dry run"}
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={() => void executeCleanup(false)}
+              disabled={cleanupBusy !== null}
+            >
+              {cleanupBusy === "live" ? "Running cleanup…" : "Run cleanup"}
+            </Button>
+          </div>
+        }
+      >
+        {statusMessage && (
+          <div className="mb-4 rounded-lg border border-border bg-muted px-4 py-3 text-sm text-foreground">
+            {statusMessage}
+          </div>
+        )}
 
-            <div className="flex gap-2">
-              <button
-                onClick={() => executeCleanup(true)}
-                disabled={cleanupBusy !== null}
-                className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {cleanupBusy === "dry" ? "Running Dry Run…" : "Run Dry Run"}
-              </button>
-              <button
-                onClick={() => executeCleanup(false)}
-                disabled={cleanupBusy !== null}
-                className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {cleanupBusy === "live" ? "Running Cleanup…" : "Run Cleanup"}
-              </button>
-            </div>
+        {actionError && (
+          <div className="mb-4 rounded-lg border border-border bg-muted px-4 py-3 text-sm text-foreground">
+            {actionError}
+          </div>
+        )}
+
+        <div className="mb-6 min-w-0 max-w-full overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+          <div className="border-b border-border px-4 py-3">
+            <h2 className="text-sm font-semibold text-foreground">
+              Effective policies
+            </h2>
           </div>
 
-          {statusMessage && (
-            <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-              {statusMessage}
+          {!policiesPageResponse && policies.length === 0 ? (
+            <div className="space-y-2 p-4">
+              <Skeleton className="h-10 w-full rounded-lg" />
+              <Skeleton className="h-10 w-full rounded-lg" />
             </div>
-          )}
-
-          {actionError && (
-            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {actionError}
+          ) : sortedPolicies.length === 0 ? (
+            <div className="p-6 text-sm text-muted-foreground">
+              No policies found.
             </div>
-          )}
+          ) : (
+            <div className="max-w-full overflow-x-auto overscroll-x-contain">
+              {policyLoadError && (
+                <div className="border-b border-border bg-muted px-4 py-3 text-sm text-foreground">
+                  {policyLoadError}
+                </div>
+              )}
 
-          <div className="mb-6 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-            <div className="border-b border-gray-100 px-4 py-3">
-              <h2 className="text-sm font-semibold text-gray-900">
-                Effective Policies
-              </h2>
-            </div>
-
-            {!policiesPageResponse && policies.length === 0 ? (
-              <div className="p-6 text-sm text-gray-600">
-                Loading retention policies…
-              </div>
-            ) : sortedPolicies.length === 0 ? (
-              <div className="p-6 text-sm text-gray-600">
-                No policies found.
-              </div>
-            ) : (
-              <div className="overflow-auto">
-                {policyLoadError && (
-                  <div className="border-b border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    {policyLoadError}
-                  </div>
-                )}
-
-                <table className="min-w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-600">
-                    <tr>
-                      <th className="px-4 py-3 text-left font-medium">Key</th>
-                      <th className="px-4 py-3 text-left font-medium">
-                        Retention Days
-                      </th>
-                      <th className="px-4 py-3 text-left font-medium">
-                        Sensitive
-                      </th>
-                      <th className="px-4 py-3 text-left font-medium">
-                        Enabled
-                      </th>
-                      <th className="px-4 py-3 text-left font-medium">
-                        Source
-                      </th>
-                      <th className="px-4 py-3 text-left font-medium">
-                        Updated
-                      </th>
-                      <th className="px-4 py-3 text-left font-medium">
-                        Action
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {sortedPolicies.map((policy) => {
-                      const draft = policyDrafts[policy.key];
-                      return (
-                        <tr key={policy.key} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 font-medium text-gray-900">
-                            {policy.key}
-                          </td>
-                          <td className="px-4 py-3">
+              <table className="min-w-[980px] w-full text-sm">
+                <thead className="bg-muted/50 text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-medium">Key</th>
+                    <th className="px-4 py-3 text-left font-medium">
+                      Retention Days
+                    </th>
+                    <th className="px-4 py-3 text-left font-medium">
+                      Sensitive
+                    </th>
+                    <th className="px-4 py-3 text-left font-medium">Enabled</th>
+                    <th className="px-4 py-3 text-left font-medium">Source</th>
+                    <th className="px-4 py-3 text-left font-medium">Updated</th>
+                    <th className="px-4 py-3 text-left font-medium">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {sortedPolicies.map((policy) => {
+                    const draft = policyDrafts[policy.key];
+                    return (
+                      <tr key={policy.key} className="hover:bg-muted/50">
+                        <td className="max-w-[240px] wrap-break-word px-4 py-3 font-medium text-foreground">
+                          {policy.key}
+                        </td>
+                        <td className="px-4 py-3">
+                          <input
+                            value={
+                              draft?.retentionDays ??
+                              String(policy.retentionDays)
+                            }
+                            onChange={(event) =>
+                              setPolicyDrafts((previous) => ({
+                                ...previous,
+                                [policy.key]: {
+                                  ...(previous[policy.key] ?? {
+                                    retentionDays: String(policy.retentionDays),
+                                    enabled: policy.enabled,
+                                    sensitive: policy.sensitive,
+                                  }),
+                                  retentionDays: event.target.value,
+                                },
+                              }))
+                            }
+                            className="w-24 rounded-lg border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+                            inputMode="numeric"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${policy.sensitive ? "bg-muted text-foreground" : "bg-muted/60 text-muted-foreground"}`}
+                          >
+                            {policy.sensitive ? "Yes" : "No"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <label className="inline-flex items-center gap-2 text-xs text-foreground">
                             <input
-                              value={
-                                draft?.retentionDays ??
-                                String(policy.retentionDays)
-                              }
+                              type="checkbox"
+                              checked={draft?.enabled ?? policy.enabled}
                               onChange={(event) =>
                                 setPolicyDrafts((previous) => ({
                                   ...previous,
@@ -349,183 +370,154 @@ export default function RetentionPage() {
                                       enabled: policy.enabled,
                                       sensitive: policy.sensitive,
                                     }),
-                                    retentionDays: event.target.value,
+                                    enabled: event.target.checked,
                                   },
                                 }))
                               }
-                              className="w-24 rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
-                              inputMode="numeric"
                             />
-                          </td>
-                          <td className="px-4 py-3">
-                            <span
-                              className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${policy.sensitive ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-700"}`}
-                            >
-                              {policy.sensitive ? "Yes" : "No"}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <label className="inline-flex items-center gap-2 text-xs text-gray-700">
-                              <input
-                                type="checkbox"
-                                checked={draft?.enabled ?? policy.enabled}
-                                onChange={(event) =>
-                                  setPolicyDrafts((previous) => ({
-                                    ...previous,
-                                    [policy.key]: {
-                                      ...(previous[policy.key] ?? {
-                                        retentionDays: String(
-                                          policy.retentionDays,
-                                        ),
-                                        enabled: policy.enabled,
-                                        sensitive: policy.sensitive,
-                                      }),
-                                      enabled: event.target.checked,
-                                    },
-                                  }))
-                                }
-                              />
-                              Enabled
-                            </label>
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {policy.source}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {policy.updatedAt
-                              ? new Date(policy.updatedAt).toLocaleString()
-                              : "—"}
-                          </td>
-                          <td className="px-4 py-3">
-                            <button
-                              onClick={() => savePolicy(policy)}
-                              disabled={busyPolicyKey === policy.key}
-                              className="inline-flex items-center rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {busyPolicyKey === policy.key
-                                ? "Saving…"
-                                : "Save"}
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                            Enabled
+                          </label>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {policy.source}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {policy.updatedAt
+                            ? new Date(policy.updatedAt).toLocaleString()
+                            : "—"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Button
+                            type="button"
+                            variant="primary"
+                            size="sm"
+                            onClick={() => void savePolicy(policy)}
+                            disabled={busyPolicyKey === policy.key}
+                          >
+                            {busyPolicyKey === policy.key ? "Saving…" : "Save"}
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              {effectivePolicyNextCursor && (
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border p-4">
+                  <span className="text-xs text-muted-foreground">
+                    Showing {sortedPolicies.length} policies
+                  </span>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      void loadMorePolicies();
+                    }}
+                    disabled={isLoadingMorePolicies}
+                  >
+                    {isLoadingMorePolicies
+                      ? "Loading more..."
+                      : "Load more policies"}
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+          <div className="border-b border-border px-4 py-3">
+            <h2 className="text-sm font-semibold text-foreground">
+              Retention run history
+            </h2>
+          </div>
+
+          {runsStatus === "LoadingFirstPage" ? (
+            <div className="space-y-2 p-4">
+              <Skeleton className="h-10 w-full rounded-lg" />
+              <Skeleton className="h-10 w-full rounded-lg" />
+            </div>
+          ) : runs.length === 0 ? (
+            <div className="p-6 text-sm text-muted-foreground">
+              No cleanup runs yet.
+            </div>
+          ) : (
+            <>
+              <div className="max-w-full overflow-x-auto overscroll-x-contain">
+                <table className="min-w-[860px] w-full text-sm">
+                  <thead className="bg-muted/50 text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-medium">
+                        Started
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium">
+                        Trigger
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium">Mode</th>
+                      <th className="px-4 py-3 text-left font-medium">
+                        Status
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium">
+                        Deleted
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium">
+                        Details
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {(runs as RetentionRunRow[]).map((run) => (
+                      <tr key={run._id} className="hover:bg-muted/50">
+                        <td className="px-4 py-3 text-foreground">
+                          {new Date(run.startedAt).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-foreground">
+                          {run.trigger}
+                        </td>
+                        <td className="px-4 py-3 text-foreground">
+                          {run.dryRun ? "dry-run" : "live"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${run.status === "success" ? "bg-muted text-foreground" : "bg-muted/80 text-foreground"}`}
+                          >
+                            {run.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-foreground">
+                          {totalDeletes(run)}
+                        </td>
+                        <td className="max-w-[260px] wrap-break-word px-4 py-3 text-xs text-muted-foreground">
+                          {run.status === "error"
+                            ? (run.error ?? "Cleanup failed")
+                            : formatRetentionDeletedCounts(run.deletedCounts)}
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
-
-                {effectivePolicyNextCursor && (
-                  <div className="flex items-center justify-between border-t border-gray-100 p-4">
-                    <span className="text-xs text-gray-500">
-                      Showing {sortedPolicies.length} policies
-                    </span>
-                    <button
-                      onClick={() => {
-                        void loadMorePolicies();
-                      }}
-                      disabled={isLoadingMorePolicies}
-                      className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {isLoadingMorePolicies
-                        ? "Loading more..."
-                        : "Load more policies"}
-                    </button>
-                  </div>
-                )}
               </div>
-            )}
-          </div>
-
-          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-            <div className="border-b border-gray-100 px-4 py-3">
-              <h2 className="text-sm font-semibold text-gray-900">
-                Retention Run History
-              </h2>
-            </div>
-
-            {runsStatus === "LoadingFirstPage" ? (
-              <div className="p-6 text-sm text-gray-600">
-                Loading retention runs…
-              </div>
-            ) : runs.length === 0 ? (
-              <div className="p-6 text-sm text-gray-600">
-                No cleanup runs yet.
-              </div>
-            ) : (
-              <>
-                <div className="overflow-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="px-4 py-3 text-left font-medium">
-                          Started
-                        </th>
-                        <th className="px-4 py-3 text-left font-medium">
-                          Trigger
-                        </th>
-                        <th className="px-4 py-3 text-left font-medium">
-                          Mode
-                        </th>
-                        <th className="px-4 py-3 text-left font-medium">
-                          Status
-                        </th>
-                        <th className="px-4 py-3 text-left font-medium">
-                          Deleted
-                        </th>
-                        <th className="px-4 py-3 text-left font-medium">
-                          Details
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {(runs as RetentionRunRow[]).map((run) => (
-                        <tr key={run._id} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 text-gray-700">
-                            {new Date(run.startedAt).toLocaleString()}
-                          </td>
-                          <td className="px-4 py-3 text-gray-700">
-                            {run.trigger}
-                          </td>
-                          <td className="px-4 py-3 text-gray-700">
-                            {run.dryRun ? "dry-run" : "live"}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span
-                              className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${run.status === "success" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}
-                            >
-                              {run.status}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-gray-700">
-                            {totalDeletes(run)}
-                          </td>
-                          <td className="max-w-sm px-4 py-3 text-xs text-gray-600">
-                            {run.status === "error"
-                              ? (run.error ?? "Cleanup failed")
-                              : formatRetentionDeletedCounts(run.deletedCounts)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              {runsStatus === "CanLoadMore" && (
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border p-4">
+                  <span className="text-xs text-muted-foreground">
+                    Showing {(runs as RetentionRunRow[]).length} runs
+                  </span>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => loadMore(20)}
+                  >
+                    Load more runs
+                  </Button>
                 </div>
-                {runsStatus === "CanLoadMore" && (
-                  <div className="flex items-center justify-between border-t border-gray-100 p-4">
-                    <span className="text-xs text-gray-500">
-                      Showing {(runs as RetentionRunRow[]).length} runs
-                    </span>
-                    <button
-                      onClick={() => loadMore(20)}
-                      className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
-                    >
-                      Load more runs
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+              )}
+            </>
+          )}
         </div>
-      </div>
+      </PageContainerWide>
     </AdminGuard>
   );
 }

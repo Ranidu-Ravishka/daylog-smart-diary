@@ -24,16 +24,18 @@ export default function EditDayPage() {
 
   if (!dayId) {
     return (
-      <div className="p-6 text-sm text-red-600">Missing day ID parameter.</div>
+      <div className="p-6 text-sm text-foreground ">
+        Missing day ID parameter.
+      </div>
     );
   }
 
   if (existing === undefined) {
-    return <div className="p-6 text-sm text-gray-600">Loading...</div>;
+    return <div className="p-6 text-sm text-muted-foreground">Loading...</div>;
   }
 
   if (existing === null) {
-    return <div className="p-6 text-sm text-red-600">Day not found.</div>;
+    return <div className="p-6 text-sm text-foreground ">Day not found.</div>;
   }
 
   return (

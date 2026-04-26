@@ -10,6 +10,14 @@ import {
   useQuery,
 } from "convex/react";
 import Link from "next/link";
+import { PageContainer } from "@/components/page-container";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  tableActionsCellClass,
+  tableActionsHeaderClass,
+  tableActionsInnerClass,
+} from "@/lib/table-actions";
 
 export default function DaysPage() {
   const listDaysPaginatedRef = makeFunctionReference<"query">(
@@ -31,110 +39,113 @@ export default function DaysPage() {
 
   return (
     <AdminGuard>
-      <div className="min-h-screen bg-gray-50 py-10">
-        <div className="max-w-5xl mx-auto px-6">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h1 className="text-2xl font-semibold text-gray-900">Days</h1>
-              <p className="text-sm text-gray-500 mt-1">
-                All rows from the <code>days</code> table.
-              </p>
+      <PageContainer
+        title="Days"
+        description={
+          <>
+            All rows from the{" "}
+            <code className="rounded-md bg-muted px-1.5 py-0.5 text-xs">
+              days
+            </code>{" "}
+            table.
+          </>
+        }
+        action={
+          <Button variant="primary" asChild>
+            <Link href="/days/create">Create day</Link>
+          </Button>
+        }
+      >
+        <div className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+          {status === "LoadingFirstPage" ? (
+            <div className="space-y-2 p-4">
+              <Skeleton className="h-12 w-full rounded-lg" />
+              <Skeleton className="h-12 w-full rounded-lg" />
+              <Skeleton className="h-12 w-full rounded-lg" />
             </div>
-
-            <Link
-              href="/days/create"
-              className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-            >
-              Create Day
-            </Link>
-          </div>
-
-          <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-            {status === "LoadingFirstPage" ? (
-              <div className="p-6 text-sm text-gray-600">Loading...</div>
-            ) : days.length === 0 ? (
-              <div className="p-6 text-sm text-gray-600">No days yet.</div>
-            ) : (
-              <>
-                <div className="overflow-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="text-left font-medium px-4 py-3">
-                          Day Key
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Rating
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Notes
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Created
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {days.map((row) => (
-                        <tr key={row._id} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 font-mono text-xs text-gray-800">
-                            {row.dayKey}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {row.rating ?? "—"}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {row.manualNotes?.length ?? 0} note(s)
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {new Date(row._creationTime).toLocaleString()}
-                          </td>
-                          <td className="px-4 py-3">
-                            <Link
-                              href={`/days/edit/${row._id}`}
-                              className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-                            >
-                              Edit
-                            </Link>
-                            <button
+          ) : days.length === 0 ? (
+            <div className="p-6 text-sm text-muted-foreground">
+              No days yet.
+            </div>
+          ) : (
+            <>
+              <div className="max-w-full overflow-x-auto overscroll-x-contain">
+                <table className="min-w-[760px] w-full text-sm">
+                  <thead className="bg-muted/50 text-muted-foreground">
+                    <tr>
+                      <th className="text-left font-medium px-4 py-3">
+                        Day Key
+                      </th>
+                      <th className="text-left font-medium px-4 py-3">
+                        Rating
+                      </th>
+                      <th className="text-left font-medium px-4 py-3">Notes</th>
+                      <th className="text-left font-medium px-4 py-3">
+                        Created
+                      </th>
+                      <th className={tableActionsHeaderClass}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {days.map((row) => (
+                      <tr key={row._id} className="hover:bg-muted/50">
+                        <td className="px-4 py-3 font-mono text-xs text-foreground">
+                          {row.dayKey}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {row.rating ?? "—"}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {row.manualNotes?.length ?? 0} note(s)
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {new Date(row._creationTime).toLocaleString()}
+                        </td>
+                        <td className={tableActionsCellClass}>
+                          <div className={tableActionsInnerClass}>
+                            <Button variant="primary" size="sm" asChild>
+                              <Link href={`/days/edit/${row._id}`}>Edit</Link>
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outlineDestructive"
+                              size="sm"
                               onClick={() => {
                                 if (
                                   window.confirm(
                                     "Are you sure you want to delete this day?",
                                   )
                                 ) {
-                                  deleteDay({ dayId: row._id });
+                                  void deleteDay({ dayId: row._id });
                                 }
                               }}
-                              className="inline-flex items-center rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 ml-2"
                             >
                               Delete
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
-                {status === "CanLoadMore" && (
-                  <div className="border-t border-gray-100 p-4">
-                    <button
-                      onClick={() => loadMore(25)}
-                      className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
-                    >
-                      Load more days
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+              {status === "CanLoadMore" && (
+                <div className="border-t border-border p-4">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => loadMore(25)}
+                  >
+                    Load more days
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
         </div>
-      </div>
+      </PageContainer>
     </AdminGuard>
   );
 }

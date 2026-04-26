@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 40" fill="none" aria-hidden="true">
+  <rect x="1" y="4" width="32" height="32" rx="8" stroke="currentColor" stroke-width="1.5"/>
+  <path fill="currentColor" d="M9 28V14h2.6v5.2L17.8 14h3.1l-5.5 5.4 6 7.6h-3.5l-4.5-5.8-2.6 2.5V28H9Z"/>
+  <text x="42" y="27" fill="currentColor" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700" letter-spacing="-0.02em">DayLog</text>
+  <text x="124" y="16" fill="currentColor" font-family="ui-sans-serif, system-ui, sans-serif" font-size="9" font-weight="600" letter-spacing="0.12em" opacity="0.55">ADMIN</text>
+</svg>

@@ -1,10 +1,17 @@
 "use client";
 
 import AdminGuard from "@/components/admin-guard";
+import { DataTable } from "@/components/data-table";
+import { EmptyState } from "@/components/empty-state";
+import { PageContainer } from "@/components/page-container";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@repo/backend/convex";
 import { useConvex, useMutation, useQuery } from "convex/react";
+import type { ColumnDef } from "@tanstack/react-table";
+import { FileText } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 const CONTENT_PAGE_SIZE = 50;
 
@@ -84,115 +91,134 @@ export default function ContentPage() {
     }
   };
 
-  const handleDeleteContent = async (row: ContentRow) => {
-    if (!window.confirm("Are you sure you want to delete this content?")) {
-      return;
-    }
+  const handleDeleteContent = useCallback(
+    async (row: ContentRow) => {
+      if (!window.confirm("Are you sure you want to delete this content?")) {
+        return;
+      }
 
-    await deleteContent({ slug: row.slug });
-    setExtraContentRows((previous) =>
-      previous.filter((existing) => existing._id !== row._id),
-    );
-  };
+      await deleteContent({ slug: row.slug });
+      setExtraContentRows((previous) =>
+        previous.filter((existing) => existing._id !== row._id),
+      );
+    },
+    [deleteContent],
+  );
+
+  const columns = useMemo<ColumnDef<ContentRow>[]>(
+    () => [
+      {
+        accessorKey: "slug",
+        header: "Slug",
+        cell: ({ row }) => (
+          <span className="font-mono text-xs text-foreground ">
+            {row.original.slug}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "title",
+        header: "Title",
+        cell: ({ row }) => (
+          <span className="text-foreground ">{row.original.title}</span>
+        ),
+      },
+      {
+        accessorKey: "_creationTime",
+        header: "Created",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground ">
+            {new Date(row.original._creationTime).toLocaleString()}
+          </span>
+        ),
+      },
+      {
+        id: "actions",
+        header: "Actions",
+        cell: ({ row }) => (
+          <div className="flex flex-wrap gap-2">
+            <Button variant="primary" size="sm" asChild>
+              <Link href={`/content/edit/${row.original.slug}`}>Edit</Link>
+            </Button>
+            <Button
+              type="button"
+              variant="outlineDestructive"
+              size="sm"
+              onClick={() => {
+                void handleDeleteContent(row.original);
+              }}
+            >
+              Delete
+            </Button>
+          </div>
+        ),
+      },
+    ],
+    [handleDeleteContent],
+  );
+
+  const loadingInitial =
+    contentResponse === undefined && contentRows.length === 0;
 
   return (
     <AdminGuard>
-      <div className="min-h-screen bg-gray-50 py-10">
-        <div className="max-w-5xl mx-auto px-6">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h1 className="text-2xl font-semibold text-gray-900">Content</h1>
-              <p className="text-sm text-gray-500 mt-1">
-                All rows from the Convex <code>content</code> table.
-              </p>
-            </div>
-
-            <Link
-              href="/content/create"
-              className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-            >
-              Create Content
-            </Link>
-          </div>
-
-          <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-            {contentResponse === undefined && contentRows.length === 0 ? (
-              <div className="p-6 text-sm text-gray-600">Loading...</div>
-            ) : contentRows.length === 0 ? (
-              <div className="p-6 text-sm text-gray-600">No content yet.</div>
-            ) : (
-              <div className="overflow-auto">
-                {loadMoreError && (
-                  <div className="border-b border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    {loadMoreError}
-                  </div>
-                )}
-
-                <table className="min-w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-600">
-                    <tr>
-                      <th className="text-left font-medium px-4 py-3">Slug</th>
-                      <th className="text-left font-medium px-4 py-3">Title</th>
-                      <th className="text-left font-medium px-4 py-3">
-                        Created
-                      </th>
-                      <th className="text-left font-medium px-4 py-3">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {contentRows.map((row) => (
-                      <tr key={row._id} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-mono text-xs text-gray-800">
-                          {row.slug}
-                        </td>
-                        <td className="px-4 py-3 text-gray-900">{row.title}</td>
-                        <td className="px-4 py-3 text-gray-600">
-                          {new Date(row._creationTime).toLocaleString()}
-                        </td>
-                        <td className="px-4 py-3">
-                          <Link
-                            href={`/content/edit/${row.slug}`}
-                            className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-                          >
-                            Edit
-                          </Link>
-                          <button
-                            onClick={() => {
-                              void handleDeleteContent(row);
-                            }}
-                            className="inline-flex items-center rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 ml-2"
-                          >
-                            Delete
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-
-                {effectiveNextCursor && (
-                  <div className="flex items-center justify-between border-t border-gray-100 p-4">
-                    <span className="text-xs text-gray-500">
-                      Showing {contentRows.length} items
-                    </span>
-                    <button
-                      onClick={() => {
-                        void loadMoreContent();
-                      }}
-                      disabled={isLoadingMore}
-                      className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {isLoadingMore ? "Loading more..." : "Load more content"}
-                    </button>
-                  </div>
-                )}
+      <PageContainer
+        title="Content"
+        description={
+          <>
+            All rows from the Convex{" "}
+            <code className="rounded-md bg-muted px-1.5 py-0.5 text-xs ">
+              content
+            </code>{" "}
+            table.
+          </>
+        }
+        action={
+          <Button variant="primary" asChild>
+            <Link href="/content/create">Create content</Link>
+          </Button>
+        }
+      >
+        {loadingInitial ? (
+          <Skeleton className="h-48 w-full rounded-2xl" />
+        ) : contentRows.length === 0 ? (
+          <EmptyState
+            icon={FileText}
+            title="No content yet"
+            description="Create your first content entry to see it listed here."
+            action={
+              <Button variant="primary" asChild>
+                <Link href="/content/create">Create content</Link>
+              </Button>
+            }
+          />
+        ) : (
+          <div className="space-y-4">
+            {loadMoreError ? (
+              <div className="rounded-xl border border-border bg-muted px-4 py-3 text-sm text-foreground ">
+                {loadMoreError}
               </div>
-            )}
+            ) : null}
+            <DataTable columns={columns} data={contentRows} />
+            {effectiveNextCursor ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-3  ">
+                <span className="text-xs text-muted-foreground ">
+                  Showing {contentRows.length} items
+                </span>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={isLoadingMore}
+                  onClick={() => void loadMoreContent()}
+                >
+                  {isLoadingMore ? "Loading more…" : "Load more"}
+                </Button>
+              </div>
+            ) : null}
           </div>
-        </div>
-      </div>
+        )}
+      </PageContainer>
     </AdminGuard>
   );
 }
