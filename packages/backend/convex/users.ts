@@ -28,6 +28,16 @@ import { captureException, logInfo } from "./observability";
 const DEFAULT_USER_DELETION_BATCH_SIZE = 128;
 const DEFAULT_ADMIN_USERS_PAGE_LIMIT = 50;
 const MAX_ADMIN_USERS_PAGE_LIMIT = 200;
+const PROFILE_IMAGE_CONTENT_TYPE_PREFIX = "image/";
+const MAX_PROFILE_IMAGE_BYTES = 5 * 1024 * 1024;
+
+type ProfileImageSource = "clerk" | "apple" | "google" | "manual";
+
+function shouldUpdateProfileImageFromClerk(
+  source: ProfileImageSource | undefined,
+): boolean {
+  return source === undefined || source === "clerk";
+}
 
 export const getUserIdByClerkIdInternal = internalQuery({
   args: {
@@ -616,6 +626,15 @@ export const runUserDeletionCascadeJobStepInternal = internalMutation({
       }
 
       if (!job.userDeletedAt && userAtFinalize) {
+        const userProfileImageStorageId = (userAtFinalize as any)
+          .profileImageStorageId as string | undefined;
+        if (typeof userProfileImageStorageId === "string") {
+          try {
+            await ctx.storage.delete(userProfileImageStorageId as any);
+          } catch {
+            // Ignore profile image cleanup failures during final user delete.
+          }
+        }
         await ctx.db.delete(userAtFinalize._id);
       }
 
@@ -808,13 +827,23 @@ async function syncUserRecord(
     .unique();
 
   if (existing) {
+    const existingProfileImageSource = (existing as any).profileImageSource as
+      | ProfileImageSource
+      | undefined;
     const adminRoleBootstrapPatch = buildAdminRoleBootstrapPatch(existing);
+    const shouldUpdateImage = shouldUpdateProfileImageFromClerk(
+      existingProfileImageSource,
+    );
 
     await ctx.db.patch(existing._id, {
       email: args.email,
       firstName: args.firstName,
       lastName: args.lastName,
-      imageUrl: args.imageUrl,
+      imageUrl: shouldUpdateImage ? args.imageUrl : existing.imageUrl,
+      profileImageSource:
+        shouldUpdateImage && args.imageUrl
+          ? "clerk"
+          : existingProfileImageSource,
       ...adminRoleBootstrapPatch,
     });
 
@@ -836,6 +865,7 @@ async function syncUserRecord(
     firstName: args.firstName,
     lastName: args.lastName,
     imageUrl: args.imageUrl,
+    profileImageSource: args.imageUrl ? "clerk" : undefined,
     accountStatus: "active",
     planTier: "free",
     isAdmin: false,
@@ -849,6 +879,165 @@ async function syncUserRecord(
 
   return await ctx.db.get(id);
 }
+
+export const getMyProfile = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await requireUser(ctx);
+    const userProfileImageStorageId = (user as any).profileImageStorageId as
+      | string
+      | undefined;
+    const userProfileImageSource = (user as any).profileImageSource as
+      | ProfileImageSource
+      | undefined;
+    const manualImageUrl =
+      typeof userProfileImageStorageId === "string"
+        ? await ctx.storage.getUrl(userProfileImageStorageId as any)
+        : null;
+
+    return {
+      ...user,
+      profileImageUrl: manualImageUrl ?? user.imageUrl ?? null,
+      profileImageSource: userProfileImageSource ?? null,
+      hasManualProfileImage:
+        typeof userProfileImageStorageId === "string" &&
+        userProfileImageStorageId.length > 0,
+    };
+  },
+});
+
+export const generateProfileImageUploadUrl = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await requireUser(ctx);
+    const uploadUrl = await ctx.storage.generateUploadUrl();
+    return { uploadUrl };
+  },
+});
+
+export const setProfileImageFromUpload = mutation({
+  args: {
+    storageId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    const existingProfileImageStorageId = (user as any)
+      .profileImageStorageId as string | undefined;
+    const metadata = await ctx.storage.getMetadata(args.storageId as any);
+    if (!metadata) {
+      throw new Error("Uploaded profile image was not found.");
+    }
+
+    if (metadata.size > MAX_PROFILE_IMAGE_BYTES) {
+      try {
+        await ctx.storage.delete(args.storageId as any);
+      } catch {
+        // Best-effort cleanup for oversized images.
+      }
+      throw new Error("Profile image must be 5MB or smaller.");
+    }
+
+    const contentType = metadata.contentType?.toLowerCase();
+    if (
+      contentType &&
+      !contentType.startsWith(PROFILE_IMAGE_CONTENT_TYPE_PREFIX)
+    ) {
+      try {
+        await ctx.storage.delete(args.storageId as any);
+      } catch {
+        // Best-effort cleanup for invalid image payloads.
+      }
+      throw new Error("Invalid profile image type: expected an image upload.");
+    }
+
+    if (
+      typeof existingProfileImageStorageId === "string" &&
+      existingProfileImageStorageId !== args.storageId
+    ) {
+      try {
+        await ctx.storage.delete(existingProfileImageStorageId as any);
+      } catch {
+        // Existing image may already be missing.
+      }
+    }
+
+    await ctx.db.patch(user._id, {
+      profileImageStorageId: args.storageId,
+      profileImageSource: "manual",
+    });
+
+    const profileImageUrl = await ctx.storage.getUrl(args.storageId as any);
+    return {
+      profileImageUrl,
+      profileImageSource: "manual" as const,
+    };
+  },
+});
+
+export const setProfileImageFromProvider = mutation({
+  args: {
+    imageUrl: v.string(),
+    source: v.union(
+      v.literal("apple"),
+      v.literal("google"),
+      v.literal("clerk"),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    const existingProfileImageStorageId = (user as any)
+      .profileImageStorageId as string | undefined;
+    const trimmedImageUrl = args.imageUrl.trim();
+    if (!trimmedImageUrl) {
+      throw new Error("Provider image URL is required.");
+    }
+
+    if (typeof existingProfileImageStorageId === "string") {
+      try {
+        await ctx.storage.delete(existingProfileImageStorageId as any);
+      } catch {
+        // Existing manual image may already be deleted.
+      }
+    }
+
+    await ctx.db.patch(user._id, {
+      imageUrl: trimmedImageUrl,
+      profileImageSource: args.source,
+      profileImageStorageId: undefined,
+    });
+
+    return {
+      profileImageUrl: trimmedImageUrl,
+      profileImageSource: args.source,
+    };
+  },
+});
+
+export const clearManualProfileImage = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const user = await requireUser(ctx);
+    const existingProfileImageStorageId = (user as any)
+      .profileImageStorageId as string | undefined;
+    if (typeof existingProfileImageStorageId === "string") {
+      try {
+        await ctx.storage.delete(existingProfileImageStorageId as any);
+      } catch {
+        // Existing manual image may already be deleted.
+      }
+    }
+
+    await ctx.db.patch(user._id, {
+      profileImageStorageId: undefined,
+      profileImageSource: user.imageUrl ? "clerk" : undefined,
+    });
+
+    return {
+      profileImageUrl: user.imageUrl ?? null,
+      profileImageSource: user.imageUrl ? "clerk" : null,
+    };
+  },
+});
 
 // ── Check whether the currently signed-in user is an admin
 export const isCurrentUserAdmin = query({

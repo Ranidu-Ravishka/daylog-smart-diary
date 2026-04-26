@@ -50,7 +50,7 @@ export type FallbackSummaryOutput = {
 
 const FALLBACK_SOURCE_LABEL = "Deterministic fallback";
 const MAX_HIGHLIGHTS = 5;
-const MAX_STORY_WORDS = 90;
+const MAX_STORY_WORDS = 120;
 
 function formatInteger(value: number): string {
   return Math.round(value).toLocaleString("en-US");
@@ -66,6 +66,22 @@ function limitWords(text: string, maxWords: number): string {
   const words = text.split(/\s+/).filter(Boolean);
   if (words.length <= maxWords) return text.trim();
   return `${words.slice(0, maxWords).join(" ").trim()}…`;
+}
+
+function pickNarrativeTone(input: {
+  dayKey: string;
+  moodLine: string | null;
+  rating?: number;
+}): "casual" | "reflective" {
+  if (typeof input.rating === "number") {
+    if (input.rating <= 2.5) return "reflective";
+    if (input.rating >= 4) return "casual";
+  }
+  if (input.moodLine?.includes("mix")) return "reflective";
+  const checksum = input.dayKey
+    .split("")
+    .reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return checksum % 2 === 0 ? "casual" : "reflective";
 }
 
 function describeMood(memories: readonly FallbackMemoryInput[]): string | null {
@@ -129,44 +145,68 @@ export function buildRuleBasedSummary(input: {
   const memoryCount = memories.length;
   const metricParts = summarizeMetrics(integrationContext.mergedMetrics);
   const moodLine = describeMood(memories);
+  const tone = pickNarrativeTone({
+    dayKey: input.dayKey,
+    moodLine,
+    rating: dayMetadata.rating,
+  });
 
-  const storyParts: string[] = [];
+  const storyParagraphs: string[] = [];
   if (memoryCount === 0) {
-    storyParts.push("No memories were captured today.");
+    storyParagraphs.push("Quiet day with minimal activity to capture.");
   } else if (memoryCount === 1) {
-    storyParts.push("You captured one memory today.");
+    storyParagraphs.push(
+      tone === "casual"
+        ? "You captured one meaningful moment today."
+        : "One meaningful moment stood out across the day.",
+    );
   } else {
-    storyParts.push(`You captured ${memoryCount} memories today.`);
-  }
-
-  if (moodLine) {
-    storyParts.push(`The day felt ${moodLine}.`);
-  }
-
-  if (typeof dayMetadata.rating === "number") {
-    storyParts.push(`You rated it ${dayMetadata.rating.toFixed(1)}/5.`);
-  }
-
-  if (metricParts.length > 0) {
-    storyParts.push(`Activity: ${metricParts.join(", ")}.`);
-  }
-
-  if (integrationContext.providers.length > 0) {
-    const providerList = integrationContext.providers.slice(0, 4).join(", ");
-    storyParts.push(`Connected data: ${providerList}.`);
-  }
-
-  if (
-    storyParts.length === 1 &&
-    memoryCount === 0 &&
-    metricParts.length === 0
-  ) {
-    storyParts.push(
-      "Add a memory, note, rating, or integration sync to build a richer picture.",
+    storyParagraphs.push(
+      tone === "casual"
+        ? `Your day moved through ${memoryCount} memorable moments.`
+        : `The day unfolded across ${memoryCount} memorable moments.`,
     );
   }
 
-  const story = limitWords(storyParts.join(" "), MAX_STORY_WORDS);
+  const detailParts: string[] = [];
+  if (moodLine) {
+    detailParts.push(`The overall mood felt ${moodLine}`);
+  }
+
+  if (typeof dayMetadata.rating === "number") {
+    detailParts.push(`you rated it ${dayMetadata.rating.toFixed(1)}/5`);
+  }
+
+  if (metricParts.length > 0) {
+    detailParts.push(`activity signals included ${metricParts.join(", ")}`);
+  }
+
+  if (detailParts.length > 0) {
+    storyParagraphs.push(`${detailParts.join(", ")}.`);
+  }
+
+  const topEvents = memories
+    .map((memory) => memory.title.trim())
+    .filter(Boolean)
+    .slice(0, 3);
+  if (topEvents.length > 0) {
+    storyParagraphs.push(
+      tone === "casual"
+        ? `Highlights included ${topEvents.join(", ")}.`
+        : `Meaningful highlights were ${topEvents.join(", ")}.`,
+    );
+  }
+
+  if (memoryCount === 0 && metricParts.length === 0 && topEvents.length === 0) {
+    storyParagraphs.push(
+      "There is not much recorded context yet, but tomorrow can start a fresh chapter.",
+    );
+  }
+
+  const story = limitWords(
+    storyParagraphs.slice(0, 3).join("\n\n"),
+    MAX_STORY_WORDS,
+  );
 
   const highlights: string[] = [];
 

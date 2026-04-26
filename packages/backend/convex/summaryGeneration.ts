@@ -147,13 +147,49 @@ function toFiniteNumber(value: unknown): number | undefined {
   return value;
 }
 
+function sanitizeStoryText(input: string): string {
+  const cleaned = input
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .filter(
+      (line) =>
+        !/^(connected data|sources?|provider(s)?|api|schema|debug|metadata)\s*:/i.test(
+          line,
+        ),
+    )
+    .join("\n\n")
+    .replace(
+      /\b(activity_summary|calendar|location|spotify|api|schema_version)\b/gi,
+      (token) =>
+        // Drop raw internal keys when they appear as standalone schema labels.
+        token.includes("_") || token.toLowerCase() === "schema_version"
+          ? ""
+          : token,
+    )
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  const paragraphs = cleaned
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .slice(0, 3);
+
+  const normalized = paragraphs.join("\n\n").trim();
+  return normalized.length > 0
+    ? normalized
+    : "Quiet day with minimal activity to capture.";
+}
+
 export function normalizeModelOutput(payload: unknown) {
   const obj = (payload ?? {}) as Record<string, unknown>;
   const storyValue = obj.story;
   const story =
     typeof storyValue === "string" && storyValue.trim().length > 0
-      ? storyValue.trim()
-      : "You had a meaningful day with several moments worth reflecting on.";
+      ? sanitizeStoryText(storyValue)
+      : "Quiet day with minimal activity to capture.";
 
   const highlights = clampHighlights(obj.highlights);
 

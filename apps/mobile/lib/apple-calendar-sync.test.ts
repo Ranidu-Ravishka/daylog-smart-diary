@@ -69,15 +69,21 @@ describe("apple-calendar-sync delta", () => {
 
   async function loadModuleWithMockedBridge(): Promise<Mod> {
     const mod = await loadModule();
+    const getEventsAsyncMock = vi.fn(
+      async () => mockExpoCalendar.events as never[],
+    );
     mod.__testing.setExpoCalendarModuleOverride({
       requestCalendarPermissionsAsync: vi.fn(async () => ({
         status: "granted",
       })),
       getCalendarsAsync: vi.fn(async () => [{ id: "cal-1" }]),
-      getEventsAsync: vi.fn(async () => mockExpoCalendar.events as never[]),
+      getEventsAsync: getEventsAsyncMock,
       EntityTypes: mockExpoCalendar.entityTypes,
       Availability: mockExpoCalendar.availability,
     });
+    (
+      mod.__testing as { getEventsAsyncMock?: typeof getEventsAsyncMock }
+    ).getEventsAsyncMock = getEventsAsyncMock;
     return mod;
   }
 
@@ -179,5 +185,50 @@ describe("apple-calendar-sync delta", () => {
     if (second.changed) {
       expect(second.reason).toBe("timezone_changed");
     }
+  });
+
+  it("normalizes events for timeline cards", async () => {
+    const mod = await loadModuleWithMockedBridge();
+    const windowStart = Date.UTC(2026, 3, 24, 0, 0, 0);
+    const windowEnd = Date.UTC(2026, 3, 25, 0, 0, 0);
+    const events = mod.__testing.toTimelineEvents(
+      [
+        buildEvent({
+          id: "evt-100",
+          title: "  Product Sync  ",
+          startDate: new Date(Date.UTC(2026, 3, 24, 10, 0, 0)).toISOString(),
+          endDate: new Date(Date.UTC(2026, 3, 24, 11, 0, 0)).toISOString(),
+        }) as never,
+      ],
+      windowStart,
+      windowEnd,
+    );
+    expect(events.length).toBe(1);
+    expect(events[0]?.title).toBe("Product Sync");
+    expect(events[0]?.durationMinutes).toBe(60);
+    expect(events[0]?.timeLabel.length).toBeGreaterThan(0);
+    expect(events[0]?.timeLabel).toContain("-");
+  });
+
+  it("uses per-day timeline cache between repeated requests", async () => {
+    mockExpoCalendar.events = [buildEvent({ id: "cache-1" })];
+    const mod = await loadModuleWithMockedBridge();
+    const bridgeMock = (
+      mod.__testing as { getEventsAsyncMock?: ReturnType<typeof vi.fn> }
+    ).getEventsAsyncMock;
+
+    const first = await mod.collectAppleCalendarTimelineForDay(
+      "2026-04-24",
+      "UTC",
+    );
+    const second = await mod.collectAppleCalendarTimelineForDay(
+      "2026-04-24",
+      "UTC",
+    );
+
+    expect(first.cached).toBe(false);
+    expect(second.cached).toBe(true);
+    expect(second.events.length).toBe(first.events.length);
+    expect(bridgeMock?.mock.calls.length).toBe(1);
   });
 });

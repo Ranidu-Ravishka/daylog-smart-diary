@@ -17,14 +17,15 @@ import * as WebBrowser from "expo-web-browser";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import {
-  Colors,
   Radius,
   Shadows,
   Spacing,
   Typography,
   type ThemeColors,
 } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { MotionTokens } from "@/constants/motion";
+import { useAppTheme } from "@/components/theme-provider";
+import { UserAvatar } from "@/components/ui/user-avatar";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -52,8 +53,7 @@ function getClerkError(error: unknown): ClerkErrorLike {
 
 export default function SignUpScreen() {
   const router = useRouter();
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? "light"];
+  const { colors } = useAppTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   const { isLoaded: authLoaded, isSignedIn } = useAuth();
@@ -109,6 +109,8 @@ export default function SignUpScreen() {
     isLoaded,
     isPending,
   ]);
+  const avatarPreviewName =
+    `${firstName} ${lastName}`.trim() || emailAddress.trim() || "User";
 
   const handleOAuthSignIn = async (
     strategy: "oauth_google" | "oauth_apple",
@@ -326,7 +328,7 @@ export default function SignUpScreen() {
       >
         <View style={styles.container}>
           <Animated.View
-            entering={FadeInDown.duration(220)}
+            entering={FadeInDown.duration(MotionTokens.duration.standard)}
             style={styles.header}
           >
             <View
@@ -348,11 +350,31 @@ export default function SignUpScreen() {
                 ? `Enter the 6-digit code sent to ${emailAddress}`
                 : "Start capturing meaningful moments in seconds."}
             </Text>
+            {!pendingVerification ? (
+              <View style={styles.avatarPreview}>
+                <UserAvatar
+                  colors={colors}
+                  name={avatarPreviewName}
+                  size={44}
+                  imageUrl={null}
+                />
+                <Text
+                  style={[
+                    styles.avatarPreviewText,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  Avatar fallback preview
+                </Text>
+              </View>
+            ) : null}
           </Animated.View>
 
           {!pendingVerification ? (
             <Animated.View
-              entering={FadeInDown.delay(60).duration(220)}
+              entering={FadeInDown.delay(MotionTokens.delay.staggerSm).duration(
+                MotionTokens.duration.standard,
+              )}
               style={styles.socialButtonsContainer}
             >
               <Pressable
@@ -414,7 +436,9 @@ export default function SignUpScreen() {
           ) : null}
 
           <Animated.View
-            entering={FadeInDown.delay(120).duration(220)}
+            entering={FadeInDown.delay(MotionTokens.delay.staggerMd).duration(
+              MotionTokens.duration.standard,
+            )}
             style={[
               styles.card,
               {
@@ -792,6 +816,15 @@ function createStyles(colors: ThemeColors) {
       ...Typography.callout,
       textAlign: "center",
       maxWidth: 320,
+    },
+    avatarPreview: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: Spacing.sm,
+      marginTop: Spacing.xs,
+    },
+    avatarPreviewText: {
+      ...Typography.caption1,
     },
     socialButtonsContainer: {
       gap: Spacing.sm,

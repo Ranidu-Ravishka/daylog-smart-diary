@@ -12,19 +12,20 @@ import {
   View,
 } from "react-native";
 import { Link, useRouter } from "expo-router";
-import { useAuth, useOAuth, useSignIn, useSignUp } from "@clerk/clerk-expo";
+import { useAuth, useOAuth, useSignIn } from "@clerk/clerk-expo";
 import * as WebBrowser from "expo-web-browser";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import {
-  Colors,
   Radius,
   Shadows,
   Spacing,
   Typography,
   type ThemeColors,
 } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
+import { MotionTokens } from "@/constants/motion";
+import { useAppTheme } from "@/components/theme-provider";
+import { UserAvatar } from "@/components/ui/user-avatar";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -32,13 +33,11 @@ type FocusedField = "email" | "password" | null;
 
 export default function SignInScreen() {
   const router = useRouter();
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? "light"];
+  const { colors } = useAppTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   const { isLoaded: authLoaded, isSignedIn } = useAuth();
   const { isLoaded, signIn, setActive } = useSignIn();
-  const { signUp } = useSignUp();
 
   const { startOAuthFlow: startGoogleOAuth } = useOAuth({
     strategy: "oauth_google",
@@ -66,6 +65,7 @@ export default function SignInScreen() {
       !emailAddress.trim() || password.length < 8 || !isLoaded || isPending
     );
   }, [emailAddress, password, isLoaded, isPending]);
+  const avatarPreviewName = emailAddress.trim() || "User";
 
   const handleOAuthSignIn = async (
     strategy: "oauth_google" | "oauth_apple",
@@ -98,27 +98,6 @@ export default function SignInScreen() {
       }
     } finally {
       setIsPending(false);
-    }
-  };
-
-  const triggerEmailVerification = async () => {
-    try {
-      if (signUp) {
-        await signUp.create({
-          emailAddress: emailAddress.trim(),
-        });
-
-        await signUp.prepareEmailAddressVerification({
-          strategy: "email_code",
-        });
-
-        setShowVerificationMessage(true);
-        setErrorMessage("Verification email sent! Please check your inbox.");
-      }
-    } catch {
-      setErrorMessage(
-        "Unable to send verification email. Please contact support.",
-      );
     }
   };
 
@@ -183,7 +162,10 @@ export default function SignInScreen() {
             errorMsg.includes("email") ||
             errorMsg.includes("verify")
           ) {
-            await triggerEmailVerification();
+            setShowVerificationMessage(true);
+            setErrorMessage(
+              "Email verification required. Check your inbox for Clerk verification instructions, then try signing in again.",
+            );
           } else {
             setErrorMessage(errorMsg);
           }
@@ -193,22 +175,6 @@ export default function SignInScreen() {
       } else {
         setErrorMessage("Unable to sign in. Please try again.");
       }
-    } finally {
-      setIsPending(false);
-    }
-  };
-
-  const resendVerificationEmail = async () => {
-    if (!signUp) return;
-
-    setIsPending(true);
-    try {
-      await signUp.prepareEmailAddressVerification({
-        strategy: "email_code",
-      });
-      setErrorMessage("Verification email resent! Please check your inbox.");
-    } catch {
-      setErrorMessage("Unable to resend verification email.");
     } finally {
       setIsPending(false);
     }
@@ -236,7 +202,7 @@ export default function SignInScreen() {
       >
         <View style={styles.container}>
           <Animated.View
-            entering={FadeInDown.duration(220)}
+            entering={FadeInDown.duration(MotionTokens.duration.standard)}
             style={styles.header}
           >
             <View
@@ -254,10 +220,28 @@ export default function SignInScreen() {
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
               Sign in to continue your day story.
             </Text>
+            <View style={styles.avatarPreview}>
+              <UserAvatar
+                colors={colors}
+                name={avatarPreviewName}
+                size={44}
+                imageUrl={null}
+              />
+              <Text
+                style={[
+                  styles.avatarPreviewText,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                Avatar fallback preview
+              </Text>
+            </View>
           </Animated.View>
 
           <Animated.View
-            entering={FadeInDown.delay(60).duration(220)}
+            entering={FadeInDown.delay(MotionTokens.delay.staggerSm).duration(
+              MotionTokens.duration.standard,
+            )}
             style={styles.socialButtonsContainer}
           >
             <Pressable
@@ -310,7 +294,9 @@ export default function SignInScreen() {
           </View>
 
           <Animated.View
-            entering={FadeInDown.delay(120).duration(220)}
+            entering={FadeInDown.delay(MotionTokens.delay.staggerMd).duration(
+              MotionTokens.duration.standard,
+            )}
             style={[
               styles.card,
               {
@@ -421,11 +407,6 @@ export default function SignInScreen() {
               >
                 Verification email sent. Check inbox and spam.
               </Text>
-              <Pressable onPress={resendVerificationEmail} disabled={isPending}>
-                <Text style={[styles.noticeAction, { color: colors.tint }]}>
-                  {isPending ? "Sending..." : "Resend email"}
-                </Text>
-              </Pressable>
             </View>
           ) : null}
 
@@ -542,6 +523,15 @@ function createStyles(colors: ThemeColors) {
       ...Typography.callout,
       textAlign: "center",
       maxWidth: 280,
+    },
+    avatarPreview: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: Spacing.sm,
+      marginTop: Spacing.xs,
+    },
+    avatarPreviewText: {
+      ...Typography.caption1,
     },
     socialButtonsContainer: {
       gap: Spacing.sm,

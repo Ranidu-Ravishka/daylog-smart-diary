@@ -66,12 +66,23 @@ describe("summary generation behavior", () => {
     expect(normalized.sourcesUsed).toEqual(["Memories", "Spotify"]);
 
     const defaults = summaryGenerationModule.normalizeModelOutput({});
-    expect(defaults.story).toContain("meaningful day");
+    expect(defaults.story).toBe("Quiet day with minimal activity to capture.");
     expect(defaults.sourcesUsed).toEqual([
       "Memories",
       "Day metadata",
       "OpenAI GPT-4o",
     ]);
+  });
+
+  it("strips internal metadata labels from model story output", () => {
+    const normalized = summaryGenerationModule.normalizeModelOutput({
+      story:
+        "Connected data: activity_summary, calendar, location, spotify.\n\nThe afternoon felt calm and focused.",
+      highlights: [],
+      sourcesUsed: ["Memories"],
+    });
+
+    expect(normalized.story).toBe("The afternoon felt calm and focused.");
   });
 
   it("supports direct model generation through OpenAI adapter", async () => {

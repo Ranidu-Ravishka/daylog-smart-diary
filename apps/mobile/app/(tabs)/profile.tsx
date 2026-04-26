@@ -21,6 +21,7 @@ import DateTimePicker, {
 } from "@react-native-community/datetimepicker";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import { useUser, useAuth } from "@clerk/clerk-expo";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
@@ -342,6 +343,22 @@ const SettingsScreen = () => {
       ? { pollToken: deletionPollToken, jobId: trackedDeletionJobId }
       : "skip",
   );
+  const currentProfile = useQuery(
+    api.users.getMyProfile,
+    isAuthenticated ? {} : "skip",
+  );
+  const generateProfileImageUploadUrl = useMutation(
+    api.users.generateProfileImageUploadUrl,
+  );
+  const setProfileImageFromUpload = useMutation(
+    api.users.setProfileImageFromUpload,
+  );
+  const setProfileImageFromProvider = useMutation(
+    api.users.setProfileImageFromProvider,
+  );
+  const clearManualProfileImage = useMutation(
+    api.users.clearManualProfileImage,
+  );
 
   const [darkMode, setDarkMode] = useState(false);
   const [allNotifications, setAllNotifications] = useState(true);
@@ -422,6 +439,7 @@ const SettingsScreen = () => {
   const [appPasswordConfirmValue, setAppPasswordConfirmValue] = useState("");
   const [isSavingAppPassword, setIsSavingAppPassword] = useState(false);
   const [appPasswordError, setAppPasswordError] = useState<string | null>(null);
+  const [isUpdatingProfileImage, setIsUpdatingProfileImage] = useState(false);
   const deletionState = deriveDeletionState(accountDeletionStatus);
   const deletionStateLabel = deletionState
     ? getDeletionStateLabel(deletionState)
@@ -797,8 +815,12 @@ const SettingsScreen = () => {
 
   useEffect(() => {
     void (async () => {
-      const runtime = await getReminderRuntimeState();
-      setReminderRuntime(runtime);
+      try {
+        const runtime = await getReminderRuntimeState();
+        setReminderRuntime(runtime);
+      } catch (error) {
+        captureException("mobile_profile_reminder_runtime_load_failed", error);
+      }
     })();
   }, []);
 
@@ -811,17 +833,26 @@ const SettingsScreen = () => {
     }
 
     void (async () => {
-      const status = await getBackgroundLocationEnablementStatus();
-      if (cancelled) return;
+      try {
+        const status = await getBackgroundLocationEnablementStatus();
+        if (cancelled) return;
 
-      const runtimeAllowed =
-        locationTrackingRuntimeConfig?.enableBackgroundLocationTracking ??
-        false;
+        const runtimeAllowed =
+          locationTrackingRuntimeConfig?.enableBackgroundLocationTracking ??
+          false;
 
-      setBackgroundLocationRuntimeStatus({
-        fullyEnabled: status.fullyEnabled && runtimeAllowed,
-        reason: status.reason,
-      });
+        setBackgroundLocationRuntimeStatus({
+          fullyEnabled: status.fullyEnabled && runtimeAllowed,
+          reason: status.reason,
+        });
+      } catch (error) {
+        if (cancelled) return;
+        setBackgroundLocationRuntimeStatus(null);
+        captureException(
+          "mobile_profile_background_location_status_load_failed",
+          error,
+        );
+      }
     })();
 
     return () => {
@@ -836,9 +867,17 @@ const SettingsScreen = () => {
     let cancelled = false;
 
     void (async () => {
-      const diagnostics = await refreshCallActivityDiagnostics();
-      if (cancelled) return;
-      setCallActivityDiagnostics(diagnostics);
+      try {
+        const diagnostics = await refreshCallActivityDiagnostics();
+        if (cancelled) return;
+        setCallActivityDiagnostics(diagnostics);
+      } catch (error) {
+        if (cancelled) return;
+        captureException(
+          "mobile_profile_call_activity_diagnostics_refresh_failed",
+          error,
+        );
+      }
     })();
 
     return () => {
@@ -851,9 +890,13 @@ const SettingsScreen = () => {
       if (nextState !== "active") return;
 
       void (async () => {
-        const diagnostics = await refreshCallActivityDiagnostics();
-        setCallActivityDiagnostics(diagnostics);
-        await refreshOfflineOutboxStatus();
+        try {
+          const diagnostics = await refreshCallActivityDiagnostics();
+          setCallActivityDiagnostics(diagnostics);
+          await refreshOfflineOutboxStatus();
+        } catch (error) {
+          captureException("mobile_profile_active_state_refresh_failed", error);
+        }
       })();
     });
 
@@ -2531,6 +2574,118 @@ const SettingsScreen = () => {
 
   const userName = user?.fullName ?? user?.firstName ?? "User";
   const userEmail = user?.primaryEmailAddress?.emailAddress ?? "";
+  const profileImageUrl =
+    currentProfile?.profileImageUrl ?? user?.imageUrl ?? undefined;
+  const providerImageOptions = (user?.externalAccounts ?? [])
+    .map((account) => {
+      const providerRaw = String(
+        (account as { provider?: string }).provider ?? "",
+      );
+      const imageUrl = (account as { imageUrl?: string }).imageUrl;
+      if (!imageUrl) return null;
+      if (providerRaw.includes("apple")) {
+        return { key: "apple" as const, label: "Apple", imageUrl };
+      }
+      if (providerRaw.includes("google")) {
+        return { key: "google" as const, label: "Google", imageUrl };
+      }
+      return null;
+    })
+    .filter(
+      (
+        option,
+      ): option is {
+        key: "apple" | "google";
+        label: string;
+        imageUrl: string;
+      } => option !== null,
+    );
+
+  const handleUploadProfileImage = async () => {
+    try {
+      setIsUpdatingProfileImage(true);
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.72,
+      });
+      if (result.canceled || !result.assets[0]?.uri) {
+        return;
+      }
+
+      const { uploadUrl } = await generateProfileImageUploadUrl({});
+      const imageResponse = await fetch(result.assets[0].uri);
+      const imageBlob = await imageResponse.blob();
+      const uploadResponse = await fetch(uploadUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": imageBlob.type || "application/octet-stream",
+        },
+        body: imageBlob,
+      });
+      if (!uploadResponse.ok) {
+        throw new Error(`Upload failed with status ${uploadResponse.status}`);
+      }
+      const uploadResult = (await uploadResponse.json()) as {
+        storageId?: string;
+      };
+      if (!uploadResult.storageId) {
+        throw new Error("Upload succeeded but no storage ID was returned.");
+      }
+      await setProfileImageFromUpload({ storageId: uploadResult.storageId });
+      Alert.alert("Profile photo updated", "Your new photo is now active.");
+    } catch (error) {
+      captureException("mobile_profile_image_upload_failed", error);
+      Alert.alert(
+        "Upload failed",
+        error instanceof Error
+          ? error.message
+          : "Unable to update profile photo.",
+      );
+    } finally {
+      setIsUpdatingProfileImage(false);
+    }
+  };
+
+  const handleUseProviderProfileImage = async (
+    provider: "apple" | "google",
+    imageUrl: string,
+  ) => {
+    try {
+      setIsUpdatingProfileImage(true);
+      await setProfileImageFromProvider({ source: provider, imageUrl });
+    } catch (error) {
+      captureException("mobile_profile_provider_image_apply_failed", error, {
+        provider,
+      });
+      Alert.alert(
+        "Update failed",
+        error instanceof Error
+          ? error.message
+          : "Unable to apply provider image.",
+      );
+    } finally {
+      setIsUpdatingProfileImage(false);
+    }
+  };
+
+  const handleResetProfileImage = async () => {
+    try {
+      setIsUpdatingProfileImage(true);
+      await clearManualProfileImage({});
+    } catch (error) {
+      captureException("mobile_profile_image_reset_failed", error);
+      Alert.alert(
+        "Reset failed",
+        error instanceof Error
+          ? error.message
+          : "Unable to reset profile image.",
+      );
+    } finally {
+      setIsUpdatingProfileImage(false);
+    }
+  };
 
   /* ── Integration data ────────────────── */
   const integrationIcons: Record<string, IoniconName> = {
@@ -2694,6 +2849,18 @@ const SettingsScreen = () => {
             colors={c}
             userName={userName}
             userEmail={userEmail}
+            userImageUrl={profileImageUrl}
+            isUpdatingProfileImage={isUpdatingProfileImage}
+            providerImageOptions={providerImageOptions}
+            onUploadProfileImage={() => {
+              void handleUploadProfileImage();
+            }}
+            onUseProviderProfileImage={(provider, imageUrl) => {
+              void handleUseProviderProfileImage(provider, imageUrl);
+            }}
+            onResetProfileImage={() => {
+              void handleResetProfileImage();
+            }}
             isPreferencesMissing={preferences === null}
             darkMode={darkMode}
             onToggleDarkMode={() => {

@@ -421,4 +421,36 @@ describe("provider adapter runtime behavior", () => {
       message: "OpenAI summary output was not valid JSON.",
     });
   });
+
+  it("removes internal metadata labels from OpenAI story content", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                story:
+                  "Connected data: activity_summary, calendar, location, spotify.\n\nA steady evening wrapped up the day on a calm note.",
+                highlights: [],
+                sourcesUsed: ["Memories"],
+              }),
+            },
+          },
+        ],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const adapter = resolveSummaryModelAdapter("openai");
+    const result = await adapter.execute({
+      dayKey: "2026-04-06",
+      modelInput: "{}",
+      apiKey: "test-key",
+    });
+
+    expect(result.story).toBe(
+      "A steady evening wrapped up the day on a calm note.",
+    );
+  });
 });

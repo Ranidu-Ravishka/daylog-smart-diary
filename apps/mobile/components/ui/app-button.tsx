@@ -1,6 +1,6 @@
 import React from "react";
 import {
-  TouchableOpacity,
+  Pressable,
   Text,
   StyleSheet,
   ActivityIndicator,
@@ -44,14 +44,14 @@ export function AppButton({
 
   const bgMap = {
     primary: c.tint,
-    secondary: c.tintLight,
+    secondary: c.surface,
     ghost: "transparent",
     danger: c.error,
   };
 
   const textColorMap = {
     primary: c.inverseText,
-    secondary: c.tint,
+    secondary: c.text,
     ghost: c.tint,
     danger: c.inverseText,
   };
@@ -59,20 +59,22 @@ export function AppButton({
   const heightMap = { sm: 36, md: 44, lg: 52 };
 
   return (
-    <TouchableOpacity
-      style={[
+    <Pressable
+      style={({ pressed }) => [
         styles.base,
         {
           backgroundColor: bgMap[variant],
           height: heightMap[size],
-          opacity: isDisabled ? 0.5 : 1,
+          opacity: isDisabled ? 0.5 : pressed ? 0.84 : 1,
+          borderColor: c.border,
         },
         variant === "ghost" && styles.ghost,
+        variant === "secondary" && styles.secondary,
+        variant === "danger" && styles.danger,
         style,
       ]}
       onPress={onPress}
       disabled={isDisabled}
-      activeOpacity={0.7}
     >
       {loading ? (
         <ActivityIndicator color={textColorMap[variant]} size="small" />
@@ -92,7 +94,7 @@ export function AppButton({
           </Text>
         </>
       )}
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 
@@ -108,6 +110,14 @@ function createStyles(c: ThemeColors) {
     },
     ghost: {
       paddingHorizontal: Spacing.md,
+      borderWidth: 0,
+    },
+    secondary: {
+      borderWidth: 1,
+    },
+    danger: {
+      borderWidth: 1,
+      borderColor: c.text,
     },
     text: {
       ...Typography.bodyMedium,

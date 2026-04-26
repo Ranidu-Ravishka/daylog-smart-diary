@@ -21,6 +21,9 @@ export type CreateMemoryOutboxPayload = {
   mood?: string;
   happenedAt: number;
   dayKey: string;
+  tags?: string[];
+  location?: string;
+  linkedPeople?: string[];
 };
 
 export type AppendDayLogOutboxPayload = {
@@ -175,6 +178,15 @@ function sanitizeCreateMemoryPayload(
     mood: payload.mood?.trim() || undefined,
     happenedAt: Math.round(payload.happenedAt),
     dayKey: payload.dayKey.trim(),
+    tags: (() => {
+      const values = dedupeItems(normalizeStringArray(payload.tags));
+      return values.length > 0 ? values : undefined;
+    })(),
+    location: payload.location?.trim() || undefined,
+    linkedPeople: (() => {
+      const values = dedupeItems(normalizeStringArray(payload.linkedPeople));
+      return values.length > 0 ? values : undefined;
+    })(),
   };
 }
 

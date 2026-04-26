@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, Pressable } from "react-native";
 import { Spacing, Typography, type ThemeColors } from "@/constants/theme";
 import { useAppTheme } from "@/components/theme-provider";
 
@@ -17,9 +17,16 @@ export function SectionHeader({ title, action, onAction }: SectionHeaderProps) {
     <View style={styles.container}>
       <Text style={styles.title}>{title}</Text>
       {action && onAction && (
-        <TouchableOpacity onPress={onAction} hitSlop={8}>
+        <Pressable
+          onPress={onAction}
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.actionPressable,
+            pressed && styles.actionPressablePressed,
+          ]}
+        >
           <Text style={styles.action}>{action}</Text>
-        </TouchableOpacity>
+        </Pressable>
       )}
     </View>
   );
@@ -40,7 +47,13 @@ function createStyles(c: ThemeColors) {
     action: {
       ...Typography.callout,
       color: c.tint,
-      fontWeight: "500",
+      fontWeight: "600",
+    },
+    actionPressable: {
+      opacity: 1,
+    },
+    actionPressablePressed: {
+      opacity: 0.7,
     },
   });
 }

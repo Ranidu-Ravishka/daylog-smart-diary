@@ -19,6 +19,8 @@ const MAX_EVENT_TITLE_LENGTH = 80;
 const MAX_ALL_DAY_BUSY_MINUTES = 8 * 60;
 
 const CALENDAR_SYNC_STATE_STORAGE_PREFIX = "apple-calendar-sync-state:v1:";
+const CALENDAR_TIMELINE_CACHE_STORAGE_PREFIX = "apple-calendar-timeline:v1:";
+const CALENDAR_TIMELINE_CACHE_TTL_MS = 10 * 60_000;
 
 type CalendarEventFingerprint = {
   id: string;
@@ -37,6 +39,23 @@ type CalendarSyncState = {
   lastSyncedAtMs: number;
   contentHash: string;
   eventCount: number;
+};
+
+export type AppleCalendarTimelineEvent = {
+  id: string;
+  title: string;
+  startAt: number;
+  endAt: number;
+  durationMinutes: number;
+  isAllDay: boolean;
+  timeLabel: string;
+};
+
+type AppleCalendarTimelineCacheState = {
+  dayKey: string;
+  timeZone: string;
+  cachedAtMs: number;
+  events: AppleCalendarTimelineEvent[];
 };
 
 type CalendarEventLike = {
@@ -109,6 +128,33 @@ function clampTitle(raw: string | undefined | null): string | null {
   return trimmed.length > MAX_EVENT_TITLE_LENGTH
     ? `${trimmed.slice(0, MAX_EVENT_TITLE_LENGTH - 1)}…`
     : trimmed;
+}
+
+function buildTimelineCacheStorageKey(
+  dayKey: string,
+  timeZone: string,
+): string {
+  return `${CALENDAR_TIMELINE_CACHE_STORAGE_PREFIX}${dayKey}:${timeZone}`;
+}
+
+function formatEventTimeLabel(args: {
+  startAt: number;
+  endAt: number;
+  isAllDay: boolean;
+}): string {
+  if (args.isAllDay) {
+    return "All day";
+  }
+
+  const startLabel = new Date(args.startAt).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const endLabel = new Date(args.endAt).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `${startLabel} - ${endLabel}`;
 }
 
 export function getAppleCalendarSetupIssue(): string | null {
@@ -321,6 +367,157 @@ async function writePersistedSyncState(
   }
 }
 
+async function readTimelineCacheState(
+  dayKey: string,
+  timeZone: string,
+): Promise<AppleCalendarTimelineCacheState | null> {
+  try {
+    const raw = await AsyncStorage.getItem(
+      buildTimelineCacheStorageKey(dayKey, timeZone),
+    );
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as Partial<AppleCalendarTimelineCacheState>;
+    if (
+      parsed?.dayKey !== dayKey ||
+      parsed?.timeZone !== timeZone ||
+      typeof parsed?.cachedAtMs !== "number" ||
+      !Array.isArray(parsed.events)
+    ) {
+      return null;
+    }
+
+    const events = parsed.events
+      .filter(
+        (event): event is AppleCalendarTimelineEvent =>
+          typeof event === "object" &&
+          event !== null &&
+          typeof event.id === "string" &&
+          typeof event.title === "string" &&
+          typeof event.startAt === "number" &&
+          typeof event.endAt === "number" &&
+          typeof event.durationMinutes === "number" &&
+          typeof event.isAllDay === "boolean" &&
+          typeof event.timeLabel === "string",
+      )
+      .slice(0, 64);
+
+    return {
+      dayKey,
+      timeZone,
+      cachedAtMs: parsed.cachedAtMs,
+      events,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function writeTimelineCacheState(
+  state: AppleCalendarTimelineCacheState,
+): Promise<void> {
+  try {
+    await AsyncStorage.setItem(
+      buildTimelineCacheStorageKey(state.dayKey, state.timeZone),
+      JSON.stringify(state),
+    );
+  } catch {
+    // Best effort cache only.
+  }
+}
+
+function toTimelineEvents(
+  events: readonly CalendarEventLike[],
+  windowStartMs: number,
+  windowEndMs: number,
+): AppleCalendarTimelineEvent[] {
+  const timelineEvents: AppleCalendarTimelineEvent[] = [];
+  for (const event of events) {
+    const rawStart = toMillis(event.startDate);
+    const rawEnd = toMillis(event.endDate);
+    if (rawStart === null || rawEnd === null || rawEnd <= rawStart) continue;
+
+    const startAt = Math.max(rawStart, windowStartMs);
+    const endAt = Math.min(rawEnd, windowEndMs);
+    if (endAt <= startAt) continue;
+
+    const title = clampTitle(event.title) ?? "Untitled event";
+    const isAllDay = Boolean(event.allDay);
+    const durationMinutes = Math.max(1, Math.round((endAt - startAt) / 60_000));
+    timelineEvents.push({
+      id:
+        typeof event.id === "string" && event.id.length > 0
+          ? event.id
+          : `${startAt}-${title}`,
+      title,
+      startAt,
+      endAt,
+      durationMinutes,
+      isAllDay,
+      timeLabel: formatEventTimeLabel({ startAt, endAt, isAllDay }),
+    });
+  }
+
+  return timelineEvents
+    .sort((left, right) => {
+      if (left.startAt !== right.startAt) return left.startAt - right.startAt;
+      if (left.endAt !== right.endAt) return left.endAt - right.endAt;
+      return left.title.localeCompare(right.title);
+    })
+    .slice(0, 64);
+}
+
+export async function collectAppleCalendarTimelineForDay(
+  dayKey: string,
+  timeZone: string = getResolvedTimeZone(),
+  options?: { forceRefresh?: boolean },
+): Promise<{
+  events: AppleCalendarTimelineEvent[];
+  cached: boolean;
+}> {
+  const nowMs = Date.now();
+  if (!options?.forceRefresh) {
+    const cached = await readTimelineCacheState(dayKey, timeZone);
+    if (cached && nowMs - cached.cachedAtMs <= CALENDAR_TIMELINE_CACHE_TTL_MS) {
+      return {
+        events: cached.events,
+        cached: true,
+      };
+    }
+  }
+
+  const setupIssue = getAppleCalendarSetupIssue();
+  if (setupIssue) throw new Error(setupIssue);
+
+  await ensureCalendarPermission();
+  const ExpoCalendar = getExpoCalendarModule();
+  if (!ExpoCalendar) {
+    throw new Error(
+      "Apple Calendar bridge is unavailable. Rebuild the iOS development client with expo-calendar installed.",
+    );
+  }
+
+  const { start, end } = parseDayRange(dayKey, timeZone);
+  const calendarIds = await listDeviceCalendarIds();
+  const rawEvents =
+    calendarIds.length === 0
+      ? []
+      : await ExpoCalendar.getEventsAsync(calendarIds, start, end);
+
+  const events = toTimelineEvents(rawEvents, start.getTime(), end.getTime());
+  await writeTimelineCacheState({
+    dayKey,
+    timeZone,
+    cachedAtMs: nowMs,
+    events,
+  });
+
+  return {
+    events,
+    cached: false,
+  };
+}
+
 export type AppleCalendarDeltaSyncResult =
   | {
       changed: false;
@@ -531,4 +728,7 @@ export const __testing = {
   MAX_EVENT_TITLE_LENGTH,
   MAX_ALL_DAY_BUSY_MINUTES,
   CALENDAR_SYNC_STATE_STORAGE_PREFIX,
+  CALENDAR_TIMELINE_CACHE_STORAGE_PREFIX,
+  CALENDAR_TIMELINE_CACHE_TTL_MS,
+  toTimelineEvents,
 };

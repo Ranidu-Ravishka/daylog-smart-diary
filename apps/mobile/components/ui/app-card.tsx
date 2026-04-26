@@ -1,6 +1,6 @@
 import React from "react";
 import { View, ViewStyle, StyleSheet } from "react-native";
-import { Radius, Spacing, type ThemeColors } from "@/constants/theme";
+import { Radius, Shadows, Spacing, type ThemeColors } from "@/constants/theme";
 import { useAppTheme } from "@/components/theme-provider";
 
 interface AppCardProps {
@@ -25,11 +25,15 @@ function createStyles(c: ThemeColors) {
     card: {
       backgroundColor: c.surface,
       borderRadius: Radius.lg,
-      shadowColor: c.cardShadow,
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.18,
-      shadowRadius: 3,
-      elevation: 1,
+      borderWidth: 1,
+      borderColor: c.border,
+      ...(c.inverseText === "#FFFFFF" ? Shadows.md : {}),
+      ...(c.inverseText === "#000000"
+        ? {
+            shadowColor: "transparent",
+            elevation: 0,
+          }
+        : {}),
     },
     padded: {
       padding: Spacing.xl,

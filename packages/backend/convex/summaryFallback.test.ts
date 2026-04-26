@@ -18,7 +18,9 @@ describe("summaryFallback.buildRuleBasedSummary", () => {
     expect(output.sourcesUsed).toContain("Deterministic fallback");
     // Highlights can be empty when we truly have nothing, but the story
     // must always be a non-empty helpful line.
-    expect(output.story.toLowerCase()).toMatch(/no memor|add a|day|track/);
+    expect(output.story.toLowerCase()).toMatch(
+      /quiet day|minimal activity|fresh chapter/,
+    );
   });
 
   it("summarizes memory count and integration metrics without LLM input", () => {
@@ -38,9 +40,10 @@ describe("summaryFallback.buildRuleBasedSummary", () => {
       },
     });
 
-    expect(output.story).toMatch(/3 memories/);
+    expect(output.story).toMatch(/3 memorable moments/);
     expect(output.story).toMatch(/4\.5\/5/);
     expect(output.story.toLowerCase()).toMatch(/happy/);
+    expect(output.story).not.toMatch(/connected data/i);
     expect(output.highlights.length).toBeGreaterThanOrEqual(3);
     expect(output.metrics?.steps).toBe(8500);
     expect(output.sourcesUsed).toEqual([

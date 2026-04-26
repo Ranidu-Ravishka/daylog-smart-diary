@@ -9,7 +9,11 @@ import {
   Image,
   Alert,
   ActivityIndicator,
+  Platform,
 } from "react-native";
+import DateTimePicker, {
+  type DateTimePickerEvent,
+} from "@react-native-community/datetimepicker";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
@@ -22,7 +26,6 @@ import {
   Spacing,
   Typography,
   Radius,
-  Shadows,
   type ThemeColors,
 } from "@/constants/theme";
 import { useAppTheme } from "@/components/theme-provider";
@@ -101,6 +104,11 @@ export default function AddMemoryScreen() {
   const [description, setDescription] = useState("");
   const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([]);
   const [mood, setMood] = useState<string>(SETTINGS_DEFAULTS.defaultMemoryMood);
+  const [tagsInput, setTagsInput] = useState("");
+  const [linkedPeopleInput, setLinkedPeopleInput] = useState("");
+  const [location, setLocation] = useState("");
+  const [timestamp, setTimestamp] = useState(() => Date.now());
+  const [isDatePickerVisible, setIsDatePickerVisible] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -199,7 +207,7 @@ export default function AddMemoryScreen() {
       return;
     }
 
-    const happenedAt = Date.now();
+    const happenedAt = timestamp;
     const dayKey = getTodayDayKey();
     const clientRequestId = `mobile_mem_${happenedAt}_${Math.floor(
       Math.random() * 1_000_000,
@@ -216,6 +224,14 @@ export default function AddMemoryScreen() {
 
     setIsSubmitting(true);
     setError(null);
+    const parsedTags = tagsInput
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const parsedLinkedPeople = linkedPeopleInput
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
 
     try {
       const memory = await withTimeout(
@@ -226,6 +242,10 @@ export default function AddMemoryScreen() {
           mood,
           happenedAt,
           dayKey,
+          tags: parsedTags.length > 0 ? parsedTags : undefined,
+          linkedPeople:
+            parsedLinkedPeople.length > 0 ? parsedLinkedPeople : undefined,
+          location: location.trim() || undefined,
         }),
         CREATE_MEMORY_TIMEOUT_MS,
         "Save timed out. Please check your connection and try again.",
@@ -262,6 +282,10 @@ export default function AddMemoryScreen() {
       setMood(
         preferences?.defaultMemoryMood ?? SETTINGS_DEFAULTS.defaultMemoryMood,
       );
+      setTagsInput("");
+      setLinkedPeopleInput("");
+      setLocation("");
+      setTimestamp(Date.now());
       hasSelectedMoodManually.current = false;
 
       logInfo("mobile_memory_create_succeeded", {
@@ -284,6 +308,10 @@ export default function AddMemoryScreen() {
             mood,
             happenedAt,
             dayKey,
+            tags: parsedTags.length > 0 ? parsedTags : undefined,
+            linkedPeople:
+              parsedLinkedPeople.length > 0 ? parsedLinkedPeople : undefined,
+            location: location.trim() || undefined,
           });
 
           let queuedPhotoCount = 0;
@@ -313,6 +341,10 @@ export default function AddMemoryScreen() {
             preferences?.defaultMemoryMood ??
               SETTINGS_DEFAULTS.defaultMemoryMood,
           );
+          setTagsInput("");
+          setLinkedPeopleInput("");
+          setLocation("");
+          setTimestamp(Date.now());
           hasSelectedMoodManually.current = false;
 
           logInfo("mobile_memory_create_queued_offline", {
@@ -368,6 +400,19 @@ export default function AddMemoryScreen() {
     !isAuthLoading &&
     isAuthenticated;
 
+  const handleTimestampChange = (
+    event: DateTimePickerEvent,
+    selectedDate?: Date,
+  ) => {
+    if (Platform.OS === "android") {
+      setIsDatePickerVisible(false);
+    }
+    if (event.type === "dismissed" || !selectedDate) {
+      return;
+    }
+    setTimestamp(selectedDate.getTime());
+  };
+
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView
@@ -417,6 +462,29 @@ export default function AddMemoryScreen() {
             numberOfLines={4}
             editable={!isSubmitting}
           />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.label}>Date & Time</Text>
+          <TouchableOpacity
+            style={styles.inputButton}
+            onPress={() => setIsDatePickerVisible(true)}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel="Edit memory date and time"
+          >
+            <Text style={styles.timestampValue}>
+              {new Date(timestamp).toLocaleString()}
+            </Text>
+          </TouchableOpacity>
+          {isDatePickerVisible ? (
+            <DateTimePicker
+              value={new Date(timestamp)}
+              mode="datetime"
+              display={Platform.OS === "ios" ? "inline" : "default"}
+              onChange={handleTimestampChange}
+            />
+          ) : null}
         </View>
 
         {/* ── Mood ─────────────────────────────────────── */}
@@ -503,6 +571,45 @@ export default function AddMemoryScreen() {
           )}
         </View>
 
+        <View style={styles.section}>
+          <Text style={styles.label}>Tags</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="work, gym, friends"
+            placeholderTextColor={c.textTertiary}
+            value={tagsInput}
+            onChangeText={setTagsInput}
+            editable={!isSubmitting}
+            accessibilityLabel="Memory tags"
+          />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.label}>Linked People</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Alice, Bob"
+            placeholderTextColor={c.textTertiary}
+            value={linkedPeopleInput}
+            onChangeText={setLinkedPeopleInput}
+            editable={!isSubmitting}
+            accessibilityLabel="Linked people"
+          />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.label}>Location (optional)</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Coffee shop, Colombo"
+            placeholderTextColor={c.textTertiary}
+            value={location}
+            onChangeText={setLocation}
+            editable={!isSubmitting}
+            accessibilityLabel="Memory location"
+          />
+        </View>
+
         {/* ── Submit ───────────────────────────────────── */}
         <View style={styles.section}>
           <AppButton
@@ -544,7 +651,7 @@ function createStyles(c: ThemeColors) {
     pageSubtitle: {
       ...Typography.callout,
       color: c.textSecondary,
-      marginTop: 2,
+      marginTop: Spacing.xs,
     },
 
     // Sections
@@ -555,7 +662,7 @@ function createStyles(c: ThemeColors) {
     label: {
       ...Typography.title3,
       color: c.text,
-      marginBottom: Spacing.sm,
+      marginBottom: Spacing.md,
     },
 
     // Inputs
@@ -568,12 +675,26 @@ function createStyles(c: ThemeColors) {
       color: c.text,
       borderWidth: 1,
       borderColor: c.border,
-      ...Shadows.sm,
+      minHeight: 48,
+    },
+    inputButton: {
+      backgroundColor: c.surface,
+      borderRadius: Radius.md,
+      paddingHorizontal: Spacing.lg,
+      paddingVertical: Spacing.md,
+      borderWidth: 1,
+      borderColor: c.border,
+      minHeight: 48,
+      justifyContent: "center",
     },
     textArea: {
       minHeight: 110,
       textAlignVertical: "top",
       paddingTop: Spacing.md,
+    },
+    timestampValue: {
+      ...Typography.body,
+      color: c.text,
     },
 
     // Error
@@ -605,7 +726,7 @@ function createStyles(c: ThemeColors) {
       paddingHorizontal: Spacing.lg,
       paddingVertical: Spacing.md,
       alignItems: "center",
-      borderWidth: 1.5,
+      borderWidth: 1,
       borderColor: c.border,
       minWidth: 72,
     },
@@ -632,12 +753,11 @@ function createStyles(c: ThemeColors) {
       alignItems: "center",
       justifyContent: "center",
       gap: Spacing.sm,
-      backgroundColor: c.tintLight,
+      backgroundColor: c.surfaceSecondary,
       borderRadius: Radius.md,
       paddingVertical: Spacing.lg,
       borderWidth: 1,
-      borderColor: c.tintMuted,
-      borderStyle: "dashed",
+      borderColor: c.border,
     },
     photoBtnText: {
       ...Typography.bodyMedium,
