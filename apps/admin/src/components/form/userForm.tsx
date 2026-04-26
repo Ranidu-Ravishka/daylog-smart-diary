@@ -102,13 +102,15 @@ export default function UserForm({
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-10">
+    <div className="w-full">
       <div className="max-w-3xl mx-auto px-6">
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-8">
+        <div className="bg-card border border-border rounded-xl shadow-sm p-8">
           <div className="mb-6">
-            <h1 className="text-2xl font-semibold text-gray-900">{title}</h1>
+            <h1 className="text-xl font-semibold text-foreground">{title}</h1>
             {description ? (
-              <p className="text-sm text-gray-500 mt-1">{description}</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                {description}
+              </p>
             ) : null}
           </div>
 
@@ -116,7 +118,7 @@ export default function UserForm({
             <div>
               <label
                 htmlFor="email"
-                className="block text-sm font-medium text-gray-700"
+                className="block text-sm font-medium text-foreground"
               >
                 Email
               </label>
@@ -129,14 +131,14 @@ export default function UserForm({
                   resetStatus();
                 }}
                 required
-                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-sm shadow-sm bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
 
             <div>
               <label
                 htmlFor="firstName"
-                className="block text-sm font-medium text-gray-700"
+                className="block text-sm font-medium text-foreground"
               >
                 First Name
               </label>
@@ -148,14 +150,14 @@ export default function UserForm({
                   setFirstName(e.target.value);
                   resetStatus();
                 }}
-                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-sm shadow-sm bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
 
             <div>
               <label
                 htmlFor="lastName"
-                className="block text-sm font-medium text-gray-700"
+                className="block text-sm font-medium text-foreground"
               >
                 Last Name
               </label>
@@ -167,7 +169,7 @@ export default function UserForm({
                   setLastName(e.target.value);
                   resetStatus();
                 }}
-                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-sm shadow-sm bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
 
@@ -180,11 +182,11 @@ export default function UserForm({
                   setIsAdmin(e.target.checked);
                   resetStatus();
                 }}
-                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                className="h-4 w-4 rounded border-border text-foreground focus-visible:ring-2 focus-visible:ring-ring"
               />
               <label
                 htmlFor="isAdmin"
-                className="text-sm font-medium text-gray-700"
+                className="text-sm font-medium text-foreground"
               >
                 Admin
               </label>
@@ -194,15 +196,17 @@ export default function UserForm({
               <button
                 type="submit"
                 disabled={status === "saving"}
-                className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                className="inline-flex items-center rounded-xl bg-foreground px-4 py-2 text-sm font-semibold text-background shadow-sm transition hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {status === "saving" ? savingLabel : submitLabel}
               </button>
               {status === "saved" && (
-                <span className="text-sm text-green-600">{successMessage}</span>
+                <span className="text-sm text-muted-foreground">
+                  {successMessage}
+                </span>
               )}
               {status === "error" && (
-                <span className="text-sm text-red-600">
+                <span className="text-sm text-foreground">
                   {errorMessage ?? "Something went wrong."}
                 </span>
               )}

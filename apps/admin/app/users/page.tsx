@@ -19,6 +19,13 @@ import {
   useQuery,
 } from "convex/react";
 import Link from "next/link";
+import { PageContainer } from "@/components/page-container";
+import { Button } from "@/components/ui/button";
+import {
+  tableActionsCellClass,
+  tableActionsHeaderClass,
+  tableActionsInnerClass,
+} from "@/lib/table-actions";
 
 type DeletionJobProgress = {
   deletedMemories: number;
@@ -168,18 +175,18 @@ function formatDeletionStageLabel(stage: string): string {
 
 function getDeletionStatusPillClasses(status: DeletionJobStatus): string {
   if (status === "completed") {
-    return "bg-emerald-100 text-emerald-800";
+    return "bg-muted text-foreground";
   }
 
   if (status === "failed") {
-    return "bg-red-100 text-red-800";
+    return "bg-foreground text-background";
   }
 
   if (status === "processing") {
-    return "bg-amber-100 text-amber-800";
+    return "bg-muted/80 text-foreground";
   }
 
-  return "bg-slate-100 text-slate-700";
+  return "bg-muted text-muted-foreground";
 }
 
 function formatDeletionStatusLabel(status: DeletionJobStatus): string {
@@ -200,14 +207,14 @@ function formatDeletionStatusLabel(status: DeletionJobStatus): string {
 
 function getToastClasses(kind: ActionToastKind): string {
   if (kind === "success") {
-    return "border-emerald-200 bg-emerald-50 text-emerald-800";
+    return "border-border bg-muted text-foreground";
   }
 
   if (kind === "error") {
-    return "border-red-200 bg-red-50 text-red-800";
+    return "border-border bg-muted text-foreground ring-1 ring-foreground/15";
   }
 
-  return "border-blue-200 bg-blue-50 text-blue-800";
+  return "border-border bg-card text-foreground";
 }
 
 function normalizeDeletionJobProgress(
@@ -311,8 +318,10 @@ function DeletionJobStatusItem({
     <li className="px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-medium text-gray-900">{job.userEmail}</p>
-          <p className="text-xs text-gray-500 font-mono">Job {job.jobId}</p>
+          <p className="text-sm font-medium text-foreground">{job.userEmail}</p>
+          <p className="text-xs text-muted-foreground font-mono">
+            Job {job.jobId}
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -323,10 +332,10 @@ function DeletionJobStatusItem({
           >
             {formatDeletionStatusLabel(job.status)}
           </span>
-          <span className="inline-flex items-center rounded-md border border-gray-200 bg-white px-2 py-1 text-gray-700">
+          <span className="inline-flex items-center rounded-md border border-border bg-card px-2 py-1 text-foreground">
             Stage: {formatDeletionStageLabel(job.stage)}
           </span>
-          <span className="inline-flex items-center rounded-md border border-gray-200 bg-white px-2 py-1 text-gray-700">
+          <span className="inline-flex items-center rounded-md border border-border bg-card px-2 py-1 text-foreground">
             Checkpoints: {job.checkpoints}
           </span>
         </div>
@@ -335,7 +344,7 @@ function DeletionJobStatusItem({
           <button
             type="button"
             onClick={() => setDetailsExpanded((value) => !value)}
-            className="text-xs text-blue-700 hover:text-blue-900"
+            className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
           >
             {detailsExpanded ? "Hide details" : "View details"}
           </button>
@@ -343,7 +352,7 @@ function DeletionJobStatusItem({
             <button
               type="button"
               onClick={() => onDismiss(job.jobId)}
-              className="text-xs text-gray-500 hover:text-gray-700"
+              className="text-xs text-muted-foreground hover:text-foreground"
             >
               Dismiss
             </button>
@@ -352,16 +361,16 @@ function DeletionJobStatusItem({
       </div>
 
       {job.status === "failed" && job.lastError ? (
-        <p className="mt-2 text-xs text-red-700">Failed: {job.lastError}</p>
+        <p className="mt-2 text-xs text-foreground">Failed: {job.lastError}</p>
       ) : null}
 
       {detailsExpanded ? (
-        <div className="mt-3 rounded-lg border border-blue-100 bg-white p-3">
-          <div className="mb-2 inline-flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1">
-            <span className="text-[11px] font-medium uppercase tracking-wide text-blue-700">
+        <div className="mt-3 rounded-lg border border-border bg-card p-3">
+          <div className="mb-2 inline-flex items-center gap-2 rounded-md border border-border bg-muted px-2.5 py-1">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               Total deleted
             </span>
-            <span className="text-sm font-semibold text-blue-900">
+            <span className="text-sm font-semibold text-foreground">
               {totalDeleted.toLocaleString()}
             </span>
           </div>
@@ -369,10 +378,12 @@ function DeletionJobStatusItem({
             {DELETION_PROGRESS_COUNTERS.map((counter) => (
               <div
                 key={counter.key}
-                className="rounded-md border border-gray-100 bg-gray-50 px-2 py-1.5"
+                className="rounded-md border border-border bg-muted px-2 py-1.5"
               >
-                <dt className="text-[11px] text-gray-500">{counter.label}</dt>
-                <dd className="text-sm font-semibold text-gray-900">
+                <dt className="text-[11px] text-muted-foreground">
+                  {counter.label}
+                </dt>
+                <dd className="text-sm font-semibold text-foreground">
                   {job.progress[counter.key]}
                 </dd>
               </div>
@@ -760,180 +771,179 @@ export default function UsersPage() {
 
   return (
     <AdminGuard>
-      <div className="min-h-screen bg-gray-50 py-10">
-        <div className="max-w-5xl mx-auto px-6">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h1 className="text-2xl font-semibold text-gray-900">Users</h1>
-              <p className="text-sm text-gray-500 mt-1">
-                All rows from the <code>user</code> table.
-              </p>
-            </div>
-
-            <Link
-              href="/users/create"
-              className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-            >
-              Create User
-            </Link>
-          </div>
-
-          {trackedDeletionJobs.length > 0 ? (
-            <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 shadow-sm overflow-hidden">
-              <div className="px-4 py-3 border-b border-blue-100 flex items-center justify-between">
-                <div>
-                  <h2 className="text-sm font-semibold text-blue-900">
-                    User Deletion Jobs
-                  </h2>
-                  <p className="text-xs text-blue-700 mt-0.5">
-                    Showing recent jobs across sessions and polling active jobs
-                    every 3 seconds.
-                  </p>
-                </div>
-                <span className="text-xs font-medium text-blue-800">
-                  {
-                    trackedDeletionJobs.filter((job) =>
-                      isDeletionJobActive(job.status),
-                    ).length
-                  }{" "}
-                  active
-                </span>
+      <PageContainer
+        className="max-w-6xl"
+        title="Users"
+        description={
+          <>
+            All rows from the{" "}
+            <code className="rounded-md bg-muted px-1.5 py-0.5 text-xs">
+              user
+            </code>{" "}
+            table.
+          </>
+        }
+        action={
+          <Button variant="primary" asChild>
+            <Link href="/users/create">Create user</Link>
+          </Button>
+        }
+      >
+        {trackedDeletionJobs.length > 0 ? (
+          <div className="mb-6 overflow-hidden rounded-xl border border-border bg-muted/40 shadow-sm">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">
+                  User Deletion Jobs
+                </h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Showing recent jobs across sessions and polling active jobs
+                  every 3 seconds.
+                </p>
               </div>
-              <ul className="divide-y divide-blue-100">
-                {trackedDeletionJobs.map((job) => (
-                  <DeletionJobStatusItem
-                    key={job.jobId}
-                    job={job}
-                    pollToken={pollToken}
-                    onSnapshot={handleDeletionSnapshot}
-                    onDismiss={dismissDeletionJob}
-                  />
-                ))}
-              </ul>
+              <span className="text-xs font-medium text-foreground">
+                {
+                  trackedDeletionJobs.filter((job) =>
+                    isDeletionJobActive(job.status),
+                  ).length
+                }{" "}
+                active
+              </span>
             </div>
-          ) : null}
-
-          {toasts.length > 0 ? (
-            <div className="fixed right-4 top-20 z-50 space-y-2">
-              {toasts.map((toast) => (
-                <div
-                  key={toast.id}
-                  className={`min-w-[300px] max-w-[420px] rounded-lg border px-3 py-2 text-sm shadow ${getToastClasses(toast.kind)}`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <p>{toast.message}</p>
-                    <button
-                      type="button"
-                      onClick={() => dismissToast(toast.id)}
-                      className="text-xs font-medium opacity-80 hover:opacity-100"
-                    >
-                      Dismiss
-                    </button>
-                  </div>
-                </div>
+            <ul className="divide-y divide-border">
+              {trackedDeletionJobs.map((job) => (
+                <DeletionJobStatusItem
+                  key={job.jobId}
+                  job={job}
+                  pollToken={pollToken}
+                  onSnapshot={handleDeletionSnapshot}
+                  onDismiss={dismissDeletionJob}
+                />
               ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {toasts.length > 0 ? (
+          <div className="fixed right-4 top-20 z-50 space-y-2">
+            {toasts.map((toast) => (
+              <div
+                key={toast.id}
+                className={`min-w-[300px] max-w-[420px] rounded-lg border px-3 py-2 text-sm shadow ${getToastClasses(toast.kind)}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <p>{toast.message}</p>
+                  <button
+                    type="button"
+                    onClick={() => dismissToast(toast.id)}
+                    className="text-xs font-medium opacity-80 hover:opacity-100"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+          {status === "LoadingFirstPage" ? (
+            <div className="p-6 text-sm text-muted-foreground">Loading...</div>
+          ) : visibleUsers.length === 0 ? (
+            <div className="p-6 text-sm text-muted-foreground">
+              No users yet.
             </div>
-          ) : null}
+          ) : (
+            <>
+              <div className="max-w-full overflow-x-auto overscroll-x-contain">
+                <table className="min-w-[980px] w-full text-sm">
+                  <thead className="bg-muted/50 text-muted-foreground">
+                    <tr>
+                      <th className="text-left font-medium px-4 py-3">User</th>
+                      <th className="text-left font-medium px-4 py-3">
+                        First Name
+                      </th>
+                      <th className="text-left font-medium px-4 py-3">
+                        Last Name
+                      </th>
+                      <th className="text-left font-medium px-4 py-3">Admin</th>
+                      <th className="text-left font-medium px-4 py-3">
+                        Created
+                      </th>
+                      <th className="text-left font-medium px-4 py-3">
+                        Deletion Status
+                      </th>
+                      <th className={tableActionsHeaderClass}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {visibleUsers.map((row) => {
+                      const rowId = String(row._id);
+                      const rowDeletionStatus =
+                        rowDeletionStatusByUserId.get(rowId) ??
+                        (deletingByUserId[rowId] ? "requested" : undefined);
 
-          <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-            {status === "LoadingFirstPage" ? (
-              <div className="p-6 text-sm text-gray-600">Loading...</div>
-            ) : visibleUsers.length === 0 ? (
-              <div className="p-6 text-sm text-gray-600">No users yet.</div>
-            ) : (
-              <>
-                <div className="overflow-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="text-left font-medium px-4 py-3">
-                          User
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          First Name
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Last Name
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Admin
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Created
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Deletion Status
-                        </th>
-                        <th className="text-left font-medium px-4 py-3">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {visibleUsers.map((row) => {
-                        const rowId = String(row._id);
-                        const rowDeletionStatus =
-                          rowDeletionStatusByUserId.get(rowId) ??
-                          (deletingByUserId[rowId] ? "requested" : undefined);
-
-                        return (
-                          <tr
-                            key={`${row._id}:${rowRefreshVersionByUserId[rowId] ?? 0}`}
-                            className="hover:bg-gray-50"
-                          >
-                            <td className="px-4 py-3">
-                              <div className="text-sm text-gray-900">
-                                {row.email}
-                              </div>
-                              <div className="font-mono text-xs text-gray-500">
-                                {row.clerkUserId}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-gray-900">
-                              {row.firstName ?? "—"}
-                            </td>
-                            <td className="px-4 py-3 text-gray-900">
-                              {row.lastName ?? "—"}
-                            </td>
-                            <td className="px-4 py-3 text-gray-600">
-                              {row.isAdmin ? "Yes" : "No"}
-                            </td>
-                            <td className="px-4 py-3 text-gray-600">
-                              {new Date(row._creationTime).toLocaleString()}
-                            </td>
-                            <td className="px-4 py-3">
-                              {rowDeletionStatus ? (
-                                <span
-                                  className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${getDeletionStatusPillClasses(
-                                    rowDeletionStatus,
-                                  )}`}
-                                >
-                                  {formatDeletionStatusLabel(rowDeletionStatus)}
-                                </span>
-                              ) : (
-                                <span className="text-xs text-gray-400">—</span>
-                              )}
-                            </td>
-                            <td className="px-4 py-3">
-                              <Link
-                                href={`/users/edit/${row._id}`}
-                                className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+                      return (
+                        <tr
+                          key={`${row._id}:${rowRefreshVersionByUserId[rowId] ?? 0}`}
+                          className="hover:bg-muted/50"
+                        >
+                          <td className="max-w-[280px] px-4 py-3">
+                            <div className="text-sm text-foreground">
+                              {row.email}
+                            </div>
+                            <div className="break-all font-mono text-xs text-muted-foreground">
+                              {row.clerkUserId}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-foreground">
+                            {row.firstName ?? "—"}
+                          </td>
+                          <td className="px-4 py-3 text-foreground">
+                            {row.lastName ?? "—"}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {row.isAdmin ? "Yes" : "No"}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {new Date(row._creationTime).toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3">
+                            {rowDeletionStatus ? (
+                              <span
+                                className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${getDeletionStatusPillClasses(
+                                  rowDeletionStatus,
+                                )}`}
                               >
-                                Edit
-                              </Link>
-                              <button
+                                {formatDeletionStatusLabel(rowDeletionStatus)}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">
+                                —
+                              </span>
+                            )}
+                          </td>
+                          <td className={tableActionsCellClass}>
+                            <div className={tableActionsInnerClass}>
+                              <Button variant="primary" size="sm" asChild>
+                                <Link href={`/users/edit/${row._id}`}>
+                                  Edit
+                                </Link>
+                              </Button>
+                              <Button
                                 type="button"
+                                variant="outlineDestructive"
+                                size="sm"
+                                disabled={
+                                  deletingByUserId[rowId] ||
+                                  activeDeletionByUserId.has(rowId)
+                                }
                                 onClick={() =>
                                   void queueUserDeletion({
                                     _id: row._id,
                                     email: row.email,
                                   })
                                 }
-                                disabled={
-                                  deletingByUserId[rowId] ||
-                                  activeDeletionByUserId.has(rowId)
-                                }
-                                className="inline-flex items-center rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 ml-2 disabled:opacity-60 disabled:cursor-not-allowed"
                               >
                                 {activeDeletionByUserId.has(rowId)
                                   ? activeDeletionStatusByUserId.get(rowId) ===
@@ -943,30 +953,32 @@ export default function UsersPage() {
                                   : deletingByUserId[rowId]
                                     ? "Queueing..."
                                     : "Delete"}
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
 
-                {status === "CanLoadMore" && (
-                  <div className="border-t border-gray-100 p-4">
-                    <button
-                      onClick={() => loadMore(25)}
-                      className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
-                    >
-                      Load more users
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+              {status === "CanLoadMore" && (
+                <div className="border-t border-border p-4">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => loadMore(25)}
+                  >
+                    Load more users
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
         </div>
-      </div>
+      </PageContainer>
     </AdminGuard>
   );
 }

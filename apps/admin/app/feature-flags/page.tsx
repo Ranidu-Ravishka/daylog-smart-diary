@@ -5,6 +5,9 @@ import { api } from "@repo/backend/convex";
 import { makeFunctionReference } from "convex/server";
 import { useConvex, useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useState } from "react";
+import { PageContainer } from "@/components/page-container";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type FeatureFlagKey = "aiSummaryEnabled" | "backgroundTrackingEnabled";
 
@@ -242,244 +245,240 @@ export default function FeatureFlagsPage() {
 
   return (
     <AdminGuard>
-      <div className="min-h-screen bg-gray-50 py-10">
-        <div className="mx-auto max-w-6xl px-6">
-          <div className="mb-6">
-            <h1 className="text-2xl font-semibold text-gray-900">
-              Feature Flags
-            </h1>
-            <p className="mt-1 text-sm text-gray-500">
-              Remotely control staged rollouts with per-environment settings,
-              deterministic percentage rollout, per-user targeting, and kill
-              switches.
-            </p>
+      <PageContainer
+        title="Feature flags"
+        description="Remotely control staged rollouts with per-environment settings, deterministic percentage rollout, per-user targeting, and kill switches."
+      >
+        {statusMessage && (
+          <div className="mb-4 rounded-lg border border-border bg-muted px-4 py-3 text-sm text-foreground">
+            {statusMessage}
           </div>
+        )}
 
-          {statusMessage && (
-            <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-              {statusMessage}
-            </div>
-          )}
+        {actionError && (
+          <div className="mb-4 rounded-lg border border-border bg-muted px-4 py-3 text-sm text-foreground">
+            {actionError}
+          </div>
+        )}
 
-          {actionError && (
-            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {actionError}
-            </div>
-          )}
+        {loadMoreError && (
+          <div className="mb-4 rounded-lg border border-border bg-muted px-4 py-3 text-sm text-foreground">
+            {loadMoreError}
+          </div>
+        )}
 
-          {loadMoreError && (
-            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {loadMoreError}
-            </div>
-          )}
+        {!flagsPageResponse && flags.length === 0 ? (
+          <div className="space-y-3">
+            <Skeleton className="h-12 w-full rounded-xl" />
+            <Skeleton className="h-40 w-full rounded-xl" />
+            <Skeleton className="h-40 w-full rounded-xl" />
+          </div>
+        ) : sortedFlags.length === 0 ? (
+          <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground shadow-sm">
+            No feature flags configured.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {sortedFlags.map((flag) => {
+              const draft = drafts[flag.key] ?? toDraft(flag);
 
-          {!flagsPageResponse && flags.length === 0 ? (
-            <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-600 shadow-sm">
-              Loading feature flags...
-            </div>
-          ) : sortedFlags.length === 0 ? (
-            <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-600 shadow-sm">
-              No feature flags configured.
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {sortedFlags.map((flag) => {
-                const draft = drafts[flag.key] ?? toDraft(flag);
-
-                return (
-                  <section
-                    key={flag.key}
-                    className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
-                  >
-                    <div className="flex items-start justify-between gap-3 border-b border-gray-100 px-4 py-3">
-                      <div>
-                        <h2 className="text-sm font-semibold text-gray-900">
-                          {flag.key}
-                        </h2>
-                        <p className="mt-1 text-xs text-gray-600">
-                          {flag.description}
-                        </p>
-                      </div>
-                      <span
-                        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
-                          flag.source === "db"
-                            ? "bg-blue-100 text-blue-700"
-                            : "bg-gray-100 text-gray-700"
-                        }`}
-                      >
-                        {flag.source}
-                      </span>
-                    </div>
-
-                    <div className="grid gap-4 px-4 py-4 md:grid-cols-2">
-                      <label className="flex items-center gap-2 text-sm text-gray-700">
-                        <input
-                          type="checkbox"
-                          checked={draft.defaultEnabled}
-                          onChange={(event) =>
-                            updateDraft(flag.key, {
-                              ...draft,
-                              defaultEnabled: event.target.checked,
-                            })
-                          }
-                        />
-                        Default Enabled
-                      </label>
-
-                      <label className="flex items-center gap-2 text-sm text-gray-700">
-                        <input
-                          type="checkbox"
-                          checked={draft.killSwitch}
-                          onChange={(event) =>
-                            updateDraft(flag.key, {
-                              ...draft,
-                              killSwitch: event.target.checked,
-                            })
-                          }
-                        />
-                        Kill Switch
-                      </label>
-
-                      <label className="block text-sm text-gray-700">
-                        <span className="mb-1 block text-xs font-medium uppercase text-gray-500">
-                          Rollout Percentage
-                        </span>
-                        <input
-                          value={draft.rolloutPercentage}
-                          onChange={(event) =>
-                            updateDraft(flag.key, {
-                              ...draft,
-                              rolloutPercentage: event.target.value,
-                            })
-                          }
-                          inputMode="numeric"
-                          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
-                        />
-                      </label>
-
-                      <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-xs text-gray-600">
-                        <p>Environment Controls</p>
-                        <div className="mt-2 flex flex-wrap gap-4 text-sm text-gray-700">
-                          <label className="inline-flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={draft.enabledInDevelopment}
-                              onChange={(event) =>
-                                updateDraft(flag.key, {
-                                  ...draft,
-                                  enabledInDevelopment: event.target.checked,
-                                })
-                              }
-                            />
-                            Development
-                          </label>
-                          <label className="inline-flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={draft.enabledInStaging}
-                              onChange={(event) =>
-                                updateDraft(flag.key, {
-                                  ...draft,
-                                  enabledInStaging: event.target.checked,
-                                })
-                              }
-                            />
-                            Staging
-                          </label>
-                          <label className="inline-flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={draft.enabledInProduction}
-                              onChange={(event) =>
-                                updateDraft(flag.key, {
-                                  ...draft,
-                                  enabledInProduction: event.target.checked,
-                                })
-                              }
-                            />
-                            Production
-                          </label>
-                        </div>
-                      </div>
-
-                      <label className="block text-sm text-gray-700">
-                        <span className="mb-1 block text-xs font-medium uppercase text-gray-500">
-                          Include Clerk User IDs
-                        </span>
-                        <textarea
-                          value={draft.includeClerkUserIds}
-                          onChange={(event) =>
-                            updateDraft(flag.key, {
-                              ...draft,
-                              includeClerkUserIds: event.target.value,
-                            })
-                          }
-                          rows={3}
-                          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
-                          placeholder="clerk_user_1, clerk_user_2"
-                        />
-                      </label>
-
-                      <label className="block text-sm text-gray-700">
-                        <span className="mb-1 block text-xs font-medium uppercase text-gray-500">
-                          Exclude Clerk User IDs
-                        </span>
-                        <textarea
-                          value={draft.excludeClerkUserIds}
-                          onChange={(event) =>
-                            updateDraft(flag.key, {
-                              ...draft,
-                              excludeClerkUserIds: event.target.value,
-                            })
-                          }
-                          rows={3}
-                          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
-                          placeholder="clerk_user_3"
-                        />
-                      </label>
-                    </div>
-
-                    <div className="flex items-center justify-between border-t border-gray-100 px-4 py-3">
-                      <p className="text-xs text-gray-500">
-                        Last updated:{" "}
-                        {flag.updatedAt
-                          ? new Date(flag.updatedAt).toLocaleString()
-                          : "Never"}
+              return (
+                <section
+                  key={flag.key}
+                  className="overflow-hidden rounded-xl border border-border bg-card shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+                    <div>
+                      <h2 className="text-sm font-semibold text-foreground">
+                        {flag.key}
+                      </h2>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {flag.description}
                       </p>
-                      <button
-                        onClick={() => {
-                          void saveFlag(flag);
-                        }}
-                        disabled={busyKey === flag.key}
-                        className="inline-flex items-center rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {busyKey === flag.key ? "Saving..." : "Save"}
-                      </button>
                     </div>
-                  </section>
-                );
-              })}
+                    <span
+                      className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                        flag.source === "db"
+                          ? "bg-muted text-foreground ring-1 ring-border"
+                          : "bg-muted/70 text-muted-foreground"
+                      }`}
+                    >
+                      {flag.source}
+                    </span>
+                  </div>
 
-              {effectiveNextCursor && (
-                <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-                  <span className="text-xs text-gray-500">
-                    Showing {sortedFlags.length} flags
-                  </span>
-                  <button
-                    onClick={() => {
-                      void loadMoreFlags();
-                    }}
-                    disabled={isLoadingMore}
-                    className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {isLoadingMore ? "Loading more..." : "Load more flags"}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
+                  <div className="grid gap-4 px-4 py-4 md:grid-cols-2">
+                    <label className="flex items-center gap-2 text-sm text-foreground">
+                      <input
+                        type="checkbox"
+                        checked={draft.defaultEnabled}
+                        onChange={(event) =>
+                          updateDraft(flag.key, {
+                            ...draft,
+                            defaultEnabled: event.target.checked,
+                          })
+                        }
+                      />
+                      Default Enabled
+                    </label>
+
+                    <label className="flex items-center gap-2 text-sm text-foreground">
+                      <input
+                        type="checkbox"
+                        checked={draft.killSwitch}
+                        onChange={(event) =>
+                          updateDraft(flag.key, {
+                            ...draft,
+                            killSwitch: event.target.checked,
+                          })
+                        }
+                      />
+                      Kill Switch
+                    </label>
+
+                    <label className="block text-sm text-foreground">
+                      <span className="mb-1 block text-xs font-medium uppercase text-muted-foreground">
+                        Rollout Percentage
+                      </span>
+                      <input
+                        value={draft.rolloutPercentage}
+                        onChange={(event) =>
+                          updateDraft(flag.key, {
+                            ...draft,
+                            rolloutPercentage: event.target.value,
+                          })
+                        }
+                        inputMode="numeric"
+                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground"
+                      />
+                    </label>
+
+                    <div className="rounded-lg border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
+                      <p>Environment Controls</p>
+                      <div className="mt-2 flex flex-wrap gap-4 text-sm text-foreground">
+                        <label className="inline-flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={draft.enabledInDevelopment}
+                            onChange={(event) =>
+                              updateDraft(flag.key, {
+                                ...draft,
+                                enabledInDevelopment: event.target.checked,
+                              })
+                            }
+                          />
+                          Development
+                        </label>
+                        <label className="inline-flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={draft.enabledInStaging}
+                            onChange={(event) =>
+                              updateDraft(flag.key, {
+                                ...draft,
+                                enabledInStaging: event.target.checked,
+                              })
+                            }
+                          />
+                          Staging
+                        </label>
+                        <label className="inline-flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={draft.enabledInProduction}
+                            onChange={(event) =>
+                              updateDraft(flag.key, {
+                                ...draft,
+                                enabledInProduction: event.target.checked,
+                              })
+                            }
+                          />
+                          Production
+                        </label>
+                      </div>
+                    </div>
+
+                    <label className="block text-sm text-foreground">
+                      <span className="mb-1 block text-xs font-medium uppercase text-muted-foreground">
+                        Include Clerk User IDs
+                      </span>
+                      <textarea
+                        value={draft.includeClerkUserIds}
+                        onChange={(event) =>
+                          updateDraft(flag.key, {
+                            ...draft,
+                            includeClerkUserIds: event.target.value,
+                          })
+                        }
+                        rows={3}
+                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground"
+                        placeholder="clerk_user_1, clerk_user_2"
+                      />
+                    </label>
+
+                    <label className="block text-sm text-foreground">
+                      <span className="mb-1 block text-xs font-medium uppercase text-muted-foreground">
+                        Exclude Clerk User IDs
+                      </span>
+                      <textarea
+                        value={draft.excludeClerkUserIds}
+                        onChange={(event) =>
+                          updateDraft(flag.key, {
+                            ...draft,
+                            excludeClerkUserIds: event.target.value,
+                          })
+                        }
+                        rows={3}
+                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground"
+                        placeholder="clerk_user_3"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="flex items-center justify-between border-t border-border px-4 py-3">
+                    <p className="text-xs text-muted-foreground">
+                      Last updated:{" "}
+                      {flag.updatedAt
+                        ? new Date(flag.updatedAt).toLocaleString()
+                        : "Never"}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      onClick={() => {
+                        void saveFlag(flag);
+                      }}
+                      disabled={busyKey === flag.key}
+                    >
+                      {busyKey === flag.key ? "Saving..." : "Save"}
+                    </Button>
+                  </div>
+                </section>
+              );
+            })}
+
+            {effectiveNextCursor && (
+              <div className="flex items-center justify-between rounded-xl border border-border bg-card p-4 shadow-sm">
+                <span className="text-xs text-muted-foreground">
+                  Showing {sortedFlags.length} flags
+                </span>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    void loadMoreFlags();
+                  }}
+                  disabled={isLoadingMore}
+                >
+                  {isLoadingMore ? "Loading more..." : "Load more flags"}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+      </PageContainer>
     </AdminGuard>
   );
 }

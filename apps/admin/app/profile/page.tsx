@@ -1,65 +1,173 @@
 "use client";
-import { useUser } from "@clerk/nextjs";
-import Image from "next/image";
-import { useState } from "react";
+
+import { PageContainer } from "@/components/page-container";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { UserAvatar } from "@/components/user-avatar";
+import { api } from "@repo/backend/convex";
+import { SignedIn, SignedOut, useUser } from "@clerk/nextjs";
+import { useConvexAuth, useQuery } from "convex/react";
+import dynamic from "next/dynamic";
+import Link from "next/link";
+import { useTheme } from "next-themes";
+import { memo, useMemo } from "react";
 
 const hasClerk = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
-function NoAuthProfile() {
-  return (
-    <div className="container profile-card action-card">
-      <h2 className="profile-name">Auth not configured</h2>
-      <p className="profile-email">
-        Set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY to enable profiles.
-      </p>
-    </div>
-  );
-}
+const ClerkUserProfile = dynamic(
+  () => import("@clerk/nextjs").then((m) => m.UserProfile),
+  {
+    ssr: false,
+    loading: () => (
+      <Skeleton className="mx-auto h-[420px] w-full max-w-3xl rounded-2xl" />
+    ),
+  },
+);
 
-function ClerkProfile() {
+const ProfileContent = memo(function ProfileContent() {
   const { user, isLoaded } = useUser();
+  const { isAuthenticated } = useConvexAuth();
+  const { resolvedTheme } = useTheme();
+  const isAdmin = useQuery(
+    api.users.isCurrentUserAdmin,
+    isAuthenticated ? {} : "skip",
+  );
 
-  const fallbackSrc = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='%2363b3ed'/%3E%3Cpath d='M50 45c7.5 0 13.64-6.14 13.64-13.64S57.5 17.72 50 17.72s-13.64 6.14-13.64 13.64S42.5 45 50 45zm0 6.82c-9.09 0-27.28 4.56-27.28 13.64v3.41c0 1.88 1.53 3.41 3.41 3.41h47.74c1.88 0 3.41-1.53 3.41-3.41v-3.41c0-9.08-18.19-13.64-27.28-13.64z' fill='%23fff'/%3E%3C/svg%3E`;
-
-  const picture = user?.imageUrl ?? null;
-  const [failedPicture, setFailedPicture] = useState<string | null>(null);
-
-  const imgSrc = picture && failedPicture !== picture ? picture : fallbackSrc;
+  const clerkAppearance = useMemo(() => {
+    const dark = resolvedTheme === "dark";
+    return {
+      variables: {
+        colorBackground: dark ? "#18181b" : "#ffffff",
+        colorInputBackground: dark ? "#09090b" : "#fafafa",
+        colorText: dark ? "#fafafa" : "#18181b",
+        colorTextSecondary: dark ? "#a1a1aa" : "#71717a",
+        colorNeutral: dark ? "#27272a" : "#f4f4f5",
+        colorPrimary: dark ? "#fafafa" : "#18181b",
+        colorTextOnPrimaryBackground: dark ? "#18181b" : "#fafafa",
+      },
+      elements: {
+        rootBox: "w-full flex justify-center",
+        card: "shadow-sm rounded-2xl w-full max-w-3xl border border-border bg-card",
+        pageScrollBox: "p-4",
+      },
+    };
+  }, [resolvedTheme]);
 
   if (!isLoaded) {
     return (
-      <div className="loading-state">
-        <div className="loading-text">Loading user profile...</div>
+      <div className="space-y-4">
+        <Skeleton className="h-24 w-full rounded-2xl" />
+        <Skeleton className="h-48 w-full rounded-2xl" />
       </div>
     );
   }
 
   if (!user) {
-    return null;
+    return (
+      <p className="text-sm text-muted-foreground">
+        Sign in to view your profile.{" "}
+        <Link href="/sign-in" className="font-medium text-foreground underline">
+          Sign in
+        </Link>
+      </p>
+    );
   }
 
+  const fallback =
+    user.firstName?.trim() ||
+    user.primaryEmailAddress?.emailAddress?.trim() ||
+    "User";
+  const roleLabel =
+    isAdmin === true ? "Administrator" : isAdmin === false ? "Standard" : "…";
+
   return (
-    <div className="container profile-card action-card">
-      <Image
-        src={imgSrc}
-        alt={user.fullName || "User profile"}
-        className="profile-picture"
-        width={100}
-        height={100}
-        sizes="100px"
-        unoptimized
-        onError={() => setFailedPicture(picture)}
-      />
-      <h2 className="profile-name">{user.fullName}</h2>
-      <p className="profile-email">{user.primaryEmailAddress?.emailAddress}</p>
+    <div className="flex flex-col gap-6">
+      <Card className="overflow-hidden border-border bg-card shadow-sm">
+        <CardHeader className="flex flex-row flex-wrap items-start gap-5 border-b border-border pb-6">
+          <UserAvatar
+            src={user.imageUrl}
+            alt={user.fullName || "Profile"}
+            fallbackLabel={fallback}
+            size="xl"
+            className="ring-2 ring-border"
+          />
+          <div className="min-w-0 flex-1 space-y-1">
+            <CardTitle className="text-lg font-semibold">
+              {user.fullName || fallback}
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              {user.primaryEmailAddress?.emailAddress}
+            </p>
+            <div className="flex flex-wrap gap-2 pt-2 text-xs text-muted-foreground">
+              <span className="rounded-full border border-border bg-muted px-2.5 py-0.5 font-medium text-foreground">
+                Role: {roleLabel}
+              </span>
+              <span>
+                Joined{" "}
+                {user.createdAt ? user.createdAt.toLocaleDateString() : "—"}
+              </span>
+              {user.updatedAt ? (
+                <span>Profile updated {user.updatedAt.toLocaleString()}</span>
+              ) : null}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-6">
+          <p className="mb-4 text-sm text-muted-foreground">
+            Update your photo, name, and security settings with Clerk. Changes
+            sync to this console after you save.
+          </p>
+          <div className="flex justify-center">
+            <ClerkUserProfile appearance={clerkAppearance} />
+          </div>
+        </CardContent>
+      </Card>
     </div>
+  );
+});
+
+function NoClerkProfile() {
+  return (
+    <Card>
+      <CardContent className="py-10 text-center text-sm text-muted-foreground">
+        Set{" "}
+        <code className="rounded bg-muted px-1 py-0.5 text-foreground">
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+        </code>{" "}
+        to enable authentication and profile management.
+      </CardContent>
+    </Card>
   );
 }
 
-export default function Profile() {
+export default function ProfilePage() {
   if (!hasClerk) {
-    return <NoAuthProfile />;
+    return (
+      <PageContainer title="Profile" description="Your account">
+        <NoClerkProfile />
+      </PageContainer>
+    );
   }
 
-  return <ClerkProfile />;
+  return (
+    <PageContainer
+      title="Profile"
+      description="Your DayLog identity and account settings."
+    >
+      <SignedOut>
+        <p className="text-sm text-muted-foreground">
+          <Link
+            href="/sign-in"
+            className="font-medium text-foreground underline"
+          >
+            Sign in
+          </Link>{" "}
+          to view your profile.
+        </p>
+      </SignedOut>
+      <SignedIn>
+        <ProfileContent />
+      </SignedIn>
+    </PageContainer>
+  );
 }

@@ -13,6 +13,15 @@ import {
 import { useState } from "react";
 import Link from "next/link";
 
+import { PageContainerWide } from "@/components/page-container";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  tableActionsCellClass,
+  tableActionsHeaderClass,
+  tableActionsInnerClass,
+} from "@/lib/table-actions";
+
 export default function PreferencesPage() {
   const listUserPreferencesPaginatedRef = makeFunctionReference<"query">(
     "admin:listUserPreferencesPaginated",
@@ -55,178 +64,184 @@ export default function PreferencesPage() {
 
   return (
     <AdminGuard>
-      <div className="min-h-screen bg-gray-50 py-10">
-        <div className="max-w-6xl mx-auto px-6">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h1 className="text-2xl font-semibold text-gray-900">
-                User Preferences
-              </h1>
-              <p className="text-sm text-gray-500 mt-1">
-                All rows from the <code>userPreferences</code> table.
-              </p>
-            </div>
-
-            <Link
-              href="/preferences/create"
-              className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-            >
-              Create Preference
-            </Link>
+      <PageContainerWide
+        title="User preferences"
+        description={
+          <>
+            All rows from the{" "}
+            <code className="rounded-md bg-muted px-1.5 py-0.5 text-xs">
+              userPreferences
+            </code>{" "}
+            table.
+          </>
+        }
+        action={
+          <Button variant="primary" asChild>
+            <Link href="/preferences/create">Create preference</Link>
+          </Button>
+        }
+      >
+        {deleteError && (
+          <div className="mb-4 rounded-lg border border-border bg-muted px-4 py-3 text-sm text-foreground">
+            {deleteError}
           </div>
+        )}
 
-          {deleteError && (
-            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {deleteError}
-            </div>
-          )}
-
-          <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-            <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-              {preferencesStatus === "LoadingFirstPage" ? (
-                <div className="p-6 text-sm text-gray-600">
-                  Loading preferences…
-                </div>
-              ) : preferences.length === 0 ? (
-                <div className="p-6 text-sm text-gray-600">
-                  No preferences yet.
-                </div>
-              ) : (
-                <>
-                  <div className="overflow-auto">
-                    <table className="min-w-full text-sm">
-                      <thead className="bg-gray-50 text-gray-600">
-                        <tr>
-                          <th className="text-left font-medium px-4 py-3">
-                            User
-                          </th>
-                          <th className="text-left font-medium px-4 py-3">
-                            Reminder
-                          </th>
-                          <th className="text-left font-medium px-4 py-3">
-                            Focus Areas
-                          </th>
-                          <th className="text-left font-medium px-4 py-3">
-                            Updated
-                          </th>
-                          <th className="text-left font-medium px-4 py-3">
-                            Actions
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {preferences.map((row) => (
-                          <tr
-                            key={row._id}
-                            className={`cursor-pointer hover:bg-gray-50 ${selectedId === row._id ? "bg-blue-50/50" : ""}`}
-                            onClick={() => setSelectedId(row._id)}
-                          >
-                            <td className="px-4 py-3">
-                              {row.email && (
-                                <div className="text-sm text-gray-900">
-                                  {row.email}
-                                </div>
-                              )}
-                              <div className="font-mono text-xs text-gray-500">
-                                {row.clerkUserId}
+        <div className="grid min-w-0 max-w-full gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+          <div className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+            {preferencesStatus === "LoadingFirstPage" ? (
+              <div className="space-y-2 p-4">
+                <Skeleton className="h-10 w-full rounded-lg" />
+                <Skeleton className="h-10 w-full rounded-lg" />
+                <Skeleton className="h-10 w-full rounded-lg" />
+              </div>
+            ) : preferences.length === 0 ? (
+              <div className="p-6 text-sm text-muted-foreground">
+                No preferences yet.
+              </div>
+            ) : (
+              <>
+                <div className="max-w-full overflow-x-auto overscroll-x-contain">
+                  <table className="min-w-[860px] w-full text-sm">
+                    <thead className="bg-muted/50 text-muted-foreground">
+                      <tr>
+                        <th className="text-left font-medium px-4 py-3">
+                          User
+                        </th>
+                        <th className="text-left font-medium px-4 py-3">
+                          Reminder
+                        </th>
+                        <th className="text-left font-medium px-4 py-3">
+                          Focus Areas
+                        </th>
+                        <th className="text-left font-medium px-4 py-3">
+                          Updated
+                        </th>
+                        <th className={tableActionsHeaderClass}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {preferences.map((row) => (
+                        <tr
+                          key={row._id}
+                          className={`cursor-pointer hover:bg-muted/50 ${selectedId === row._id ? "bg-muted/80" : ""}`}
+                          onClick={() => setSelectedId(row._id)}
+                        >
+                          <td className="max-w-[280px] px-4 py-3">
+                            {row.email && (
+                              <div className="text-sm text-foreground">
+                                {row.email}
                               </div>
-                            </td>
-                            <td className="px-4 py-3 text-gray-600">
-                              {row.reminderType} — {row.formattedTime}
-                            </td>
-                            <td className="px-4 py-3 text-gray-600 text-xs">
-                              [{row.focusAreas.join(", ")}]
-                            </td>
-                            <td className="px-4 py-3 text-gray-600">
-                              {new Date(row.updatedAt).toLocaleString()}
-                            </td>
-                            <td className="px-4 py-3">
-                              <Link
-                                href={`/preferences/edit/${row._id}`}
-                                className="inline-flex items-center rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700"
-                                onClick={(event) => event.stopPropagation()}
-                              >
-                                Edit
-                              </Link>
-                              <button
+                            )}
+                            <div className="break-all font-mono text-xs text-muted-foreground">
+                              {row.clerkUserId}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {row.reminderType} — {row.formattedTime}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground text-xs">
+                            [{row.focusAreas.join(", ")}]
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {new Date(row.updatedAt).toLocaleString()}
+                          </td>
+                          <td className={tableActionsCellClass}>
+                            <div className={tableActionsInnerClass}>
+                              <Button variant="primary" size="sm" asChild>
+                                <Link
+                                  href={`/preferences/edit/${row._id}`}
+                                  onClick={(event) => event.stopPropagation()}
+                                >
+                                  Edit
+                                </Link>
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outlineDestructive"
+                                size="sm"
                                 onClick={(event) => {
                                   event.stopPropagation();
-                                  onDelete(row._id);
+                                  void onDelete(row._id);
                                 }}
-                                className="ml-2 inline-flex items-center rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700"
                               >
                                 Delete
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {preferencesStatus === "CanLoadMore" && (
-                    <div className="border-t border-gray-100 p-4">
-                      <button
-                        onClick={() => loadMore(25)}
-                        className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
-                      >
-                        Load more preferences
-                      </button>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-
-            <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5">
-              <h2 className="text-base font-semibold text-gray-900 mb-3">
-                Preference Detail
-              </h2>
-              {!selectedId ? (
-                <p className="text-sm text-gray-600">
-                  Select a row to inspect a preference.
-                </p>
-              ) : selectedPreference === undefined ? (
-                <p className="text-sm text-gray-600">Loading detail…</p>
-              ) : (
-                <div className="space-y-3 text-sm">
-                  <div>
-                    <p className="text-xs text-gray-500">Clerk User ID</p>
-                    <p className="font-mono text-xs text-gray-800">
-                      {selectedPreference.clerkUserId}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Reminder</p>
-                    <p className="text-gray-800">
-                      {selectedPreference.reminderType} —{" "}
-                      {selectedPreference.formattedTime}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Daily Time</p>
-                    <p className="text-gray-800">
-                      {selectedPreference.dailyTime}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Weekly Day</p>
-                    <p className="text-gray-800">
-                      {selectedPreference.weeklyDay}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Focus Areas</p>
-                    <p className="text-gray-800">
-                      [{selectedPreference.focusAreas.join(", ")}]
-                    </p>
-                  </div>
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              )}
-            </div>
+
+                {preferencesStatus === "CanLoadMore" && (
+                  <div className="border-t border-border p-4">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => loadMore(25)}
+                    >
+                      Load more preferences
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          <div className="min-w-0 max-w-full rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
+            <h2 className="text-base font-semibold text-foreground mb-3">
+              Preference detail
+            </h2>
+            {!selectedId ? (
+              <p className="text-sm text-muted-foreground">
+                Select a row to inspect a preference.
+              </p>
+            ) : selectedPreference === undefined ? (
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-2/3 rounded-md" />
+                <Skeleton className="h-4 w-full rounded-md" />
+              </div>
+            ) : (
+              <div className="space-y-3 text-sm">
+                <div>
+                  <p className="text-xs text-muted-foreground">Clerk User ID</p>
+                  <p className="font-mono text-xs text-foreground">
+                    {selectedPreference.clerkUserId}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Reminder</p>
+                  <p className="text-foreground">
+                    {selectedPreference.reminderType} —{" "}
+                    {selectedPreference.formattedTime}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Daily Time</p>
+                  <p className="text-foreground">
+                    {selectedPreference.dailyTime}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Weekly Day</p>
+                  <p className="text-foreground">
+                    {selectedPreference.weeklyDay}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Focus Areas</p>
+                  <p className="text-foreground">
+                    [{selectedPreference.focusAreas.join(", ")}]
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
-      </div>
+      </PageContainerWide>
     </AdminGuard>
   );
 }

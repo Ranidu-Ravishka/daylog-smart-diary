@@ -59,7 +59,7 @@ export default function UserOwnerSelector({
 
   return (
     <div className="mb-6 space-y-2">
-      <label className="block text-sm font-medium text-gray-700 mb-1">
+      <label className="block text-sm font-medium text-foreground mb-1">
         Owner (User)
       </label>
       <input
@@ -67,12 +67,12 @@ export default function UserOwnerSelector({
         value={search}
         onChange={(event) => setSearch(event.target.value)}
         placeholder="Search loaded users by email, Clerk ID, or user ID"
-        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        className="w-full rounded-lg border border-border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-ring  "
       />
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        className="w-full rounded-lg border border-border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-ring  "
       >
         <option value="">Select a user...</option>
         {filteredUsers.map((user) => {
@@ -91,13 +91,13 @@ export default function UserOwnerSelector({
         <button
           type="button"
           onClick={() => loadMore(50)}
-          className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
+          className="inline-flex items-center rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm transition hover:bg-muted"
         >
           Load more users
         </button>
       )}
 
-      <p className="text-xs text-gray-500">{helperText}</p>
+      <p className="text-xs text-muted-foreground">{helperText}</p>
     </div>
   );
 }

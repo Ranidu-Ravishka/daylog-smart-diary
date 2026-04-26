@@ -112,16 +112,20 @@ export default function MemoryForm({
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-10">
+    <div className="w-full">
       <div className="max-w-3xl mx-auto px-6">
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-8">
+        <div className="bg-card border border-border rounded-xl shadow-sm p-8">
           <div className="mb-6">
-            <h1 className="text-2xl font-semibold text-gray-900">{title}</h1>
+            <h1 className="text-xl font-semibold text-foreground">{title}</h1>
             {description ? (
-              <p className="text-sm text-gray-500 mt-1">{description}</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                {description}
+              </p>
             ) : null}
             {ownerLabel ? (
-              <p className="text-xs text-gray-400 mt-1">Owner: {ownerLabel}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Owner: {ownerLabel}
+              </p>
             ) : null}
           </div>
 
@@ -129,7 +133,7 @@ export default function MemoryForm({
             <div>
               <label
                 htmlFor="memTitle"
-                className="block text-sm font-medium text-gray-700"
+                className="block text-sm font-medium text-foreground"
               >
                 Title
               </label>
@@ -142,14 +146,14 @@ export default function MemoryForm({
                   resetStatus();
                 }}
                 required
-                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-sm shadow-sm bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
 
             <div>
               <label
                 htmlFor="desc"
-                className="block text-sm font-medium text-gray-700"
+                className="block text-sm font-medium text-foreground"
               >
                 Description
               </label>
@@ -161,14 +165,14 @@ export default function MemoryForm({
                   resetStatus();
                 }}
                 rows={4}
-                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-sm shadow-sm bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
 
             <div>
               <label
                 htmlFor="mood"
-                className="block text-sm font-medium text-gray-700"
+                className="block text-sm font-medium text-foreground"
               >
                 Mood
               </label>
@@ -181,14 +185,14 @@ export default function MemoryForm({
                   resetStatus();
                 }}
                 placeholder="e.g. happy, sad, neutral"
-                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-sm shadow-sm bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
 
             <div>
               <label
                 htmlFor="happenedAt"
-                className="block text-sm font-medium text-gray-700"
+                className="block text-sm font-medium text-foreground"
               >
                 Happened At
               </label>
@@ -201,14 +205,14 @@ export default function MemoryForm({
                   resetStatus();
                 }}
                 required
-                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-sm shadow-sm bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
 
             <div>
               <label
                 htmlFor="dayKey"
-                className="block text-sm font-medium text-gray-700"
+                className="block text-sm font-medium text-foreground"
               >
                 Day Key
               </label>
@@ -222,7 +226,7 @@ export default function MemoryForm({
                 }}
                 placeholder="YYYY-MM-DD"
                 required
-                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-sm shadow-sm bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
 
@@ -230,15 +234,17 @@ export default function MemoryForm({
               <button
                 type="submit"
                 disabled={status === "saving"}
-                className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                className="inline-flex items-center rounded-xl bg-foreground px-4 py-2 text-sm font-semibold text-background shadow-sm transition hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {status === "saving" ? savingLabel : submitLabel}
               </button>
               {status === "saved" && (
-                <span className="text-sm text-green-600">{successMessage}</span>
+                <span className="text-sm text-muted-foreground">
+                  {successMessage}
+                </span>
               )}
               {status === "error" && (
-                <span className="text-sm text-red-600">
+                <span className="text-sm text-foreground">
                   {errorMessage ?? "Something went wrong."}
                 </span>
               )}

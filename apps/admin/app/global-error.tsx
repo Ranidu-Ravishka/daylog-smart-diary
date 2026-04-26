@@ -19,17 +19,18 @@ export default function GlobalError({
 
   return (
     <html lang="en">
-      <body className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
-        <div className="w-full max-w-lg rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h1 className="text-lg font-semibold text-gray-900">
+      <body className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground antialiased">
+        <div className="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-sm">
+          <h1 className="text-lg font-semibold text-foreground">
             A critical error occurred
           </h1>
-          <p className="mt-2 text-sm text-gray-600">
+          <p className="mt-2 text-sm text-muted-foreground">
             The admin app hit an unrecoverable rendering error.
           </p>
           <button
+            type="button"
             onClick={reset}
-            className="mt-4 inline-flex items-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+            className="mt-4 inline-flex items-center rounded-xl bg-foreground px-3 py-2 text-sm font-semibold text-background shadow-sm transition hover:bg-foreground/90"
           >
             Retry
           </button>

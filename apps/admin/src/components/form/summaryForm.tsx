@@ -121,16 +121,20 @@ export default function SummaryForm({
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-10">
+    <div className="w-full">
       <div className="max-w-3xl mx-auto px-6">
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-8">
+        <div className="bg-card border border-border rounded-xl shadow-sm p-8">
           <div className="mb-6">
-            <h1 className="text-2xl font-semibold text-gray-900">{title}</h1>
+            <h1 className="text-xl font-semibold text-foreground">{title}</h1>
             {description ? (
-              <p className="text-sm text-gray-500 mt-1">{description}</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                {description}
+              </p>
             ) : null}
             {ownerLabel ? (
-              <p className="text-xs text-gray-400 mt-1">Owner: {ownerLabel}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Owner: {ownerLabel}
+              </p>
             ) : null}
           </div>
 
@@ -138,7 +142,7 @@ export default function SummaryForm({
             <div>
               <label
                 htmlFor="dayKey"
-                className="block text-sm font-medium text-gray-700"
+                className="block text-sm font-medium text-foreground"
               >
                 Day Key
               </label>
@@ -152,14 +156,14 @@ export default function SummaryForm({
                 }}
                 placeholder="YYYY-MM-DD"
                 required
-                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-sm shadow-sm bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
 
             <div>
               <label
                 htmlFor="story"
-                className="block text-sm font-medium text-gray-700"
+                className="block text-sm font-medium text-foreground"
               >
                 Story
               </label>
@@ -172,14 +176,14 @@ export default function SummaryForm({
                 }}
                 rows={6}
                 required
-                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-sm shadow-sm bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
 
             <div>
               <label
                 htmlFor="highlights"
-                className="block text-sm font-medium text-gray-700"
+                className="block text-sm font-medium text-foreground"
               >
                 Highlights (one per line)
               </label>
@@ -192,14 +196,14 @@ export default function SummaryForm({
                 }}
                 rows={4}
                 placeholder="Each line becomes a separate highlight"
-                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-sm shadow-sm bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
 
             <div>
               <label
                 htmlFor="sourcesUsed"
-                className="block text-sm font-medium text-gray-700"
+                className="block text-sm font-medium text-foreground"
               >
                 Sources Used (comma-separated)
               </label>
@@ -212,7 +216,7 @@ export default function SummaryForm({
                   resetStatus();
                 }}
                 placeholder="e.g. calendar, health, photos"
-                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-sm shadow-sm bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
 
@@ -220,15 +224,17 @@ export default function SummaryForm({
               <button
                 type="submit"
                 disabled={status === "saving"}
-                className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                className="inline-flex items-center rounded-xl bg-foreground px-4 py-2 text-sm font-semibold text-background shadow-sm transition hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {status === "saving" ? savingLabel : submitLabel}
               </button>
               {status === "saved" && (
-                <span className="text-sm text-green-600">{successMessage}</span>
+                <span className="text-sm text-muted-foreground">
+                  {successMessage}
+                </span>
               )}
               {status === "error" && (
-                <span className="text-sm text-red-600">
+                <span className="text-sm text-foreground">
                   {errorMessage ?? "Something went wrong."}
                 </span>
               )}

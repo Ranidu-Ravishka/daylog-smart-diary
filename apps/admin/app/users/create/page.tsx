@@ -14,7 +14,7 @@ export default function CreateUserPage() {
     <AdminGuard>
       <div className="max-w-2xl mx-auto py-10 px-6">
         <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-foreground mb-1">
             Clerk User ID
           </label>
           <input
@@ -22,9 +22,9 @@ export default function CreateUserPage() {
             value={clerkUserId}
             onChange={(e) => setClerkUserId(e.target.value)}
             placeholder="e.g. user_2abc123..."
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-lg border border-border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-ring "
           />
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="text-xs text-muted-foreground mt-1">
             Required. The Clerk user identifier to associate with this user
             record.
           </p>

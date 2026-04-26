@@ -24,18 +24,20 @@ export default function EditMemoryPage() {
 
   if (!memoryId) {
     return (
-      <div className="p-6 text-sm text-red-600">
+      <div className="p-6 text-sm text-foreground ">
         Missing memory ID parameter.
       </div>
     );
   }
 
   if (existing === undefined) {
-    return <div className="p-6 text-sm text-gray-600">Loading...</div>;
+    return <div className="p-6 text-sm text-muted-foreground">Loading...</div>;
   }
 
   if (existing === null) {
-    return <div className="p-6 text-sm text-red-600">Memory not found.</div>;
+    return (
+      <div className="p-6 text-sm text-foreground ">Memory not found.</div>
+    );
   }
 
   return (

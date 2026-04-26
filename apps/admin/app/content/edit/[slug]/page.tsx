@@ -20,12 +20,14 @@ export default function EditContentPage() {
 
   if (!slug) {
     return (
-      <div className="p-6 text-sm text-red-600">Missing slug parameter.</div>
+      <div className="p-6 text-sm text-foreground ">
+        Missing slug parameter.
+      </div>
     );
   }
 
   if (existing === undefined) {
-    return <div className="p-6 text-sm text-gray-600">Loading...</div>;
+    return <div className="p-6 text-sm text-muted-foreground">Loading...</div>;
   }
 
   return (
