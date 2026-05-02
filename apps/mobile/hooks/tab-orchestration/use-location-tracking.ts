@@ -76,7 +76,12 @@ export function useLocationTracking({
   }, [isLoaded, isSignedIn, sessionId, userId]);
 
   React.useEffect(() => {
-    if (!isAuthenticated || !hasLoadedLaunchPreferences) {
+    if (
+      !isLoaded ||
+      !isSignedIn ||
+      !isAuthenticated ||
+      !hasLoadedLaunchPreferences
+    ) {
       return;
     }
 
@@ -175,6 +180,8 @@ export function useLocationTracking({
     };
   }, [
     hasLoadedLaunchPreferences,
+    isLoaded,
+    isSignedIn,
     isAuthenticated,
     locationTrackingEnabled,
     updateMyLocationTrackingState,
@@ -183,6 +190,8 @@ export function useLocationTracking({
 
   React.useEffect(() => {
     if (
+      !isLoaded ||
+      !isSignedIn ||
       !isAuthenticated ||
       !hasLoadedLaunchPreferences ||
       locationTrackingRuntimeConfig === undefined
@@ -286,6 +295,8 @@ export function useLocationTracking({
   }, [
     backgroundLocationTrackingEnabled,
     hasLoadedLaunchPreferences,
+    isLoaded,
+    isSignedIn,
     isAuthenticated,
     locationTrackingEnabled,
     locationTrackingRuntimeConfig,

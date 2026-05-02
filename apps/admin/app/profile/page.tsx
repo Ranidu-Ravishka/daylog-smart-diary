@@ -37,13 +37,13 @@ const ProfileContent = memo(function ProfileContent() {
     const dark = resolvedTheme === "dark";
     return {
       variables: {
-        colorBackground: dark ? "#18181b" : "#ffffff",
-        colorInputBackground: dark ? "#09090b" : "#fafafa",
-        colorText: dark ? "#fafafa" : "#18181b",
-        colorTextSecondary: dark ? "#a1a1aa" : "#71717a",
-        colorNeutral: dark ? "#27272a" : "#f4f4f5",
-        colorPrimary: dark ? "#fafafa" : "#18181b",
-        colorTextOnPrimaryBackground: dark ? "#18181b" : "#fafafa",
+        colorBackground: dark ? "#1E1E1E" : "#FFFFFF",
+        colorInputBackground: dark ? "#1E1E1E" : "#FFFFFF",
+        colorText: dark ? "#EAEAEA" : "#1A1A1A",
+        colorTextSecondary: dark ? "#A0A0A0" : "#6B6B6B",
+        colorNeutral: dark ? "#232323" : "#F2F2F2",
+        colorPrimary: dark ? "#3F5661" : "#2F3E46",
+        colorTextOnPrimaryBackground: "#FFFFFF",
       },
       elements: {
         rootBox: "w-full flex justify-center",

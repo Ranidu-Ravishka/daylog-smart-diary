@@ -98,8 +98,9 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   initials: {
-    ...Typography.bodyMedium,
-    fontWeight: "700",
+    ...Typography.h3,
+    fontSize: 16,
+    lineHeight: 25,
   },
   editBadge: {
     position: "absolute",

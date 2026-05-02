@@ -42,19 +42,18 @@ const styles = StyleSheet.create({
     ...Typography.body,
   },
   defaultSemiBold: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.h3,
+    fontSize: 16,
+    lineHeight: 25,
   },
   title: {
-    ...Typography.largeTitle,
-    fontWeight: "700",
+    ...Typography.h1,
   },
   subtitle: {
-    ...Typography.title2,
-    fontWeight: "600",
+    ...Typography.h3,
   },
   link: {
-    ...Typography.bodyMedium,
+    ...Typography.button,
     textDecorationLine: "underline",
   },
 });

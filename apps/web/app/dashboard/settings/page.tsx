@@ -21,7 +21,7 @@ import {
   getResolvedTimeZone,
 } from "@repo/ui/lib/day-window";
 import type { GenericId } from "convex/values";
-import { useUser } from "@clerk/nextjs";
+import { useAuth, useUser } from "@clerk/nextjs";
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Check, RefreshCcw } from "lucide-react";
@@ -138,8 +138,11 @@ export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { setThemePreference } = useWebThemePreference();
+  const { isLoaded, isSignedIn } = useAuth();
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
   const { user } = useUser();
+  const canUseIntegrationApis = isLoaded && isSignedIn && isAuthenticated;
+
   const userTimeZone = getResolvedTimeZone();
   const todayDayKey = getDayKeyForTimestamp(Date.now(), userTimeZone);
 
@@ -149,15 +152,15 @@ export default function SettingsPage() {
   );
   const supportedProviders = useQuery(
     api.integrations.listSupportedProviders,
-    isAuthenticated ? {} : "skip",
+    canUseIntegrationApis ? {} : "skip",
   );
   const integrations = useQuery(
     api.integrations.listMyIntegrations,
-    isAuthenticated ? {} : "skip",
+    canUseIntegrationApis ? {} : "skip",
   ) as IntegrationDoc[] | undefined;
   const syncRuns = useQuery(
     api.integrations.listMyIntegrationSyncRunsForDay,
-    isAuthenticated ? { dayKey: todayDayKey } : "skip",
+    canUseIntegrationApis ? { dayKey: todayDayKey } : "skip",
   ) as IntegrationSyncRunDoc[] | undefined;
 
   const syncPreferences = useMutation(
@@ -352,6 +355,7 @@ export default function SettingsPage() {
   };
 
   const handleConnect = async (provider: string) => {
+    if (!canUseIntegrationApis) return;
     const providerStatus =
       INTEGRATION_PROVIDER_STATUS[
         provider as keyof typeof INTEGRATION_PROVIDER_STATUS
@@ -404,6 +408,7 @@ export default function SettingsPage() {
   };
 
   const handleDisconnect = async (provider: string) => {
+    if (!canUseIntegrationApis) return;
     const integration = integrationByProvider.get(provider);
     if (!integration) return;
 
@@ -425,6 +430,14 @@ export default function SettingsPage() {
   };
 
   const handleSync = async (provider: string) => {
+    if (!canUseIntegrationApis) return;
+    if (provider === "spotify") {
+      const spotifyIntegration = integrationByProvider.get("spotify");
+      if (spotifyIntegration?.status !== "connected") {
+        toastError("Spotify is not connected. Reconnect Spotify to sync.");
+        return;
+      }
+    }
     logInfo("web_integration_sync_started", {
       status: "started",
       provider,
@@ -438,6 +451,10 @@ export default function SettingsPage() {
         dayKey: todayDayKey,
         timeZone: userTimeZone,
       });
+      if (result?.success === false && result.reason === "reauth_required") {
+        toastError("Spotify session expired. Please reconnect Spotify.");
+        return;
+      }
 
       if (result?.idempotent) {
         logInfo("web_integration_sync_skipped", {
@@ -472,15 +489,15 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="max-w-xl">
+    <div className="max-w-xl pb-4">
       <h1 className="text-xl font-semibold tracking-tight mb-1">Settings</h1>
       <p className="text-sm text-muted-foreground mb-8">
         Manage your preferences and reflection schedule.
       </p>
 
       {/* ── Profile ───────────────────────────────────── */}
-      <Card className="mb-6">
-        <CardContent className="p-5 flex items-center gap-4">
+      <Card className="mb-6 bg-card/95">
+        <CardContent className="flex items-center gap-4 p-5">
           <Avatar className="h-12 w-12">
             {user?.imageUrl && (
               <AvatarImage src={user.imageUrl} alt="Profile" />
@@ -502,7 +519,7 @@ export default function SettingsPage() {
       </Card>
 
       {/* ── Focus Areas ───────────────────────────────── */}
-      <Card className="mb-6">
+      <Card className="mb-6 bg-card/95">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Focus Areas</CardTitle>
           <CardDescription>Choose what matters most to you.</CardDescription>
@@ -518,8 +535,8 @@ export default function SettingsPage() {
                   className={cn(
                     "inline-flex items-center rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
                     isActive
-                      ? "border-foreground bg-foreground text-background"
-                      : "border-input text-muted-foreground hover:text-foreground hover:border-foreground",
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-input-border bg-secondary text-muted-foreground hover:border-border hover:text-foreground",
                   )}
                 >
                   {area.label}
@@ -531,7 +548,7 @@ export default function SettingsPage() {
       </Card>
 
       {/* ── Reminders ─────────────────────────────────── */}
-      <Card className="mb-8">
+      <Card className="mb-8 bg-card/95">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Reminders</CardTitle>
           <CardDescription>
@@ -590,7 +607,7 @@ export default function SettingsPage() {
       </Card>
 
       {/* ── Preferences ───────────────────────────────── */}
-      <Card className="mb-6">
+      <Card className="mb-6 bg-card/95">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Appearance</CardTitle>
           <CardDescription>Choose your app theme.</CardDescription>
@@ -616,7 +633,7 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      <Card className="mb-6">
+      <Card className="mb-6 bg-card/95">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Notifications</CardTitle>
           <CardDescription>
@@ -723,7 +740,7 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      <Card className="mb-6">
+      <Card className="mb-6 bg-card/95">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Integrations defaults</CardTitle>
           <CardDescription>
@@ -771,7 +788,7 @@ export default function SettingsPage() {
       </Card>
 
       {/* ── Integrations ──────────────────────────────── */}
-      <Card className="mb-8">
+      <Card className="mb-8 bg-card/95">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Integrations</CardTitle>
           <CardDescription>
@@ -816,7 +833,7 @@ export default function SettingsPage() {
             return (
               <div
                 key={provider}
-                className="rounded-md border border-border p-3 space-y-2"
+                className="space-y-2 rounded-md border border-border bg-secondary p-3"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -836,7 +853,7 @@ export default function SettingsPage() {
                             ? "bg-success/15 text-success"
                             : status === "error"
                               ? "bg-destructive/15 text-destructive"
-                              : "bg-muted text-muted-foreground",
+                              : "bg-background text-muted-foreground",
                     )}
                   >
                     {statusLabel}
@@ -936,14 +953,14 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      <Card className="mb-8">
+      <Card className="mb-8 bg-card/95">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Location data transparency</CardTitle>
           <CardDescription>
             DayLog stores privacy-first location signals only.
           </CardDescription>
         </CardHeader>
-        <CardContent className="pb-5 text-xs text-muted-foreground space-y-1.5">
+        <CardContent className="space-y-1.5 pb-5 text-xs text-muted-foreground">
           <p>
             • Location is opt-in and collected only while the mobile app is
             open.

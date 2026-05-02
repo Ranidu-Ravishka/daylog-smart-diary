@@ -737,7 +737,7 @@ export default function SignUpScreen() {
               >
                 Already have an account?
               </Text>
-              <Link href="/sign-in" asChild>
+              <Link href="/(auth)/sign-in" asChild>
                 <Pressable disabled={isPending}>
                   <Text style={[styles.linkText, { color: colors.tint }]}>
                     Sign in
@@ -858,8 +858,7 @@ function createStyles(colors: ThemeColors) {
       height: 1,
     },
     dividerText: {
-      ...Typography.caption1,
-      fontWeight: "600",
+      ...Typography.label,
       letterSpacing: 0.4,
     },
     card: {
@@ -881,8 +880,7 @@ function createStyles(colors: ThemeColors) {
       gap: Spacing.sm,
     },
     label: {
-      ...Typography.caption1,
-      fontWeight: "600",
+      ...Typography.label,
       letterSpacing: 0.2,
       textTransform: "uppercase",
     },
@@ -896,7 +894,7 @@ function createStyles(colors: ThemeColors) {
     codeInput: {
       letterSpacing: 3,
       textAlign: "center",
-      fontWeight: "600",
+      ...Typography.button,
     },
     passwordInputWrap: {
       position: "relative",
@@ -926,12 +924,10 @@ function createStyles(colors: ThemeColors) {
       marginTop: Spacing.xs,
     },
     rowActionText: {
-      ...Typography.caption1,
-      fontWeight: "600",
+      ...Typography.label,
     },
     rowActionSecondaryText: {
-      ...Typography.caption1,
-      fontWeight: "600",
+      ...Typography.label,
     },
     errorContainer: {
       borderRadius: Radius.md,
@@ -965,8 +961,7 @@ function createStyles(colors: ThemeColors) {
       ...Typography.callout,
     },
     linkText: {
-      ...Typography.callout,
-      fontWeight: "600",
+      ...Typography.button,
     },
     infoFooter: {
       borderRadius: Radius.md,

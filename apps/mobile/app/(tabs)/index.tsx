@@ -551,9 +551,8 @@ function createStyles(c: ThemeColors) {
       marginBottom: Spacing.sm,
     },
     actionLabel: {
-      ...Typography.caption1,
+      ...Typography.label,
       color: c.text,
-      fontWeight: "600",
     },
 
     // Memory list

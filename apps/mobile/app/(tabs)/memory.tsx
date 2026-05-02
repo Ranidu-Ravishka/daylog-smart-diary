@@ -14,6 +14,7 @@ import {
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useAuth } from "@clerk/clerk-expo";
 import {
   useQuery,
   useMutation,
@@ -258,6 +259,7 @@ const DailyDetailView = () => {
   const { colors: c } = useAppTheme();
   const styles = React.useMemo(() => createStyles(c), [c]);
   const router = useRouter();
+  const { isLoaded, isSignedIn } = useAuth();
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
   const [dayKey, setDayKey] = useState(getTodayDayKey());
   const scrollRef = React.useRef<ScrollView>(null);
@@ -294,7 +296,9 @@ const DailyDetailView = () => {
   );
   const rawIntegrationDailyData = useQuery(
     api.integrations.listMyIntegrationDailyDataForDay,
-    isAuthenticated ? { dayKey, refreshToken } : "skip",
+    isLoaded && isSignedIn && isAuthenticated
+      ? { dayKey, refreshToken }
+      : "skip",
   );
   const generateSummaryForDay = useAction(
     api.summaryGeneration.generateSummaryForDay,
@@ -1323,7 +1327,7 @@ function createStyles(c: ThemeColors) {
     },
     filterChipTextSelected: {
       color: c.tint,
-      fontWeight: "600",
+      ...Typography.label,
     },
 
     // Story
@@ -1388,9 +1392,8 @@ function createStyles(c: ThemeColors) {
       gap: 2,
     },
     timelineTimeLabel: {
-      ...Typography.caption1,
+      ...Typography.label,
       color: c.text,
-      fontWeight: "600",
     },
     timelineTitleText: {
       ...Typography.bodyMedium,

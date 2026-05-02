@@ -39,6 +39,42 @@ function shouldUpdateProfileImageFromClerk(
   return source === undefined || source === "clerk";
 }
 
+function resolveFallbackClerkEmail(clerkUserId: string): string {
+  return `${clerkUserId}@daylog.invalid`;
+}
+
+async function createUserFromClerkIdentity(
+  ctx: Pick<MutationCtx, "db">,
+  args: {
+    clerkUserId: string;
+    email: string;
+    firstName?: string;
+    lastName?: string;
+    imageUrl?: string;
+  },
+) {
+  const now = Date.now();
+  const id = await ctx.db.insert("user", {
+    clerkUserId: args.clerkUserId,
+    email: args.email,
+    firstName: args.firstName,
+    lastName: args.lastName,
+    imageUrl: args.imageUrl,
+    profileImageSource: args.imageUrl ? "clerk" : undefined,
+    accountStatus: "active",
+    planTier: "free",
+    isAdmin: false,
+    adminAuthVersion: 0,
+    adminRoleUpdatedAt: now,
+  });
+
+  await applyDashboardMetricsDelta(ctx.db, {
+    totalUsers: 1,
+  });
+
+  return await ctx.db.get(id);
+}
+
 export const getUserIdByClerkIdInternal = internalQuery({
   args: {
     clerkUserId: v.string(),
@@ -778,6 +814,57 @@ export const getUserDeletionJobByIdInternal = internalQuery({
   },
 });
 
+export const ensureUserExists = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: not signed in");
+    }
+
+    const clerkUserId = identity.subject;
+    const existing = await ctx.db
+      .query("user")
+      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", clerkUserId))
+      .unique();
+
+    if (existing) {
+      return {
+        created: false,
+        blocked: false,
+        userId: existing._id,
+      };
+    }
+
+    const latestDeletionJob = await findLatestUserDeletionJobByClerkUserId(
+      ctx,
+      clerkUserId,
+    );
+
+    if (shouldBlockUserSyncDuringDeletion(latestDeletionJob)) {
+      return {
+        created: false,
+        blocked: true,
+        userId: null,
+      };
+    }
+
+    const user = await createUserFromClerkIdentity(ctx, {
+      clerkUserId,
+      email: identity.email?.trim() || resolveFallbackClerkEmail(clerkUserId),
+      firstName: undefined,
+      lastName: undefined,
+      imageUrl: identity.pictureUrl ?? undefined,
+    });
+
+    return {
+      created: true,
+      blocked: false,
+      userId: user?._id ?? null,
+    };
+  },
+});
+
 // ── Sync a user row from Clerk (called by the client after sign-in).
 //    Identity must match the clerkUserId arg.
 export const syncUserFromClerk = mutation({
@@ -821,6 +908,20 @@ async function syncUserRecord(
     imageUrl?: string;
   },
 ) {
+  const latestDeletionJob = await findLatestUserDeletionJobByClerkUserId(
+    ctx,
+    args.clerkUserId,
+  );
+
+  if (shouldBlockUserSyncDuringDeletion(latestDeletionJob)) {
+    logInfo("user.sync.blocked_during_deletion", {
+      clerkUserId: args.clerkUserId,
+      jobId: latestDeletionJob?._id ?? null,
+      jobStatus: latestDeletionJob?.status ?? null,
+    });
+    return null;
+  }
+
   const existing = await ctx.db
     .query("user")
     .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", args.clerkUserId))
@@ -850,34 +951,7 @@ async function syncUserRecord(
     return await ctx.db.get(existing._id);
   }
 
-  const latestDeletionJob = await findLatestUserDeletionJobByClerkUserId(
-    ctx,
-    args.clerkUserId,
-  );
-  if (shouldBlockUserSyncDuringDeletion(latestDeletionJob)) {
-    throw new Error("Account deletion in progress; user sync is blocked");
-  }
-
-  const now = Date.now();
-  const id = await ctx.db.insert("user", {
-    clerkUserId: args.clerkUserId,
-    email: args.email,
-    firstName: args.firstName,
-    lastName: args.lastName,
-    imageUrl: args.imageUrl,
-    profileImageSource: args.imageUrl ? "clerk" : undefined,
-    accountStatus: "active",
-    planTier: "free",
-    isAdmin: false,
-    adminAuthVersion: 0,
-    adminRoleUpdatedAt: now,
-  });
-
-  await applyDashboardMetricsDelta(ctx.db, {
-    totalUsers: 1,
-  });
-
-  return await ctx.db.get(id);
+  return await createUserFromClerkIdentity(ctx, args);
 }
 
 export const getMyProfile = query({

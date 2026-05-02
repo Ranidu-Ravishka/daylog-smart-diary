@@ -6,6 +6,7 @@ import {
   useConvexAuth,
   usePaginatedQuery,
 } from "convex/react";
+import { useAuth } from "@clerk/nextjs";
 import { api } from "@repo/backend/convex";
 import { INTEGRATION_PROVIDER_META, MOOD_EMOJI } from "@repo/ui/lib/constants";
 import {
@@ -172,7 +173,10 @@ function getSummaryGenerationFailureResultMessage(
 const MEMORIES_PAGE_SIZE = 20;
 
 export default function DashboardPage() {
+  const { isLoaded, isSignedIn } = useAuth();
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
+  const canUseIntegrationQueries = isLoaded && isSignedIn && isAuthenticated;
+
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [showMemoryForm, setShowMemoryForm] = useState(false);
   const [editingMemory, setEditingMemory] = useState<MemoryData | null>(null);
@@ -206,7 +210,7 @@ export default function DashboardPage() {
   ) as DashboardDay | undefined;
   const integrationDailyData = useQuery(
     api.integrations.listMyIntegrationDailyDataForDay,
-    isAuthenticated ? { dayKey } : "skip",
+    canUseIntegrationQueries ? { dayKey } : "skip",
   ) as Array<DashboardIntegrationSource> | undefined;
 
   const memoriesWithThumbnail = memories as Array<
@@ -353,22 +357,22 @@ export default function DashboardPage() {
   ].filter((item): item is { label: string; value: string } => Boolean(item));
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-2xl pb-4">
       <DashboardDatePicker
         selectedDate={selectedDate}
         onSelectDate={setSelectedDate}
       />
 
       {/* ── Quick stats ───────────────────────────────── */}
-      <div className="grid grid-cols-3 gap-3 mb-8">
+      <div className="mb-8 grid grid-cols-3 gap-3">
         <Card>
-          <CardContent className="p-4 text-center">
+          <CardContent className="bg-secondary/80 p-4 text-center">
             <p className="text-xl">{latestMemoryMood}</p>
             <p className="mt-1 text-xs text-muted-foreground">Latest mood</p>
           </CardContent>
         </Card>
         <Card>
-          <CardContent className="p-4 text-center">
+          <CardContent className="bg-secondary/80 p-4 text-center">
             <p className="text-xl font-semibold">
               {memoriesWithThumbnail.length}
             </p>
@@ -376,7 +380,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
         <Card>
-          <CardContent className="p-4 text-center">
+          <CardContent className="bg-secondary/80 p-4 text-center">
             <DayRating dayKey={dayKey} initialRating={day?.rating ?? null} />
           </CardContent>
         </Card>
@@ -386,7 +390,7 @@ export default function DashboardPage() {
       <section className="mb-8">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-muted-foreground" />
+            <Sparkles className="h-4 w-4 text-primary" />
             <h2 className="text-sm font-medium">AI Summary</h2>
           </div>
           <Button
@@ -404,7 +408,7 @@ export default function DashboardPage() {
           </p>
         ) : null}
         {summaryGenerationError ? (
-          <Card className="mb-3 border-destructive/30">
+          <Card className="mb-3 border-destructive/40 bg-destructive/10">
             <CardContent className="p-3 text-xs text-destructive">
               {summaryGenerationError}
             </CardContent>
@@ -428,7 +432,7 @@ export default function DashboardPage() {
                         key={i}
                         className="flex items-start gap-2 text-sm text-muted-foreground"
                       >
-                        <span className="mt-1 block h-1 w-1 rounded-full bg-foreground shrink-0" />
+                        <span className="mt-1 block h-1 w-1 shrink-0 rounded-full bg-primary" />
                         {h}
                       </li>
                     ))}
@@ -456,7 +460,7 @@ export default function DashboardPage() {
                       {metricItems.map((metric) => (
                         <div
                           key={metric.label}
-                          className="rounded-md border border-border p-2"
+                          className="rounded-md border border-border bg-secondary p-2"
                         >
                           <p className="text-[11px] text-muted-foreground">
                             {metric.label}
@@ -489,7 +493,7 @@ export default function DashboardPage() {
 
       <section className="mb-8">
         <div className="mb-3 flex items-center gap-2">
-          <Database className="h-4 w-4 text-muted-foreground" />
+          <Database className="h-4 w-4 text-primary" />
           <h2 className="text-sm font-medium">Data sources for this day</h2>
         </div>
 
@@ -501,7 +505,7 @@ export default function DashboardPage() {
               {sourceRows.map((row) => (
                 <div
                   key={`${row.provider}-${row.dayKey}`}
-                  className="rounded-md border border-border p-3"
+                  className="rounded-md border border-border bg-secondary p-3"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 text-sm font-medium">
@@ -567,14 +571,14 @@ export default function DashboardPage() {
 
       {/* ── Memories ──────────────────────────────────── */}
       <section className="mb-8">
-        <div className="flex items-center gap-2 mb-3">
-          <Clock className="h-4 w-4 text-muted-foreground" />
+        <div className="mb-3 flex items-center gap-2">
+          <Clock className="h-4 w-4 text-primary" />
           <h2 className="text-sm font-medium">Memories</h2>
         </div>
         {isMemoriesLoading ? (
           <MemoriesSkeleton />
         ) : memoriesWithThumbnail.length > 0 ? (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {memoriesWithThumbnail.map((memory) => (
               <MemoryCard
                 key={memory._id}
@@ -620,8 +624,8 @@ export default function DashboardPage() {
       {/* ── Notes ─────────────────────────────────────── */}
       {day?.manualNotes && day.manualNotes.length > 0 && (
         <section className="mb-8">
-          <div className="flex items-center gap-2 mb-3">
-            <FileText className="h-4 w-4 text-muted-foreground" />
+          <div className="mb-3 flex items-center gap-2">
+            <FileText className="h-4 w-4 text-primary" />
             <h2 className="text-sm font-medium">Notes</h2>
           </div>
           <Card>
@@ -632,7 +636,7 @@ export default function DashboardPage() {
                     key={i}
                     className="flex items-start gap-2 text-sm text-muted-foreground"
                   >
-                    <span className="mt-1.5 block h-1 w-1 rounded-full bg-foreground shrink-0" />
+                    <span className="mt-1.5 block h-1 w-1 shrink-0 rounded-full bg-primary" />
                     {note}
                   </li>
                 ))}
@@ -645,8 +649,8 @@ export default function DashboardPage() {
       {/* ── People ────────────────────────────────────── */}
       {day?.peopleTags && day.peopleTags.length > 0 && (
         <section>
-          <div className="flex items-center gap-2 mb-3">
-            <Users className="h-4 w-4 text-muted-foreground" />
+          <div className="mb-3 flex items-center gap-2">
+            <Users className="h-4 w-4 text-primary" />
             <h2 className="text-sm font-medium">People</h2>
           </div>
           <div className="flex flex-wrap gap-1.5">

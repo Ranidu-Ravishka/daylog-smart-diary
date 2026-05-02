@@ -17,9 +17,12 @@ export function DashboardVolumeChart({ data }: { data: VolumeDatum[] }) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
 
-  const fill = isDark ? "#fafafa" : "#18181b";
-  const gridStroke = isDark ? "#3f3f46" : "#e4e4e7";
-  const tickFill = isDark ? "#a1a1aa" : "#52525b";
+  const fill = isDark ? "#91B49A" : "#2F3E46";
+  const gridStroke = isDark ? "#2F2F2F" : "#E5E5E5";
+  const tickFill = isDark ? "#A0A0A0" : "#6B6B6B";
+  const tooltipBackground = isDark ? "#1E1E1E" : "#FFFFFF";
+  const tooltipBorder = isDark ? "#2F2F2F" : "#E5E5E5";
+  const tooltipLabel = isDark ? "#EAEAEA" : "#1A1A1A";
 
   return (
     <div className="h-[280px] w-full text-foreground">
@@ -43,14 +46,14 @@ export function DashboardVolumeChart({ data }: { data: VolumeDatum[] }) {
             width={44}
           />
           <Tooltip
-            cursor={{ fill: "rgba(24, 24, 27, 0.06)" }}
+            cursor={{ fill: "rgba(0, 0, 0, 0.04)" }}
             contentStyle={{
               borderRadius: 12,
-              border: "1px solid rgb(228 228 231)",
-              background: "#ffffff",
+              border: `1px solid ${tooltipBorder}`,
+              background: tooltipBackground,
               fontSize: 12,
             }}
-            labelStyle={{ color: "#18181b", fontWeight: 600 }}
+            labelStyle={{ color: tooltipLabel, fontWeight: 600 }}
           />
           <Bar
             dataKey="value"

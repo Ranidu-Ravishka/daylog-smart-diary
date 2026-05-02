@@ -89,6 +89,34 @@ describe("users behavior", () => {
     expect(db.getTable("user")).toHaveLength(2);
   });
 
+  it("creates a missing user record during bootstrap", async () => {
+    const db = createInMemoryDb({
+      user: [baseSeed().user[0]],
+    });
+
+    const ensureUserExists = handler<
+      Record<string, never>,
+      { created: boolean; blocked: boolean; userId: Id<"user"> | null }
+    >(usersModule.ensureUserExists);
+
+    const result = await ensureUserExists(
+      createAuthCtx(db, "clerk_new_user_001"),
+      {},
+    );
+
+    expect(result.created).toBe(true);
+    expect(result.blocked).toBe(false);
+    expect(result.userId).toBeTruthy();
+
+    const createdUser = db
+      .getTable("user")
+      .find((user) => user.clerkUserId === "clerk_new_user_001");
+
+    expect(createdUser?.email).toBe("clerk_new_user_001@daylog.invalid");
+    expect(createdUser?.isAdmin).toBe(false);
+    expect(db.getTable("adminDashboardMetrics")[0]?.totalUsers).toBe(1);
+  });
+
   it("updates profile image via manual upload and provider fallback", async () => {
     const db = createInMemoryDb(baseSeed());
     const generateProfileImageUploadUrl = handler<
@@ -819,7 +847,7 @@ describe("users behavior", () => {
         clerkUserId: "clerk_deleted_target_001",
         email: "deleted-target@example.com",
       }),
-    ).rejects.toThrow("Account deletion in progress");
+    ).resolves.toBeNull();
   });
 
   it("marks deletion jobs as failed when a step throws", async () => {

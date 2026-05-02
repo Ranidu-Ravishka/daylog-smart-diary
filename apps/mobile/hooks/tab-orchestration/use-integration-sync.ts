@@ -36,6 +36,8 @@ import { dedupeSignals, toErrorMessage } from "@/hooks/tab-orchestration/utils";
 import { type LocationTrackingRuntimeConfig } from "@/hooks/tab-orchestration/types";
 
 type UseIntegrationSyncParams = {
+  isLoaded: boolean;
+  isSignedIn: boolean;
   isAuthenticated: boolean;
   hasLaunchPreferencesRecord: boolean;
   locationTrackingRuntimeConfig: LocationTrackingRuntimeConfig | undefined;
@@ -196,6 +198,8 @@ function aggregateBackgroundLocationUploadResults(
 }
 
 export function useIntegrationSync({
+  isLoaded,
+  isSignedIn,
   isAuthenticated,
   hasLaunchPreferencesRecord,
   locationTrackingRuntimeConfig,
@@ -216,6 +220,8 @@ export function useIntegrationSync({
 
   React.useEffect(() => {
     if (
+      !isLoaded ||
+      !isSignedIn ||
       !isAuthenticated ||
       !hasLaunchPreferencesRecord ||
       locationTrackingRuntimeConfig === undefined
@@ -712,6 +718,8 @@ export function useIntegrationSync({
     callSummaryEnabled,
     fitnessTrackingEnabled,
     hasLaunchPreferencesRecord,
+    isLoaded,
+    isSignedIn,
     isAuthenticated,
     locationTrackingRuntimeConfig,
     moodAssistanceEnabled,

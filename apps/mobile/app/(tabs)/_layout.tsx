@@ -1,5 +1,5 @@
 import { Tabs, Redirect } from "expo-router";
-import React from "react";
+import React, { useMemo } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 
 import { useAuth } from "@clerk/clerk-expo";
@@ -11,6 +11,7 @@ import { IconSymbol } from "@/components/ui/icon-symbol";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { useAppTheme } from "@/components/theme-provider";
 import { AppLockProvider } from "@/components/security/app-lock-provider";
+import { Typography } from "@/constants/theme";
 import { useForegroundTasks } from "@/hooks/tab-orchestration/use-foreground-tasks";
 import { useIntegrationSync } from "@/hooks/tab-orchestration/use-integration-sync";
 import { useLocationTracking } from "@/hooks/tab-orchestration/use-location-tracking";
@@ -20,25 +21,69 @@ export default function TabLayout() {
   const { colors: theme } = useAppTheme();
   const { isLoaded, isSignedIn, sessionId, userId } = useAuth();
   const { isLoading: isConvexAuthLoading, isAuthenticated } = useConvexAuth();
+  const canUseIntegrationQueries = isLoaded && isSignedIn && isAuthenticated;
+  const userPreferencesQueryArgs = useMemo(
+    () => (isAuthenticated ? {} : "skip"),
+    [isAuthenticated],
+  );
+  const locationTrackingRuntimeConfigQueryArgs = useMemo(
+    () => (canUseIntegrationQueries ? {} : "skip"),
+    [canUseIntegrationQueries],
+  );
   const launchPreferences = useQuery(
     api.userPreferences.getMyUserPreferences,
-    isAuthenticated ? {} : "skip",
+    userPreferencesQueryArgs,
   );
   const locationTrackingRuntimeConfig = useQuery(
     api.integrations.getMyLocationTrackingRuntimeConfig,
-    isAuthenticated ? {} : "skip",
+    locationTrackingRuntimeConfigQueryArgs,
   );
   const isPreferencesLoading =
     isAuthenticated &&
     (launchPreferences === undefined ||
       locationTrackingRuntimeConfig === undefined);
-  const launchUserSettings = React.useMemo(
+  const launchUserSettings = useMemo(
     () => normalizeUserSettings(launchPreferences),
     [launchPreferences],
   );
   const locationTrackingEnabled = launchUserSettings.locationTrackingEnabled;
   const backgroundLocationTrackingEnabled =
     launchUserSettings.backgroundLocationTrackingEnabled;
+  const screenOptions = useMemo(
+    () => ({
+      headerShown: false,
+      tabBarButton: HapticTab,
+      tabBarActiveTintColor: theme.tint,
+      tabBarInactiveTintColor: theme.tabIconDefault,
+      tabBarLabelPosition: "below-icon" as const,
+      tabBarItemStyle: {
+        flex: 1,
+        justifyContent: "center" as const,
+        alignItems: "center" as const,
+      },
+      tabBarIconStyle: {
+        marginBottom: -3,
+      },
+      tabBarLabelStyle: {
+        marginTop: 4,
+        ...Typography.label,
+      },
+      tabBarStyle: {
+        position: "absolute" as const,
+        left: 16,
+        right: 16,
+        bottom: 10,
+        height: 70,
+        paddingTop: 6,
+        paddingBottom: 8,
+        backgroundColor: theme.surface,
+        borderTopWidth: 1,
+        borderTopColor: theme.border,
+        borderRadius: 20,
+      },
+    }),
+    [theme.border, theme.surface, theme.tabIconDefault, theme.tint],
+  );
 
   useOfflineQueue({
     isAuthenticated,
@@ -50,6 +95,8 @@ export default function TabLayout() {
   });
 
   useIntegrationSync({
+    isLoaded,
+    isSignedIn: Boolean(isSignedIn),
     isAuthenticated,
     hasLaunchPreferencesRecord: launchPreferences != null,
     locationTrackingRuntimeConfig,
@@ -89,47 +136,13 @@ export default function TabLayout() {
   }
 
   if (!isSignedIn) {
-    return <Redirect href="/sign-in" />;
+    return <Redirect href="/(auth)/sign-in" />;
   }
 
   return (
     <ErrorBoundary>
       <AppLockProvider>
-        <Tabs
-          screenOptions={{
-            headerShown: false,
-            tabBarButton: HapticTab,
-            tabBarActiveTintColor: theme.tint,
-            tabBarInactiveTintColor: theme.tabIconDefault,
-            tabBarLabelPosition: "below-icon",
-            tabBarItemStyle: {
-              flex: 1,
-              justifyContent: "center",
-              alignItems: "center",
-            },
-            tabBarIconStyle: {
-              marginBottom: -3,
-            },
-            tabBarLabelStyle: {
-              marginTop: 4,
-              fontSize: 11,
-              fontWeight: "600",
-            },
-            tabBarStyle: {
-              position: "absolute",
-              left: 16,
-              right: 16,
-              bottom: 10,
-              height: 70,
-              paddingTop: 6,
-              paddingBottom: 8,
-              backgroundColor: theme.surface,
-              borderTopWidth: 1,
-              borderTopColor: theme.border,
-              borderRadius: 20,
-            },
-          }}
-        >
+        <Tabs screenOptions={screenOptions}>
           {/* 🔒 Hidden Quick Setup */}
           <Tabs.Screen
             name="quick-setup"

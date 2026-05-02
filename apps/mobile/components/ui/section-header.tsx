@@ -45,9 +45,8 @@ function createStyles(c: ThemeColors) {
       color: c.text,
     },
     action: {
-      ...Typography.callout,
+      ...Typography.button,
       color: c.tint,
-      fontWeight: "600",
     },
     actionPressable: {
       opacity: 1,

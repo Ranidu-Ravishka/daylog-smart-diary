@@ -205,7 +205,6 @@ const styles = StyleSheet.create({
     ...Typography.caption2,
   },
   integrationAction: {
-    ...Typography.caption1,
-    fontWeight: "600",
+    ...Typography.label,
   },
 });

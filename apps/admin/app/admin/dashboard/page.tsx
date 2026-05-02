@@ -3,7 +3,7 @@
 import AdminGuard from "@/components/admin-guard";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@repo/backend/convex";
 import { makeFunctionReference } from "convex/server";
 import {
@@ -83,6 +83,9 @@ export default function AdminDashboardPage() {
   const qualityQueueRef = makeFunctionReference<"query">(
     "summaryQuality:listSummaryQualityEvaluationsPaginated",
   );
+  const listUsersPaginatedRef = makeFunctionReference<"query">(
+    "admin:listUsersPaginated",
+  );
   const healthSummaryRef = makeFunctionReference<"query">(
     "integrationHealth:getIntegrationHealthSummary",
   );
@@ -100,14 +103,24 @@ export default function AdminDashboardPage() {
   const [cleanupBusy, setCleanupBusy] = useState<"soft" | "hard" | null>(null);
   const [cleanupError, setCleanupError] = useState<string | null>(null);
   const [cleanupStatus, setCleanupStatus] = useState<string | null>(null);
+  const bootstrapRequestedRef = useRef(false);
   const isAdmin = useQuery(
     api.users.isCurrentUserAdmin,
     isAuthenticated ? {} : "skip",
   );
   const runLegacyUnsupportedCleanup = useMutation(legacyUnsupportedCleanupRef);
+  const rebuildDashboardMetrics = useMutation(
+    api.admin.adminRebuildDashboardMetrics,
+  );
   const metrics = useQuery(
     api.admin.getDashboardMetrics,
     isAdmin ? {} : "skip",
+  );
+
+  const { results: adminUsersPreview } = usePaginatedQuery(
+    listUsersPaginatedRef,
+    isAdmin ? {} : "skip",
+    { initialNumItems: 1 },
   );
 
   const healthSummary = useQuery(healthSummaryRef, isAdmin ? {} : "skip") as
@@ -150,6 +163,19 @@ export default function AdminDashboardPage() {
   const lowQualityOpen = (lowQualityQueue as QualityEval[]).filter(
     (row) => row.lowQuality,
   ).length;
+
+  useEffect(() => {
+    if (!isAdmin || metrics === undefined) return;
+    if (bootstrapRequestedRef.current) return;
+    if (metrics.totalUsers > 0) return;
+    if (adminUsersPreview.length === 0) return;
+
+    bootstrapRequestedRef.current = true;
+    void rebuildDashboardMetrics({}).catch((error) => {
+      bootstrapRequestedRef.current = false;
+      captureException("admin_dashboard_metrics_bootstrap_failed", error);
+    });
+  }, [adminUsersPreview.length, isAdmin, metrics, rebuildDashboardMetrics]);
 
   const lastInfoEventAt = transportHealth?.overall.lastReceivedAt;
   const infoTransportDropRate = transportHealth?.overall.estimatedDropRate ?? 0;
@@ -275,7 +301,7 @@ export default function AdminDashboardPage() {
           </div>
         )}
 
-        <Card>
+        <Card className="bg-card/95">
           <CardHeader>
             <CardTitle>Entity volume</CardTitle>
             <p className="text-sm text-muted-foreground ">
@@ -292,10 +318,10 @@ export default function AdminDashboardPage() {
         </Card>
 
         <div>
-          <h2 className="text-lg font-semibold text-foreground ">
+          <h2 className="text-lg font-semibold text-foreground">
             Maturity layer
           </h2>
-          <p className="mt-1 text-sm text-muted-foreground ">
+          <p className="mt-1 text-sm text-muted-foreground">
             Observability, governance, and quality workflows.
           </p>
 
@@ -334,7 +360,7 @@ export default function AdminDashboardPage() {
             <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <CardTitle>Legacy unsupported integration cleanup</CardTitle>
-                <p className="mt-1 text-sm text-muted-foreground ">
+                <p className="mt-1 text-sm text-muted-foreground">
                   Monitors and cleans legacy rows for slack, strava, and
                   todoist.
                 </p>
@@ -366,19 +392,19 @@ export default function AdminDashboardPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               {cleanupStatus ? (
-                <div className="rounded-xl border border-border bg-muted px-3 py-2 text-xs text-foreground ">
+                <div className="rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-xs text-foreground">
                   {cleanupStatus}
                 </div>
               ) : null}
 
               {cleanupError ? (
-                <div className="rounded-xl border border-foreground/15 bg-muted px-3 py-2 text-xs text-foreground ">
+                <div className="rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-xs text-foreground">
                   {cleanupError}
                 </div>
               ) : null}
 
               {legacyUnsupportedCounts === undefined ? (
-                <p className="text-xs text-muted-foreground ">
+                <p className="text-xs text-muted-foreground">
                   Loading legacy cleanup metrics…
                 </p>
               ) : (
@@ -400,8 +426,8 @@ export default function AdminDashboardPage() {
                     value={legacyUnsupportedCounts.affectedUsers}
                   />
 
-                  <div className="rounded-xl border border-border bg-muted p-3 text-xs text-foreground sm:col-span-2 lg:col-span-4">
-                    <span className="font-medium text-foreground ">
+                  <div className="rounded-xl border border-border bg-secondary p-3 text-xs text-foreground sm:col-span-2 lg:col-span-4">
+                    <span className="font-medium text-foreground">
                       By provider:
                     </span>{" "}
                     slack {legacyUnsupportedCounts.rowsByProvider.slack} |
@@ -432,10 +458,10 @@ const MetricCard = memo(function MetricCard({
       href={href}
       className="block outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-2xl"
     >
-      <Card className="h-full transition hover:border-border ">
+      <Card className="h-full bg-card/95 transition-colors hover:bg-secondary">
         <CardContent className="p-5">
-          <p className="text-sm text-muted-foreground ">{label}</p>
-          <p className="mt-1 text-2xl font-semibold tabular-nums text-foreground ">
+          <p className="text-sm text-muted-foreground">{label}</p>
+          <p className="mt-1 text-2xl font-semibold tabular-nums text-foreground">
             {value}
           </p>
         </CardContent>
@@ -458,10 +484,10 @@ const MaturityCard = memo(function MaturityCard({
       href={href}
       className="block outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-2xl"
     >
-      <Card className="h-full transition hover:border-border ">
+      <Card className="h-full bg-card/95 transition-colors hover:bg-secondary">
         <CardContent className="p-5">
-          <p className="text-sm font-semibold text-foreground ">{title}</p>
-          <p className="mt-2 text-xs text-muted-foreground ">{subtitle}</p>
+          <p className="text-sm font-semibold text-foreground">{title}</p>
+          <p className="mt-2 text-xs text-muted-foreground">{subtitle}</p>
         </CardContent>
       </Card>
     </Link>
@@ -476,11 +502,11 @@ const MiniMetric = memo(function MiniMetric({
   value: number;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-muted p-3  ">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground ">
+    <div className="rounded-xl border border-border bg-secondary p-3">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
         {label}
       </p>
-      <p className="mt-1 text-lg font-semibold tabular-nums text-foreground ">
+      <p className="mt-1 text-lg font-semibold tabular-nums text-foreground">
         {value}
       </p>
     </div>

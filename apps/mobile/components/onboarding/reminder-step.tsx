@@ -285,8 +285,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   pillText: {
-    ...Typography.callout,
-    fontWeight: "600",
+    ...Typography.button,
   },
   dayWrap: {
     flexDirection: "row",
@@ -302,8 +301,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   dayText: {
-    ...Typography.caption1,
-    fontWeight: "600",
+    ...Typography.label,
   },
   helper: {
     ...Typography.caption2,

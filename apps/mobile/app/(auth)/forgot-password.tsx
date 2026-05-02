@@ -210,7 +210,7 @@ export default function ForgotPasswordScreen() {
 
         // Wait a moment then redirect
         setTimeout(() => {
-          router.replace("/sign-in");
+          router.replace("/(auth)/sign-in");
         }, 2000);
       } else {
         setError("Failed to reset password. Please try again.");
@@ -634,8 +634,7 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.surfaceSecondary,
       textAlign: "center",
       lineHeight: 32,
-      ...Typography.callout,
-      fontWeight: "600",
+      ...Typography.button,
       color: colors.textTertiary,
       marginBottom: 4,
     },
@@ -644,13 +643,11 @@ function createStyles(colors: ThemeColors) {
       color: colors.inverseText,
     },
     stepLabel: {
-      ...Typography.caption1,
+      ...Typography.label,
       color: colors.textTertiary,
-      fontWeight: "500",
     },
     activeStepLabel: {
       color: colors.tint,
-      fontWeight: "600",
     },
     stepLine: {
       flex: 1,
@@ -717,18 +714,16 @@ function createStyles(colors: ThemeColors) {
       shadowOpacity: 0,
     },
     buttonText: {
-      ...Typography.bodyMedium,
+      ...Typography.button,
       color: colors.inverseText,
-      fontWeight: "600",
     },
     cancelButton: {
       alignItems: "center",
       paddingVertical: Spacing.md,
     },
     cancelText: {
-      ...Typography.callout,
+      ...Typography.button,
       color: colors.textSecondary,
-      fontWeight: "500",
     },
     codeActions: {
       gap: Spacing.md,
@@ -738,9 +733,8 @@ function createStyles(colors: ThemeColors) {
       paddingVertical: Spacing.md,
     },
     resendText: {
-      ...Typography.callout,
+      ...Typography.button,
       color: colors.tint,
-      fontWeight: "600",
     },
     passwordHint: {
       ...Typography.caption1,

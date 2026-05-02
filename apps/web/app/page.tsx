@@ -41,7 +41,7 @@ export default function Home() {
   return (
     <div className="min-h-screen flex flex-col bg-background">
       {/* ── Navbar ─────────────────────────────────────── */}
-      <nav className="sticky top-0 z-50 w-full border-b bg-background/80 backdrop-blur-sm">
+      <nav className="sticky top-0 z-50 w-full border-b border-border/80 bg-background/85 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-6">
           <span className="text-lg font-semibold tracking-tight">DayLog</span>
           <div className="flex items-center gap-2">
@@ -71,9 +71,9 @@ export default function Home() {
       </nav>
 
       {/* ── Hero ──────────────────────────────────────── */}
-      <section className="flex flex-1 flex-col items-center px-6 pt-24 pb-20 md:pt-36 md:pb-28 text-center">
-        <div className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs text-muted-foreground mb-8">
-          <Sparkles className="h-3 w-3" />
+      <section className="flex flex-1 flex-col items-center px-6 pt-24 pb-24 md:pt-36 md:pb-32 text-center">
+        <div className="mb-8 inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary px-3 py-1 text-xs text-muted-foreground">
+          <Sparkles className="h-3 w-3 text-primary" />
           AI-Powered Daily Reflection
         </div>
         <h1 className="max-w-2xl text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl">
@@ -110,9 +110,9 @@ export default function Home() {
 
         {/* ── App Preview ────────────────────────────── */}
         <div className="mt-20 w-full max-w-3xl">
-          <div className="rounded-lg border bg-card p-6 shadow-sm md:p-10">
+          <div className="rounded-2xl border border-border bg-card p-6 shadow-sm md:p-10">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              <div className="rounded-md border p-4">
+              <div className="rounded-xl border border-border bg-secondary p-4">
                 <p className="text-xs text-muted-foreground">Today</p>
                 <p className="mt-1 text-sm font-medium">Monday, Mar 9</p>
                 <p className="mt-2 text-sm text-muted-foreground">
@@ -129,7 +129,7 @@ export default function Home() {
                   ))}
                 </div>
               </div>
-              <div className="rounded-md border p-4 md:col-span-2">
+              <div className="rounded-xl border border-border bg-secondary p-4 md:col-span-2">
                 <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                   <Sparkles className="h-3 w-3" />
                   AI Summary
@@ -141,10 +141,10 @@ export default function Home() {
                   dinner with friends.&rdquo;
                 </p>
                 <div className="mt-3 flex gap-2">
-                  <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
+                  <span className="rounded-full border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground">
                     3 memories
                   </span>
-                  <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
+                  <span className="rounded-full border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground">
                     2 highlights
                   </span>
                 </div>
@@ -155,7 +155,10 @@ export default function Home() {
       </section>
 
       {/* ── Features ──────────────────────────────────── */}
-      <section id="features" className="border-t px-6 py-24 md:py-32">
+      <section
+        id="features"
+        className="border-t border-border px-6 py-24 md:py-32"
+      >
         <div className="mx-auto max-w-5xl">
           <div className="mb-16 text-center">
             <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
@@ -170,10 +173,10 @@ export default function Home() {
             {features.map((f) => (
               <div
                 key={f.title}
-                className="group rounded-lg border p-6 transition-colors hover:bg-muted/50"
+                className="group rounded-2xl border border-border bg-card p-6 transition-colors hover:bg-muted/60"
               >
-                <div className="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-md border">
-                  <f.icon className="h-5 w-5 text-muted-foreground group-hover:text-foreground transition-colors" />
+                <div className="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-secondary">
+                  <f.icon className="h-5 w-5 text-muted-foreground transition-colors group-hover:text-primary" />
                 </div>
                 <h3 className="font-semibold">{f.title}</h3>
                 <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
@@ -186,7 +189,7 @@ export default function Home() {
       </section>
 
       {/* ── CTA ───────────────────────────────────────── */}
-      <section className="border-t px-6 py-24 md:py-32">
+      <section className="border-t border-border px-6 py-24 md:py-32">
         <div className="mx-auto max-w-xl text-center">
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
             Start reflecting today
@@ -215,7 +218,7 @@ export default function Home() {
       </section>
 
       {/* ── Footer ────────────────────────────────────── */}
-      <footer className="border-t px-6 py-12">
+      <footer className="border-t border-border px-6 py-12">
         <div className="mx-auto max-w-5xl">
           <div className="flex flex-col gap-8 md:flex-row md:justify-between">
             <div>

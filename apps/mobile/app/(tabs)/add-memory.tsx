@@ -744,7 +744,7 @@ function createStyles(c: ThemeColors) {
     },
     moodLabelSelected: {
       color: c.tint,
-      fontWeight: "600",
+      ...Typography.label,
     },
 
     // Photos

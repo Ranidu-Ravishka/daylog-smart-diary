@@ -54,9 +54,8 @@ export function createProfileStyles(c: ThemeColors) {
       backgroundColor: c.tintLight,
     },
     sectionChipText: {
-      ...Typography.caption1,
+      ...Typography.label,
       color: c.textSecondary,
-      fontWeight: "600",
     },
     sectionChipTextActive: {
       color: c.tint,
@@ -143,9 +142,8 @@ export function createProfileStyles(c: ThemeColors) {
       paddingVertical: Spacing.sm,
     },
     quietHoursChipText: {
-      ...Typography.caption1,
+      ...Typography.label,
       color: c.text,
-      fontWeight: "600",
     },
     modalOverlay: {
       flex: 1,
@@ -176,9 +174,8 @@ export function createProfileStyles(c: ThemeColors) {
       color: c.textSecondary,
     },
     pickerDoneText: {
-      ...Typography.callout,
+      ...Typography.button,
       color: c.tint,
-      fontWeight: "600",
     },
     moodChipsRow: {
       flexDirection: "row",
@@ -263,10 +260,9 @@ export function createProfileStyles(c: ThemeColors) {
       borderColor: c.divider,
     },
     integrationHealthStateText: {
-      ...Typography.caption2,
+      ...Typography.label,
       color: c.textSecondary,
       textTransform: "capitalize",
-      fontWeight: "600",
     },
     integrationErrorText: {
       ...Typography.caption1,
@@ -286,9 +282,8 @@ export function createProfileStyles(c: ThemeColors) {
       paddingVertical: 2,
     },
     integrationDetailLinkText: {
-      ...Typography.caption1,
+      ...Typography.label,
       color: c.tint,
-      fontWeight: "600",
     },
     integrationStatusBadge: {
       borderRadius: Radius.full,
@@ -329,9 +324,8 @@ export function createProfileStyles(c: ThemeColors) {
       paddingVertical: Spacing.sm,
     },
     integrationPrimaryBtnText: {
-      ...Typography.caption1,
+      ...Typography.label,
       color: c.inverseText,
-      fontWeight: "600",
     },
     integrationSecondaryBtn: {
       borderWidth: 1,
@@ -342,9 +336,8 @@ export function createProfileStyles(c: ThemeColors) {
       paddingVertical: Spacing.sm,
     },
     integrationSecondaryBtnText: {
-      ...Typography.caption1,
+      ...Typography.label,
       color: c.text,
-      fontWeight: "600",
     },
     integrationFeedback: {
       borderRadius: Radius.sm,
@@ -375,9 +368,8 @@ export function createProfileStyles(c: ThemeColors) {
       gap: Spacing.sm,
     },
     integrationHealthDashboardTitle: {
-      ...Typography.callout,
+      ...Typography.button,
       color: c.text,
-      fontWeight: "600",
     },
     integrationHealthUpdatedText: {
       ...Typography.caption2,
@@ -400,9 +392,10 @@ export function createProfileStyles(c: ThemeColors) {
       gap: 2,
     },
     integrationHealthMetricValue: {
-      ...Typography.callout,
+      ...Typography.h3,
+      fontSize: 14,
+      lineHeight: 22,
       color: c.text,
-      fontWeight: "700",
     },
     integrationHealthMetricValueWarn: {
       color: c.warning,
@@ -428,9 +421,8 @@ export function createProfileStyles(c: ThemeColors) {
       gap: Spacing.xs,
     },
     integrationHealthWarningTitle: {
-      ...Typography.caption1,
+      ...Typography.label,
       color: c.text,
-      fontWeight: "600",
     },
     integrationHealthWarningText: {
       ...Typography.caption1,
@@ -460,20 +452,19 @@ export function createProfileStyles(c: ThemeColors) {
       marginBottom: Spacing.xs,
     },
     integrationDetailModalTitle: {
-      ...Typography.body,
+      ...Typography.h3,
+      fontSize: 16,
+      lineHeight: 25,
       color: c.text,
-      fontWeight: "700",
       flex: 1,
     },
     integrationDetailModalCloseText: {
-      ...Typography.caption1,
+      ...Typography.label,
       color: c.tint,
-      fontWeight: "600",
     },
     integrationDetailFailureHeading: {
-      ...Typography.caption1,
+      ...Typography.label,
       color: c.text,
-      fontWeight: "600",
       marginTop: Spacing.sm,
       marginBottom: Spacing.xs,
     },
@@ -493,9 +484,8 @@ export function createProfileStyles(c: ThemeColors) {
       gap: 2,
     },
     integrationDetailFailureTime: {
-      ...Typography.caption2,
+      ...Typography.label,
       color: c.textSecondary,
-      fontWeight: "600",
     },
     integrationDetailFailureMessage: {
       ...Typography.caption1,
@@ -525,9 +515,8 @@ export function createProfileStyles(c: ThemeColors) {
       color: c.textSecondary,
     },
     appleHealthHintAction: {
-      ...Typography.caption1,
+      ...Typography.label,
       color: c.tint,
-      fontWeight: "600",
     },
     emptyRow: {
       flexDirection: "row",
@@ -566,9 +555,8 @@ export function createProfileStyles(c: ThemeColors) {
       paddingTop: Spacing.sm,
     },
     inlineActionText: {
-      ...Typography.caption1,
+      ...Typography.label,
       color: c.textSecondary,
-      fontWeight: "600",
     },
 
     /* Version / About */
@@ -645,9 +633,8 @@ export function createProfileStyles(c: ThemeColors) {
       backgroundColor: c.error,
     },
     dangerStateBadgeText: {
-      ...Typography.caption1,
+      ...Typography.label,
       color: c.text,
-      fontWeight: "700",
     },
     dangerStateBadgeTextInverted: {
       color: c.inverseText,

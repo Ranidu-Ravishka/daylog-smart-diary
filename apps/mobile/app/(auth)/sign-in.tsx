@@ -565,8 +565,7 @@ function createStyles(colors: ThemeColors) {
       height: 1,
     },
     dividerText: {
-      ...Typography.caption1,
-      fontWeight: "600",
+      ...Typography.label,
       letterSpacing: 0.4,
     },
     card: {
@@ -580,8 +579,7 @@ function createStyles(colors: ThemeColors) {
       marginBottom: Spacing.md,
     },
     label: {
-      ...Typography.caption1,
-      fontWeight: "600",
+      ...Typography.label,
       letterSpacing: 0.2,
       textTransform: "uppercase",
     },
@@ -591,8 +589,7 @@ function createStyles(colors: ThemeColors) {
       alignItems: "center",
     },
     forgotPasswordText: {
-      ...Typography.caption1,
-      fontWeight: "600",
+      ...Typography.label,
     },
     input: {
       borderWidth: 1,
@@ -629,8 +626,7 @@ function createStyles(colors: ThemeColors) {
       ...Typography.callout,
     },
     noticeAction: {
-      ...Typography.caption1,
-      fontWeight: "600",
+      ...Typography.label,
       alignSelf: "flex-start",
     },
     errorContainer: {
@@ -665,8 +661,7 @@ function createStyles(colors: ThemeColors) {
       ...Typography.callout,
     },
     linkText: {
-      ...Typography.callout,
-      fontWeight: "600",
+      ...Typography.button,
     },
   });
 }

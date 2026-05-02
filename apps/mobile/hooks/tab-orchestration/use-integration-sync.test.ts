@@ -193,6 +193,8 @@ describe("useIntegrationSync", () => {
     const module = await loadModule();
 
     module.useIntegrationSync({
+      isLoaded: true,
+      isSignedIn: true,
       isAuthenticated: true,
       hasLaunchPreferencesRecord: false,
       locationTrackingRuntimeConfig: {
@@ -209,6 +211,8 @@ describe("useIntegrationSync", () => {
     });
 
     module.useIntegrationSync({
+      isLoaded: true,
+      isSignedIn: true,
       isAuthenticated: false,
       hasLaunchPreferencesRecord: true,
       locationTrackingRuntimeConfig: {
@@ -231,6 +235,8 @@ describe("useIntegrationSync", () => {
     const module = await loadModule();
 
     module.useIntegrationSync({
+      isLoaded: true,
+      isSignedIn: true,
       isAuthenticated: true,
       hasLaunchPreferencesRecord: true,
       locationTrackingRuntimeConfig: {
@@ -292,6 +298,8 @@ describe("useIntegrationSync", () => {
     const module = await loadModule();
 
     module.useIntegrationSync({
+      isLoaded: true,
+      isSignedIn: true,
       isAuthenticated: true,
       hasLaunchPreferencesRecord: true,
       locationTrackingRuntimeConfig: {
@@ -428,6 +436,8 @@ describe("useIntegrationSync", () => {
       );
 
       module.useIntegrationSync({
+        isLoaded: true,
+        isSignedIn: true,
         isAuthenticated: true,
         hasLaunchPreferencesRecord: true,
         locationTrackingRuntimeConfig: {
@@ -528,6 +538,8 @@ describe("useIntegrationSync", () => {
       );
 
       module.useIntegrationSync({
+        isLoaded: true,
+        isSignedIn: true,
         isAuthenticated: true,
         hasLaunchPreferencesRecord: true,
         locationTrackingRuntimeConfig: {

@@ -23,7 +23,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useUser, useAuth } from "@clerk/clerk-expo";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, Redirect } from "expo-router";
 import {
   useAction,
   useConvex,
@@ -89,7 +89,7 @@ import { collectAndroidScreenTimeDailyDataForDay } from "../../lib/android-scree
 import { collectIosScreenTimeDailyDataForDay } from "../../lib/ios-screen-time-sync";
 import { getOfflineOutboxSnapshot } from "@/lib/offline-outbox";
 import { captureException, logInfo, logWarn } from "@/lib/observability";
-import { Spacing } from "@/constants/theme";
+import { Spacing, Typography } from "@/constants/theme";
 import { useAppTheme } from "@/components/theme-provider";
 import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
 import { createProfileStyles } from "@/components/profile/profile-styles";
@@ -275,23 +275,25 @@ const SettingsScreen = () => {
   } = useAppLock();
   const styles = React.useMemo(() => createProfileStyles(c), [c]);
   const router = useRouter();
+  const [postIntegrationRedirect, setPostIntegrationRedirect] = useState(false);
   const searchParams = useLocalSearchParams<{
     integrationProvider?: string;
     integrationStatus?: string;
     integrationMessage?: string;
   }>();
   const { user } = useUser();
-  const { signOut } = useAuth();
+  const { signOut, isLoaded, isSignedIn } = useAuth();
   const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
   const todayDayKey = getTodayDayKey();
+  const canUseIntegrationApis = isLoaded && isSignedIn && isAuthenticated;
 
   const supportedProviders = useQuery(
     api.integrations.listSupportedProviders,
-    isAuthenticated ? {} : "skip",
+    canUseIntegrationApis ? {} : "skip",
   );
   const integrations = useQuery(
     api.integrations.listMyIntegrations,
-    isAuthenticated ? {} : "skip",
+    canUseIntegrationApis ? {} : "skip",
   ) as IntegrationDoc[] | undefined;
   const integrationHealthSnapshots = useQuery(
     api.integrationHealth.listMyIntegrationHealth,
@@ -299,7 +301,7 @@ const SettingsScreen = () => {
   ) as IntegrationHealthSnapshot[] | undefined;
   const syncRuns = useQuery(
     api.integrations.listMyIntegrationSyncRunsForDay,
-    isAuthenticated ? { dayKey: todayDayKey } : "skip",
+    canUseIntegrationApis ? { dayKey: todayDayKey } : "skip",
   ) as IntegrationSyncRunDoc[] | undefined;
   const preferences = useQuery(
     api.userPreferences.getMyUserPreferences,
@@ -307,7 +309,7 @@ const SettingsScreen = () => {
   );
   const locationTrackingRuntimeConfig = useQuery(
     api.integrations.getMyLocationTrackingRuntimeConfig,
-    isAuthenticated ? {} : "skip",
+    canUseIntegrationApis ? {} : "skip",
   );
   const convexClient = useConvex();
   const connectIntegration = useMutation(api.integrations.connectIntegration);
@@ -805,7 +807,8 @@ const SettingsScreen = () => {
 
     Alert.alert(alertTitle, alertMessage);
 
-    router.replace("/(tabs)/profile");
+    setIntegrationFeedback((prev) => prev); // keep linter happy
+    setPostIntegrationRedirect(true);
   }, [
     router,
     searchParams.integrationMessage,
@@ -1758,19 +1761,23 @@ const SettingsScreen = () => {
 
   /* ── Callbacks ────────────────────────── */
   const handleSignOut = useCallback(() => {
-    if (lockUnsafeDeletionNavigation) {
-      Alert.alert(
-        "Deletion in progress",
-        "Sign out is blocked while secure deletion cleanup is running.",
-      );
-      return;
-    }
-
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
       { text: "Cancel", style: "cancel" },
-      { text: "Sign Out", style: "destructive", onPress: () => signOut() },
+      {
+        text: "Sign Out",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await signOut();
+            router.replace("/(auth)/sign-in");
+          } catch (error) {
+            captureException("mobile_sign_out_failed", error);
+            Alert.alert("Sign out failed", "Please try again.");
+          }
+        },
+      },
     ]);
-  }, [lockUnsafeDeletionNavigation, signOut]);
+  }, [router, signOut]);
 
   const handleExportData = useCallback(() => {
     void (async () => {
@@ -1953,8 +1960,14 @@ const SettingsScreen = () => {
   // Guards against cross-user writes, reactivity gaps, and silent failures.
   const verifyIntegrationPersisted = useCallback(
     async (provider: string, timeoutMs = 6000): Promise<boolean> => {
+      if (!canUseIntegrationApis) {
+        return false;
+      }
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
+        if (!canUseIntegrationApis) {
+          return false;
+        }
         try {
           const list = (await convexClient.query(
             api.integrations.listMyIntegrations,
@@ -1984,11 +1997,14 @@ const SettingsScreen = () => {
       }
       return false;
     },
-    [convexClient],
+    [canUseIntegrationApis, convexClient],
   );
 
   const handleConnectIntegration = useCallback(
     async (provider: string) => {
+      if (!canUseIntegrationApis) {
+        return;
+      }
       const providerStatus =
         INTEGRATION_PROVIDER_STATUS[
           provider as keyof typeof INTEGRATION_PROVIDER_STATUS
@@ -2244,6 +2260,7 @@ const SettingsScreen = () => {
     },
     [
       beginOAuthMobileHandoff,
+      canUseIntegrationApis,
       connectIntegration,
       setProviderAction,
       supportedProviders,
@@ -2253,6 +2270,9 @@ const SettingsScreen = () => {
 
   const handleDisconnectIntegration = useCallback(
     async (provider: string, integrationId: GenericId<"integrations">) => {
+      if (!canUseIntegrationApis) {
+        return;
+      }
       setProviderAction(provider, "disconnect");
       setIntegrationFeedback(null);
 
@@ -2278,11 +2298,26 @@ const SettingsScreen = () => {
         setProviderAction(provider, undefined);
       }
     },
-    [disconnectIntegration, setProviderAction],
+    [canUseIntegrationApis, disconnectIntegration, setProviderAction],
   );
 
   const handleSyncIntegration = useCallback(
     async (provider: string) => {
+      if (!canUseIntegrationApis) {
+        return;
+      }
+      if (provider === "spotify") {
+        const spotifyIntegration = (integrations ?? []).find(
+          (entry) => entry.provider === "spotify",
+        );
+        if (spotifyIntegration?.status !== "connected") {
+          setIntegrationFeedback({
+            type: "error",
+            message: "Spotify is not connected. Reconnect Spotify to sync.",
+          });
+          return;
+        }
+      }
       logInfo("mobile_integration_sync_started", {
         status: "started",
         provider,
@@ -2440,6 +2475,14 @@ const SettingsScreen = () => {
           dayKey: todayDayKey,
           timeZone: userTimeZone,
         });
+        if (result?.success === false && result.reason === "reauth_required") {
+          setIntegrationFeedback({
+            type: "error",
+            message:
+              "Spotify session expired. Please reconnect Spotify and try again.",
+          });
+          return;
+        }
 
         let screenTimeMessage = "";
         if (provider === "google_fit" && Platform.OS === "android") {
@@ -2539,6 +2582,8 @@ const SettingsScreen = () => {
       }
     },
     [
+      canUseIntegrationApis,
+      integrations,
       setProviderAction,
       upsertMyIntegrationDailyData,
       syncAppleHealthDailyData,
@@ -2569,6 +2614,10 @@ const SettingsScreen = () => {
         supportedProviders === undefined ||
         syncRuns === undefined ||
         locationTrackingRuntimeConfig === undefined));
+
+  if (postIntegrationRedirect) {
+    return <Redirect href="/(tabs)/profile" />;
+  }
 
   if (isLoading) return <ProfileSkeleton />;
 
@@ -3144,7 +3193,12 @@ const SettingsScreen = () => {
                       opacity: isSavingAppPassword ? 0.7 : 1,
                     }}
                   >
-                    <Text style={{ color: c.inverseText, fontWeight: "700" }}>
+                    <Text
+                      style={{
+                        color: c.inverseText,
+                        ...Typography.button,
+                      }}
+                    >
                       Save PIN/Password
                     </Text>
                   </Pressable>
