@@ -14,7 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useConvexAuth, useAction } from "convex/react";
 import { api } from "@repo/backend/convex";
 import { captureException } from "@/lib/observability";
-import { MOOD_EMOJI } from "@repo/ui/lib/constants";
+import { MOOD_EMOJI, MOOD_LABELS } from "@repo/ui/lib/constants";
 import {
   Spacing,
   Typography,
@@ -602,7 +602,8 @@ const InsightsScreen = () => {
                     {MOOD_EMOJI[mood] ?? "❓"}
                   </Text>
                   <Text style={styles.distLabel}>
-                    {mood.charAt(0).toUpperCase() + mood.slice(1)}
+                    {MOOD_LABELS[mood] ??
+                      mood.charAt(0).toUpperCase() + mood.slice(1)}
                   </Text>
                   <View style={styles.barOuter}>
                     <View

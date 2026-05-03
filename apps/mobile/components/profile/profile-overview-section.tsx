@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { MEMORY_MOOD_OPTIONS, SETTINGS_DEFAULTS } from "@repo/ui/lib/constants";
+import { MOOD_OPTIONS, SETTINGS_DEFAULTS } from "@repo/ui/lib/constants";
 import { Spacing, type ThemeColors } from "@/constants/theme";
 import { AppCard } from "@/components/ui/app-card";
 import { SectionHeader } from "@/components/ui/section-header";
@@ -179,13 +179,13 @@ export function ProfileOverviewSection({
         <AppCard>
           <Text style={styles.toggleSub}>Default mood for new memories</Text>
           <View style={styles.moodChipsRow}>
-            {MEMORY_MOOD_OPTIONS.map((mood) => {
-              const selected = defaultMemoryMood === mood;
+            {MOOD_OPTIONS.map((option) => {
+              const selected = defaultMemoryMood === option.value;
               return (
                 <TouchableOpacity
-                  key={mood}
+                  key={option.value}
                   style={[styles.moodChip, selected && styles.moodChipSelected]}
-                  onPress={() => onChangeDefaultMemoryMood(mood)}
+                  onPress={() => onChangeDefaultMemoryMood(option.value)}
                   disabled={isPreferencesMissing}
                 >
                   <Text
@@ -194,7 +194,7 @@ export function ProfileOverviewSection({
                       selected && styles.moodChipLabelSelected,
                     ]}
                   >
-                    {mood}
+                    {option.emoji} {option.label}
                   </Text>
                 </TouchableOpacity>
               );

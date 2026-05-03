@@ -4,7 +4,7 @@ import { useState } from "react";
 import Image from "next/image";
 import type { Id } from "@repo/backend";
 import { EllipsisVertical, Trash, Edit } from "lucide-react";
-import { MOOD_EMOJI } from "@repo/ui/lib/constants";
+import { MOOD_EMOJI, MOOD_LABELS } from "@repo/ui/lib/constants";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -62,7 +62,8 @@ export function MemoryCard({
 
               {memory.mood && (
                 <Badge variant="secondary" className="inline-block">
-                  {MOOD_EMOJI[memory.mood] ?? "😐"} {memory.mood}
+                  {MOOD_EMOJI[memory.mood] ?? "😐"}{" "}
+                  {MOOD_LABELS[memory.mood] ?? memory.mood}
                 </Badge>
               )}
 

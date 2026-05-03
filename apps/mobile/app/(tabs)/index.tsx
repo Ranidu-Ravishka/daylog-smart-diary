@@ -15,7 +15,7 @@ import { useUser } from "@clerk/clerk-expo";
 import { useQuery, useConvexAuth } from "convex/react";
 import { api } from "@repo/backend/convex";
 import type { GenericId } from "convex/values";
-import { MOOD_EMOJI } from "@repo/ui/lib/constants";
+import { MOOD_EMOJI, MOOD_LABELS } from "@repo/ui/lib/constants";
 import {
   Spacing,
   Typography,
@@ -399,7 +399,9 @@ const HomeScreen = () => {
                       {mem.title ?? "Untitled memory"}
                     </Text>
                     {mem.mood && (
-                      <Text style={styles.memoryMood}>{mem.mood}</Text>
+                      <Text style={styles.memoryMood}>
+                        {MOOD_LABELS[mem.mood] ?? mem.mood}
+                      </Text>
                     )}
                   </View>
                   {thumbnailByMemoryId.get(String(mem._id)) ? (

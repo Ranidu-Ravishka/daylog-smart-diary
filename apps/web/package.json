@@ -44,7 +44,7 @@
     "@types/node": "^22.15.3",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
-    "baseline-browser-mapping": "^2.10.25",
+    "baseline-browser-mapping": "^2.10.27",
     "eslint": "^9.39.1",
     "tailwindcss": "^4.1.17",
     "typescript": "5.9.2",

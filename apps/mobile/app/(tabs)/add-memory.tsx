@@ -20,7 +20,11 @@ import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "@repo/backend/convex";
-import { SETTINGS_DEFAULTS } from "@repo/ui/lib/constants";
+import { MOOD_OPTIONS, SETTINGS_DEFAULTS } from "@repo/ui/lib/constants";
+import {
+  getDayKeyForTimestamp,
+  getResolvedTimeZone,
+} from "@repo/ui/lib/day-window";
 import type { GenericId } from "convex/values";
 import {
   Spacing,
@@ -37,11 +41,6 @@ import {
 } from "@/lib/offline-outbox";
 import { withOpacity } from "@/lib/color-utils";
 import { captureException, logInfo } from "@/lib/observability";
-
-function getTodayDayKey(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-}
 
 function createMediaClientRequestId(
   memoryClientRequestId: string,
@@ -208,7 +207,7 @@ export default function AddMemoryScreen() {
     }
 
     const happenedAt = timestamp;
-    const dayKey = getTodayDayKey();
+    const dayKey = getDayKeyForTimestamp(happenedAt, getResolvedTimeZone());
     const clientRequestId = `mobile_mem_${happenedAt}_${Math.floor(
       Math.random() * 1_000_000,
     )
@@ -386,14 +385,6 @@ export default function AddMemoryScreen() {
     }
   };
 
-  const moods = [
-    { id: "happy", emoji: "😊", label: "Happy" },
-    { id: "sad", emoji: "😢", label: "Sad" },
-    { id: "excited", emoji: "🎉", label: "Excited" },
-    { id: "peaceful", emoji: "😌", label: "Peaceful" },
-    { id: "loved", emoji: "❤️", label: "Loved" },
-  ];
-
   const canSubmit =
     title.trim().length > 0 &&
     !isSubmitting &&
@@ -491,15 +482,15 @@ export default function AddMemoryScreen() {
         <View style={styles.section}>
           <Text style={styles.label}>How are you feeling?</Text>
           <View style={styles.moodRow}>
-            {moods.map((item) => {
-              const isSelected = mood === item.id;
+            {MOOD_OPTIONS.map((item) => {
+              const isSelected = mood === item.value;
               return (
                 <TouchableOpacity
-                  key={item.id}
+                  key={item.value}
                   style={[styles.moodBtn, isSelected && styles.moodBtnSelected]}
                   onPress={() => {
                     hasSelectedMoodManually.current = true;
-                    setMood(item.id);
+                    setMood(item.value);
                   }}
                   disabled={isSubmitting}
                   activeOpacity={0.7}

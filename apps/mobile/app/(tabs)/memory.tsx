@@ -24,7 +24,11 @@ import {
 } from "convex/react";
 import { api } from "@repo/backend/convex";
 import type { GenericId } from "convex/values";
-import { INTEGRATION_PROVIDER_META, MOOD_EMOJI } from "@repo/ui/lib/constants";
+import {
+  INTEGRATION_PROVIDER_META,
+  MOOD_EMOJI,
+  MOOD_LABELS,
+} from "@repo/ui/lib/constants";
 import {
   Spacing,
   Typography,
@@ -693,6 +697,9 @@ const DailyDetailView = () => {
 
   const moodFromMemories =
     resolvedMemories.length > 0 ? (resolvedMemories[0]?.mood ?? null) : null;
+  const moodSummaryLabel = moodFromMemories
+    ? `${MOOD_EMOJI[moodFromMemories] ?? ""} ${MOOD_LABELS[moodFromMemories] ?? moodFromMemories}`.trim()
+    : null;
   const availableTags = React.useMemo(() => {
     const merged = resolvedMemories.flatMap((memory) => memory.tags ?? []);
     return Array.from(new Set(merged)).slice(0, 12);
@@ -805,9 +812,7 @@ const DailyDetailView = () => {
           <View style={styles.metricChip}>
             <Ionicons name="happy-outline" size={14} color={c.tint} />
             <Text style={styles.metricText}>
-              {moodFromMemories
-                ? `${MOOD_EMOJI[moodFromMemories] ?? ""} ${moodFromMemories}`
-                : "No mood"}
+              {moodSummaryLabel || "No mood"}
             </Text>
           </View>
           <View style={styles.metricChip}>

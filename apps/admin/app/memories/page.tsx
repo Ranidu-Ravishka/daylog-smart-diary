@@ -16,6 +16,7 @@ import Link from "next/link";
 import { PageContainerWide } from "@/components/page-container";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { MOOD_EMOJI, MOOD_LABELS } from "@repo/ui/lib/constants";
 import {
   tableActionsCellClass,
   tableActionsHeaderClass,
@@ -128,7 +129,9 @@ export default function MemoriesPage() {
                             {row.title}
                           </td>
                           <td className="px-4 py-3 text-muted-foreground">
-                            {row.mood ?? "—"}
+                            {row.mood
+                              ? `${MOOD_EMOJI[row.mood] ?? ""} ${MOOD_LABELS[row.mood] ?? row.mood}`.trim()
+                              : "—"}
                           </td>
                           <td className="px-4 py-3 font-mono text-xs text-foreground">
                             {row.dayKey}
@@ -217,7 +220,9 @@ export default function MemoriesPage() {
                   <div>
                     <p className="text-xs text-muted-foreground">Mood</p>
                     <p className="text-foreground">
-                      {memoryDetail.mood || "—"}
+                      {memoryDetail.mood
+                        ? `${MOOD_EMOJI[memoryDetail.mood] ?? ""} ${MOOD_LABELS[memoryDetail.mood] ?? memoryDetail.mood}`.trim()
+                        : "—"}
                     </p>
                   </div>
                   <div>

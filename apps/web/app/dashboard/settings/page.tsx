@@ -13,7 +13,7 @@ import {
   INTEGRATION_COMING_SOON_HELPER_TEXT,
   INTEGRATION_PROVIDER_META,
   INTEGRATION_PROVIDER_STATUS,
-  MEMORY_MOOD_OPTIONS,
+  MOOD_OPTIONS,
   SETTINGS_DEFAULTS,
 } from "@repo/ui/lib/constants";
 import {
@@ -776,9 +776,9 @@ export default function SettingsPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {MEMORY_MOOD_OPTIONS.map((mood) => (
-                  <SelectItem key={mood} value={mood}>
-                    {mood}
+                {MOOD_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.emoji} {option.label}
                   </SelectItem>
                 ))}
               </SelectContent>

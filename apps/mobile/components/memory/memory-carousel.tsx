@@ -8,7 +8,7 @@ import {
   StyleSheet,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { MOOD_EMOJI } from "@repo/ui/lib/constants";
+import { MOOD_EMOJI, MOOD_LABELS } from "@repo/ui/lib/constants";
 import {
   Radius,
   Spacing,
@@ -67,7 +67,9 @@ export function MemoryCarousel({
             <View style={styles.metaRow}>
               <Text style={styles.metaText}>
                 {MOOD_EMOJI[memory.mood ?? ""] ?? "📝"}{" "}
-                {memory.mood ? memory.mood : "memory"}
+                {memory.mood
+                  ? (MOOD_LABELS[memory.mood] ?? memory.mood)
+                  : "memory"}
               </Text>
               {memory.happenedAt ? (
                 <Text style={styles.metaText}>

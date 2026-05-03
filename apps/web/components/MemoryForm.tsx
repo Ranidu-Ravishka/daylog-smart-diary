@@ -5,7 +5,7 @@ import Image from "next/image";
 import { makeFunctionReference } from "convex/server";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@repo/backend/convex";
-import { MOOD_EMOJI, MOODS } from "@repo/ui/lib/constants";
+import { MOOD_OPTIONS } from "@repo/ui/lib/constants";
 import type { Id } from "@repo/backend";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -526,9 +526,9 @@ export function MemoryForm({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {MOODS.map((m) => (
-                    <SelectItem key={m} value={m}>
-                      {MOOD_EMOJI[m]} {m}
+                  {MOOD_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.emoji} {option.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
