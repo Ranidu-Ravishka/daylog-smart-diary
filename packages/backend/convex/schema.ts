@@ -282,6 +282,8 @@ export default defineSchema(
       theme: v.optional(userSettingsThemeValidator),
       notificationsEnabled: v.optional(v.boolean()),
       dailySummaryEnabled: v.optional(v.boolean()),
+      summaryNotificationsEnabled: v.optional(v.boolean()),
+      autoGenerateSummaries: v.optional(v.boolean()),
       weeklyInsightsEnabled: v.optional(v.boolean()),
       quietHoursEnabled: v.optional(v.boolean()),
       quietHoursStart: v.optional(v.string()),
@@ -358,6 +360,8 @@ export default defineSchema(
       peopleTagsEncrypted: v.optional(encryptedSensitiveFieldValidator),
       sensitiveDataNonce: v.optional(v.string()),
       sensitiveDataMigratedAt: v.optional(v.number()),
+      lastAutoSummaryCheckAt: v.optional(v.number()),
+      lastDebouncedMemoryCount: v.optional(v.number()),
     })
       .index("by_user_day", ["userId", "dayKey"])
       .index("by_dayKey", ["dayKey"]),
@@ -372,6 +376,7 @@ export default defineSchema(
       highlightsEncrypted: v.optional(encryptedSensitiveFieldValidator),
       sensitiveDataNonce: v.optional(v.string()),
       sensitiveDataMigratedAt: v.optional(v.number()),
+      modelInputHash: v.optional(v.string()),
       metrics: v.optional(
         v.object({
           steps: v.optional(v.number()),

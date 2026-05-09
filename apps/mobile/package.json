@@ -28,7 +28,7 @@
     "@repo/ui": "workspace:*",
     "@repo/user-settings": "workspace:*",
     "@sentry/react-native": "^8.7.0",
-    "convex": "^1.29.3",
+    "convex": "^1.38.0",
     "expo": "~54.0.33",
     "expo-battery": "~10.0.8",
     "expo-calendar": "~15.0.8",
