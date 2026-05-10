@@ -24,6 +24,10 @@ import {
 } from "./cascadeCleanup";
 import { applyDashboardMetricsDelta } from "./dashboardMetrics";
 import { captureException, logInfo } from "./observability";
+import {
+  findLatestUserDeletionJobByClerkUserId,
+  findLatestUserDeletionJobByUserId,
+} from "./userDeletionJobQueries";
 
 const DEFAULT_USER_DELETION_BATCH_SIZE = 128;
 const DEFAULT_ADMIN_USERS_PAGE_LIMIT = 50;
@@ -250,119 +254,6 @@ type UserDeletionJobRef = {
 };
 
 type UserDeletionJobReader = Pick<MutationCtx | QueryCtx, "db">;
-
-async function findLatestUserDeletionJobByUserId(
-  ctx: Pick<MutationCtx, "db">,
-  userId: Id<"user">,
-): Promise<Doc<"userDeletionJobs"> | null> {
-  const processing = await ctx.db
-    .query("userDeletionJobs")
-    .withIndex("by_user_status", (q) =>
-      q.eq("userId", userId).eq("status", "processing"),
-    )
-    .order("desc")
-    .take(1);
-  if (processing[0]) return processing[0];
-
-  const requested = await ctx.db
-    .query("userDeletionJobs")
-    .withIndex("by_user_status", (q) =>
-      q.eq("userId", userId).eq("status", "requested"),
-    )
-    .order("desc")
-    .take(1);
-  if (requested[0]) return requested[0];
-
-  const completed = await ctx.db
-    .query("userDeletionJobs")
-    .withIndex("by_user_status", (q) =>
-      q.eq("userId", userId).eq("status", "completed"),
-    )
-    .order("desc")
-    .take(1);
-
-  const failed = await ctx.db
-    .query("userDeletionJobs")
-    .withIndex("by_user_status", (q) =>
-      q.eq("userId", userId).eq("status", "failed"),
-    )
-    .order("desc")
-    .take(1);
-
-  const latestCompleted = completed[0] ?? null;
-  const latestFailed = failed[0] ?? null;
-
-  if (!latestCompleted) {
-    return latestFailed;
-  }
-
-  if (!latestFailed) {
-    return latestCompleted;
-  }
-
-  return latestCompleted.updatedAt >= latestFailed.updatedAt
-    ? latestCompleted
-    : latestFailed;
-}
-
-async function findLatestUserDeletionJobByClerkUserId(
-  ctx: UserDeletionJobReader,
-  clerkUserId: string,
-): Promise<Doc<"userDeletionJobs"> | null> {
-  const [processing, requested, completed, failed] = await Promise.all([
-    ctx.db
-      .query("userDeletionJobs")
-      .withIndex("by_clerk_status", (q) =>
-        q.eq("clerkUserId", clerkUserId).eq("status", "processing"),
-      )
-      .order("desc")
-      .take(1),
-    ctx.db
-      .query("userDeletionJobs")
-      .withIndex("by_clerk_status", (q) =>
-        q.eq("clerkUserId", clerkUserId).eq("status", "requested"),
-      )
-      .order("desc")
-      .take(1),
-    ctx.db
-      .query("userDeletionJobs")
-      .withIndex("by_clerk_status", (q) =>
-        q.eq("clerkUserId", clerkUserId).eq("status", "completed"),
-      )
-      .order("desc")
-      .take(1),
-    ctx.db
-      .query("userDeletionJobs")
-      .withIndex("by_clerk_status", (q) =>
-        q.eq("clerkUserId", clerkUserId).eq("status", "failed"),
-      )
-      .order("desc")
-      .take(1),
-  ]);
-
-  if (processing[0]) {
-    return processing[0];
-  }
-
-  if (requested[0]) {
-    return requested[0];
-  }
-
-  const latestCompleted = completed[0] ?? null;
-  const latestFailed = failed[0] ?? null;
-
-  if (!latestCompleted) {
-    return latestFailed;
-  }
-
-  if (!latestFailed) {
-    return latestCompleted;
-  }
-
-  return latestCompleted.updatedAt >= latestFailed.updatedAt
-    ? latestCompleted
-    : latestFailed;
-}
 
 function shouldBlockUserSyncDuringDeletion(
   job: Doc<"userDeletionJobs"> | null,
@@ -671,7 +562,16 @@ export const runUserDeletionCascadeJobStepInternal = internalMutation({
             // Ignore profile image cleanup failures during final user delete.
           }
         }
-        await ctx.db.delete(userAtFinalize._id);
+
+        const keepTombstoneUntilClerkDeleted =
+          job.requestedByUserId !== undefined;
+        if (keepTombstoneUntilClerkDeleted) {
+          await ctx.db.patch(userAtFinalize._id, {
+            accountBackendPurgedAt: now,
+          });
+        } else {
+          await ctx.db.delete(userAtFinalize._id);
+        }
       }
 
       await ctx.db.patch(job._id, {
@@ -957,7 +857,43 @@ async function syncUserRecord(
 export const getMyProfile = query({
   args: {},
   handler: async (ctx) => {
-    const user = await requireUser(ctx);
+    const user = await getCurrentUser(ctx);
+    if (!user) {
+      throw new Error(
+        "Unauthorized: user record not found — sign in once to create it",
+      );
+    }
+
+    if (
+      user.accountStatus === "deletion_requested" &&
+      user.accountBackendPurgedAt === undefined
+    ) {
+      throw new Error("Unauthorized: account deletion in progress");
+    }
+
+    if (typeof user.accountBackendPurgedAt === "number") {
+      const userProfileImageStorageId = (user as any).profileImageStorageId as
+        | string
+        | undefined;
+      const manualImageUrl =
+        typeof userProfileImageStorageId === "string"
+          ? await ctx.storage.getUrl(userProfileImageStorageId as any)
+          : null;
+      const userProfileImageSource = (user as any).profileImageSource as
+        | ProfileImageSource
+        | undefined;
+
+      return {
+        ...user,
+        profileImageUrl: manualImageUrl ?? user.imageUrl ?? null,
+        profileImageSource: userProfileImageSource ?? null,
+        hasManualProfileImage:
+          typeof userProfileImageStorageId === "string" &&
+          userProfileImageStorageId.length > 0,
+        clerkAccountDeletionFinalizePending: true as const,
+      };
+    }
+
     const userProfileImageStorageId = (user as any).profileImageStorageId as
       | string
       | undefined;
@@ -1363,22 +1299,38 @@ export const getMyAccountDeletionStatus = query({
       scopedRequestedJob ??
       (await findLatestUserDeletionJobByClerkUserId(ctx, clerkUserId));
 
-    const requestedFromJob =
-      latestJob?.status === "requested" ||
-      latestJob?.status === "processing" ||
-      latestJob?.status === "failed" ||
-      latestJob?.status === "completed";
+    const backendPurgedAwaitingClerk =
+      user !== null && typeof user.accountBackendPurgedAt === "number";
+
+    const deletionPipelineActive =
+      latestJob?.status === "requested" || latestJob?.status === "processing";
+
+    const deletionFailed = latestJob?.status === "failed";
+
+    const requestedFromLatestJob = deletionPipelineActive || deletionFailed;
 
     const requested =
-      user?.accountStatus === "deletion_requested" || requestedFromJob;
+      (!backendPurgedAwaitingClerk &&
+        user?.accountStatus === "deletion_requested") ||
+      requestedFromLatestJob;
+
+    const accountStatusLabel: "active" | "deletion_requested" = (() => {
+      if (!user) {
+        return "active";
+      }
+      if (backendPurgedAwaitingClerk) {
+        return "active";
+      }
+      return requested ? "deletion_requested" : "active";
+    })();
 
     return {
       requested,
       requestedAt: user?.accountDeletionRequestedAt ?? latestJob?.startedAt,
-      accountStatus: requested ? "deletion_requested" : "active",
+      accountStatus: accountStatusLabel,
       userExists: user !== null,
-      inProgress:
-        latestJob?.status === "requested" || latestJob?.status === "processing",
+      backendPurgedAwaitingClerk,
+      inProgress: deletionPipelineActive,
       retryable: latestJob?.status === "failed",
       canDeleteClerkAccount: latestJob?.status === "completed",
       job: latestJob
@@ -1419,6 +1371,21 @@ export const deleteUserAndRelatedDataByClerkId = internalMutation({
           q.eq("clerkUserId", args.clerkUserId),
         )
         .unique();
+
+      if (user && typeof user.accountBackendPurgedAt === "number") {
+        await ctx.db.delete(user._id);
+        logInfo("deletion.user.tombstone_removed_after_clerk_deleted", {
+          status: "succeeded",
+          clerkUserId: args.clerkUserId,
+          userId: user._id,
+        });
+        return {
+          success: true,
+          deleted: true,
+          queued: false,
+          tombstonePurged: true,
+        };
+      }
 
       if (!user) {
         const existingJob = await findActiveUserDeletionJobByClerkId(

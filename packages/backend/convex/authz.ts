@@ -1,5 +1,6 @@
 import { Doc, Id } from "./_generated/dataModel";
 import { QueryCtx, MutationCtx } from "./_generated/server";
+import { findLatestUserDeletionJobByUserId } from "./userDeletionJobQueries";
 
 // ────────────────────────────────────────────────────────────
 // Shared auth context type (QueryCtx is a subset of MutationCtx,
@@ -40,6 +41,27 @@ export async function requireUser(ctx: AuthCtx): Promise<Doc<"user">> {
     throw new Error(
       "Unauthorized: user record not found — sign in once to create it",
     );
+  }
+
+  if (typeof user.accountBackendPurgedAt === "number") {
+    throw new Error(
+      "Unauthorized: account backend data was removed — finalize sign-out in Settings",
+    );
+  }
+
+  if (user.accountStatus === "deletion_requested") {
+    throw new Error("Unauthorized: account deletion in progress");
+  }
+
+  const latestDeletionJob = await findLatestUserDeletionJobByUserId(
+    ctx,
+    user._id,
+  );
+  if (
+    latestDeletionJob?.status === "requested" ||
+    latestDeletionJob?.status === "processing"
+  ) {
+    throw new Error("Unauthorized: account deletion in progress");
   }
 
   return user;

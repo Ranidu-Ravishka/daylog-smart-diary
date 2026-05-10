@@ -178,6 +178,12 @@ export const adminDeleteUser = mutation({
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("User not found");
 
+    const now = Date.now();
+    await ctx.db.patch(args.userId, {
+      accountStatus: "deletion_requested",
+      accountDeletionRequestedAt: user.accountDeletionRequestedAt ?? now,
+    });
+
     const deletionJob = await ctx.runMutation(
       internal.users.enqueueUserDeletionJobInternal,
       {

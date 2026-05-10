@@ -484,7 +484,13 @@ function RootAuthBoundary({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (accountDeletionAccountStatus === "deletion_requested") {
+    const shouldHardBlockDeletionUi =
+      accountDeletionStatus?.inProgress === true ||
+      accountDeletionStatus?.retryable === true ||
+      (accountDeletionAccountStatus === "deletion_requested" &&
+        accountDeletionStatus?.canDeleteClerkAccount !== true);
+
+    if (shouldHardBlockDeletionUi) {
       updateBootstrapState("blocked");
       return;
     }
@@ -533,6 +539,9 @@ function RootAuthBoundary({ children }: { children: React.ReactNode }) {
     isLoaded,
     isSignedIn,
     accountDeletionAccountStatus,
+    accountDeletionStatus?.canDeleteClerkAccount,
+    accountDeletionStatus?.inProgress,
+    accountDeletionStatus?.retryable,
     userId,
     updateBootstrapState,
   ]);

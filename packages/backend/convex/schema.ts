@@ -256,6 +256,8 @@ export default defineSchema(
       ),
       accountStatus: v.optional(userAccountStatusValidator),
       accountDeletionRequestedAt: v.optional(v.number()),
+      /** Convex cascade finished; Convex user row kept until Clerk `user.deleted` webhook clears it */
+      accountBackendPurgedAt: v.optional(v.number()),
       planTier: v.optional(
         v.union(
           v.literal("free"),
