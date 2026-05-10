@@ -6,7 +6,6 @@ import {
   StyleSheet,
   Pressable,
   TextInput,
-  Image,
   Alert,
   ScrollView,
   KeyboardAvoidingView,
@@ -21,6 +20,7 @@ import {
   getDayKeyForTimestamp,
   getResolvedTimeZone,
 } from "@repo/ui/lib/day-window";
+import { Image } from "expo-image";
 import {
   Radius,
   Spacing,
@@ -186,8 +186,12 @@ export function MemoryDetailSheet({
             >
               {hasImage ? (
                 <Image
-                  source={{ uri: memory.thumbnailUrl ?? undefined }}
+                  source={{ uri: memory.thumbnailUrl ?? "" }}
                   style={styles.image}
+                  contentFit="cover"
+                  transition={220}
+                  cachePolicy="memory-disk"
+                  accessibilityLabel={`Memory photo for ${memory.title ?? "this memory"}`}
                 />
               ) : mood ? (
                 <View style={styles.moodHero}>

@@ -12,6 +12,7 @@
     "test": "vitest run --config vitest.config.ts",
     "test:watch": "vitest --config vitest.config.ts",
     "check-types": "tsc --noEmit",
+    "build": "pnpm run build:ci",
     "build:ci": "CI=1 expo export --platform web"
   },
   "dependencies": {

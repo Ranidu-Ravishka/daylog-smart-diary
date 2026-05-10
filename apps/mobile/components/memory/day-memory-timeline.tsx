@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo } from "react";
-import { View, Text, Pressable, Image, StyleSheet } from "react-native";
+import { View, Text, Pressable, StyleSheet } from "react-native";
+import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { MOOD_LABELS } from "@repo/ui/lib/constants";
 import {
@@ -11,12 +12,23 @@ import {
 import { MoodEmoji } from "@/components/ui/mood-emoji";
 import type { MemoryItem } from "@/components/memory/types";
 import type { DayTimelineEntry } from "@/lib/day-timeline";
+import {
+  SwipeableManualNoteRow,
+  type ManualNoteEditorBindings,
+} from "@/components/memory/swipeable-manual-note-row";
+
+export type { ManualNoteEditorBindings } from "@/components/memory/swipeable-manual-note-row";
+
+const IMAGE_TRANSITION_MS = 200;
 
 type DayMemoryTimelineProps = {
   entries: DayTimelineEntry[];
   colors: ThemeColors;
   onOpenMemory: (memory: MemoryItem) => void;
-  onPressNote: (index: number) => void;
+  /** Used when {@link manualNoteEditor} is not provided (legacy tap → sheet). */
+  onPressNote?: (index: number) => void;
+  /** When set, manual notes use swipe / inline edit instead of {@link onPressNote}. */
+  manualNoteEditor?: ManualNoteEditorBindings;
 };
 
 function DayMemoryTimelineComponent({
@@ -24,6 +36,7 @@ function DayMemoryTimelineComponent({
   colors,
   onOpenMemory,
   onPressNote,
+  manualNoteEditor,
 }: DayMemoryTimelineProps) {
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -44,6 +57,7 @@ function DayMemoryTimelineComponent({
             colors={colors}
             onOpenMemory={onOpenMemory}
             onPressNote={onPressNote}
+            manualNoteEditor={manualNoteEditor}
           />
         );
       })}
@@ -61,7 +75,8 @@ type TimelineRowProps = {
   styles: RowStyles;
   colors: ThemeColors;
   onOpenMemory: (memory: MemoryItem) => void;
-  onPressNote: (index: number) => void;
+  onPressNote?: (index: number) => void;
+  manualNoteEditor?: ManualNoteEditorBindings;
 };
 
 function TimelineRowComponent({
@@ -71,6 +86,7 @@ function TimelineRowComponent({
   colors,
   onOpenMemory,
   onPressNote,
+  manualNoteEditor,
 }: TimelineRowProps) {
   const handleMemoryPress = useCallback(() => {
     if (entry.kind === "memory") {
@@ -79,12 +95,14 @@ function TimelineRowComponent({
   }, [entry, onOpenMemory]);
 
   const handleNotePress = useCallback(() => {
-    if (entry.kind === "note") {
+    if (entry.kind === "note" && onPressNote) {
       onPressNote(entry.index);
     }
   }, [entry, onPressNote]);
 
   if (entry.kind === "note") {
+    const useSwipe = Boolean(manualNoteEditor);
+
     return (
       <View style={styles.row}>
         <View style={styles.rail}>
@@ -93,17 +111,41 @@ function TimelineRowComponent({
           </View>
           {!isLast ? <View style={styles.railLine} /> : null}
         </View>
-        <Pressable
-          style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
-          onPress={handleNotePress}
-          accessibilityRole="button"
-          accessibilityLabel={`Manual note: ${entry.text}. Opens edit or delete options.`}
-        >
-          <Text style={styles.notePillLabel}>Note</Text>
-          <Text style={styles.cardTitle} numberOfLines={4}>
-            {entry.text}
-          </Text>
-        </Pressable>
+        {useSwipe && manualNoteEditor ? (
+          <SwipeableManualNoteRow
+            noteIndex={entry.index}
+            noteText={entry.text}
+            colors={colors}
+            variant="timeline"
+            isEditing={manualNoteEditor.editingIndex === entry.index}
+            draft={manualNoteEditor.draft}
+            onDraftChange={manualNoteEditor.onDraftChange}
+            onBeginEdit={() => {
+              manualNoteEditor.onBeginEdit(entry.index);
+            }}
+            onSave={manualNoteEditor.onSave}
+            onCancel={manualNoteEditor.onCancel}
+            onDelete={() => {
+              manualNoteEditor.onDelete(entry.index);
+            }}
+            saveDisabled={manualNoteEditor.saveDisabled}
+            saveLoading={manualNoteEditor.saveLoading}
+          />
+        ) : (
+          <Pressable
+            style={({ pressed }) => [
+              styles.card,
+              pressed && styles.cardPressed,
+            ]}
+            onPress={handleNotePress}
+            accessibilityRole="button"
+            accessibilityLabel={`Manual note: ${entry.text}. Opens edit or delete options.`}
+          >
+            <Text style={styles.cardTitle} numberOfLines={4}>
+              {entry.text}
+            </Text>
+          </Pressable>
+        )}
       </View>
     );
   }
@@ -113,6 +155,9 @@ function TimelineRowComponent({
   const moodLabel = memory.mood
     ? (MOOD_LABELS[memory.mood] ?? memory.mood)
     : null;
+
+  const imageLabel =
+    `Photo thumbnail${memory.title ? ` for ${memory.title}` : ""}`.trim();
 
   return (
     <View style={styles.row}>
@@ -152,8 +197,12 @@ function TimelineRowComponent({
         {hasImage ? (
           <View style={styles.mediaRow}>
             <Image
-              source={{ uri: memory.thumbnailUrl ?? undefined }}
+              source={{ uri: memory.thumbnailUrl ?? "" }}
               style={styles.thumb}
+              contentFit="cover"
+              transition={IMAGE_TRANSITION_MS}
+              cachePolicy="memory-disk"
+              accessibilityLabel={imageLabel}
             />
             <View style={styles.mediaTextCol}>
               <Text style={styles.cardTitle} numberOfLines={2}>
@@ -264,13 +313,6 @@ function createStyles(c: ThemeColors) {
       ...Typography.label,
       flexShrink: 1,
       textAlign: "right",
-    },
-    notePillLabel: {
-      ...Typography.caption2,
-      color: c.tint,
-      marginBottom: 4,
-      textTransform: "uppercase",
-      letterSpacing: 0.6,
     },
     cardTitle: {
       ...Typography.bodyMedium,

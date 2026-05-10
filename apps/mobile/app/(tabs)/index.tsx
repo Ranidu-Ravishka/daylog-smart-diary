@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
-  Image,
   Pressable,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -24,6 +23,7 @@ import {
   Shadows,
   type ThemeColors,
 } from "@/constants/theme";
+import { Image } from "expo-image";
 import { useAppTheme } from "@/components/theme-provider";
 import { AppCard } from "@/components/ui/app-card";
 import { SectionHeader } from "@/components/ui/section-header";
@@ -453,6 +453,10 @@ const HomeScreen = () => {
                       <Image
                         source={{ uri: thumb }}
                         style={styles.memoryThumb}
+                        contentFit="cover"
+                        transition={200}
+                        cachePolicy="memory-disk"
+                        accessibilityLabel={`Thumbnail for ${mem.title ?? "memory"}`}
                       />
                     ) : null}
                     <View style={styles.memoryTime}>

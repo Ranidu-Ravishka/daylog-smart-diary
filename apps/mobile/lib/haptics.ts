@@ -1,4 +1,5 @@
 import * as Haptics from "expo-haptics";
+import { Platform } from "react-native";
 
 /**
  * Tiny wrapper around `expo-haptics` so callers don't need to remember the
@@ -45,4 +46,15 @@ export async function warningNotification(): Promise<void> {
   await safeRun(() =>
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning),
   );
+}
+
+/** Cross-platform “something serious happened” (e.g. delete affordance engaged). */
+export async function destructiveImpact(): Promise<void> {
+  if (Platform.OS === "ios") {
+    await safeRun(() =>
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning),
+    );
+    return;
+  }
+  await safeRun(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium));
 }

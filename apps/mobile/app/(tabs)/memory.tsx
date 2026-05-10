@@ -8,10 +8,6 @@ import {
   ScrollView,
   RefreshControl,
   Alert,
-  Modal,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from "react-native";
@@ -47,8 +43,14 @@ import {
   MemoryDetailSheet,
   type MemoryPatchPayload,
 } from "@/components/memory/memory-detail-sheet";
-import { DayMemoryTimeline } from "@/components/memory/day-memory-timeline";
+import {
+  DayMemoryTimeline,
+  type ManualNoteEditorBindings,
+} from "@/components/memory/day-memory-timeline";
+import { JournalDayStrip } from "@/components/memory/journal-day-strip";
 import { MemoryEmptyIllustration } from "@/components/memory/memory-empty-illustration";
+import { SwipeableManualNoteRow } from "@/components/memory/swipeable-manual-note-row";
+import { UndoToast } from "@/components/ui/undo-toast";
 import { PeopleYouMetSection } from "@/components/memory/people-you-met-section";
 import type { MemoryItem } from "@/components/memory/types";
 import {
@@ -62,6 +64,7 @@ import {
 import { captureException, logInfo, logWarn } from "@/lib/observability";
 import { getTodayDayKey, shiftDayKey } from "@/lib/day-key";
 import { formatLastSyncTime } from "@/lib/format-sync-status";
+import { destructiveImpact } from "@/lib/haptics";
 import { buildDayTimelineEntries } from "@/lib/day-timeline";
 
 type MemoryDoc = MemoryItem;
@@ -236,6 +239,7 @@ const DailyDetailView = () => {
   const [dayKey, setDayKey] = useState(getTodayDayKey());
   const scrollRef = React.useRef<ScrollView>(null);
   const manualNotesSectionYRef = React.useRef(0);
+  const journalTimelineSectionYRef = React.useRef(0);
   const manualEntryInputRef = React.useRef<TextInput>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
@@ -747,6 +751,10 @@ const DailyDetailView = () => {
     value: string;
   } | null>(null);
   const [isEditingNoteSaving, setIsEditingNoteSaving] = useState(false);
+  const [undoNotesSnapshot, setUndoNotesSnapshot] = useState<string[] | null>(
+    null,
+  );
+  const [undoToastVisible, setUndoToastVisible] = useState(false);
 
   const handleSaveEditedNote = useCallback(async () => {
     if (!editingNote) return;
@@ -774,52 +782,98 @@ const DailyDetailView = () => {
     }
   }, [editingNote, manualNotes, dayKey, upsertDay]);
 
+  const dismissUndoToast = useCallback(() => {
+    setUndoToastVisible(false);
+    setUndoNotesSnapshot(null);
+  }, []);
+
+  const handleUndoDelete = useCallback(async () => {
+    if (!undoNotesSnapshot) {
+      setUndoToastVisible(false);
+      return;
+    }
+    try {
+      await upsertDay({ dayKey, manualNotes: undoNotesSnapshot });
+    } catch (error) {
+      captureException("mobile_day_note_undo_failed", error, { dayKey });
+      Alert.alert("Error", "Could not restore the note.");
+    } finally {
+      setUndoNotesSnapshot(null);
+      setUndoToastVisible(false);
+    }
+  }, [undoNotesSnapshot, dayKey, upsertDay]);
+
   const handleDeleteNote = useCallback(
-    (index: number) => {
+    async (index: number) => {
       const current = manualNotes[index];
       if (typeof current !== "string") return;
-      Alert.alert("Delete note?", current, [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            const nextNotes = manualNotes.filter((_, i) => i !== index);
-            try {
-              await upsertDay({ dayKey, manualNotes: nextNotes });
-            } catch (error) {
-              captureException("mobile_day_note_delete_failed", error, {
-                dayKey,
-                index,
-              });
-              Alert.alert("Error", "Could not delete this note.");
-            }
-          },
-        },
-      ]);
+
+      void destructiveImpact();
+      const previousNotes = [...manualNotes];
+      const nextNotes = manualNotes.filter((_, i) => i !== index);
+      setEditingNote(null);
+
+      setUndoNotesSnapshot(previousNotes);
+      setUndoToastVisible(true);
+
+      try {
+        await upsertDay({ dayKey, manualNotes: nextNotes });
+      } catch (error) {
+        setUndoNotesSnapshot(null);
+        setUndoToastVisible(false);
+        captureException("mobile_day_note_delete_failed", error, {
+          dayKey,
+          index,
+        });
+        Alert.alert("Error", "Could not delete this note.");
+      }
     },
     [manualNotes, dayKey, upsertDay],
   );
 
-  const handleNotePress = useCallback(
-    (index: number) => {
-      const current = manualNotes[index];
-      if (typeof current !== "string") return;
-      Alert.alert("Manual note", current, [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Edit",
-          onPress: () => setEditingNote({ index, value: current }),
-        },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => handleDeleteNote(index),
-        },
-      ]);
-    },
-    [manualNotes, handleDeleteNote],
+  const manualNoteEditor: ManualNoteEditorBindings = React.useMemo(
+    () => ({
+      editingIndex: editingNote?.index ?? null,
+      draft: editingNote?.value ?? "",
+      onDraftChange: (text: string) =>
+        setEditingNote((current) =>
+          current ? { ...current, value: text } : current,
+        ),
+      onBeginEdit: (index: number) => {
+        const note = manualNotes[index];
+        if (typeof note === "string") {
+          setEditingNote({ index, value: note });
+        }
+      },
+      onSave: handleSaveEditedNote,
+      onCancel: () => setEditingNote(null),
+      onDelete: handleDeleteNote,
+      saveDisabled:
+        !editingNote ||
+        !editingNote.value.trim() ||
+        Boolean(isEditingNoteSaving),
+      saveLoading: isEditingNoteSaving,
+    }),
+    [
+      editingNote,
+      handleSaveEditedNote,
+      handleDeleteNote,
+      manualNotes,
+      isEditingNoteSaving,
+    ],
   );
+
+  React.useEffect(() => {
+    const y = journalTimelineSectionYRef.current;
+    if (y <= 0) return;
+    const id = requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({
+        y: Math.max(0, y - Spacing.lg),
+        animated: true,
+      });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [dayKey]);
 
   const handleDeleteMemory = useCallback(
     async (memory: MemoryDoc) => {
@@ -847,6 +901,7 @@ const DailyDetailView = () => {
         ref={scrollRef}
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         onScroll={handleMemoryScroll}
         scrollEventThrottle={120}
         refreshControl={
@@ -878,6 +933,14 @@ const DailyDetailView = () => {
             </TouchableOpacity>
           </View>
           <Text style={styles.syncText}>{syncStatusText}</Text>
+        </View>
+
+        <View style={{ paddingHorizontal: Spacing.xl }}>
+          <JournalDayStrip
+            selectedDayKey={dayKey}
+            onSelectDay={setDayKey}
+            colors={c}
+          />
         </View>
 
         {/* ── Quick Metrics ───────────────────────────── */}
@@ -1069,9 +1132,14 @@ const DailyDetailView = () => {
 
         {/* ── Today's timeline (memories + notes) ───────── */}
         {resolvedMemories.length > 0 || manualNotes.length > 0 ? (
-          <View style={styles.section}>
+          <View
+            style={styles.section}
+            onLayout={(event) => {
+              journalTimelineSectionYRef.current = event.nativeEvent.layout.y;
+            }}
+          >
             <SectionHeader
-              title="Today's timeline"
+              title="Journal timeline"
               action={
                 includeNotesInTimeline ? "Memories & notes" : "Filtered view"
               }
@@ -1168,7 +1236,7 @@ const DailyDetailView = () => {
                   entries={timelineEntries}
                   colors={c}
                   onOpenMemory={(memory) => setSelectedMemory(memory)}
-                  onPressNote={handleNotePress}
+                  manualNoteEditor={manualNoteEditor}
                 />
               ) : (
                 <EmptyState
@@ -1192,7 +1260,7 @@ const DailyDetailView = () => {
           </View>
         ) : (
           <View style={styles.section}>
-            <SectionHeader title="Today's timeline" />
+            <SectionHeader title="Journal timeline" />
             <AppCard>
               <EmptyState
                 icon="time-outline"
@@ -1271,23 +1339,28 @@ const DailyDetailView = () => {
             {manualNotes.length > 0 && (
               <View style={{ marginBottom: Spacing.lg }}>
                 {manualNotes.map((note: string, index: number) => (
-                  <TouchableOpacity
-                    key={`${index}-${note}`}
-                    style={styles.noteRow}
-                    onPress={() => handleNotePress(index)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Note: ${note}. Tap for edit or delete.`}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.noteBullet} />
-                    <Text style={styles.noteText}>{note}</Text>
-                    <Ionicons
-                      name="ellipsis-horizontal"
-                      size={16}
-                      color={c.textTertiary}
-                      style={styles.noteAction}
-                    />
-                  </TouchableOpacity>
+                  <SwipeableManualNoteRow
+                    key={`${dayKey}-note-${index}`}
+                    noteIndex={index}
+                    noteText={note}
+                    colors={c}
+                    variant="list"
+                    isEditing={editingNote?.index === index}
+                    draft={
+                      editingNote?.index === index ? editingNote.value : ""
+                    }
+                    onDraftChange={manualNoteEditor.onDraftChange}
+                    onBeginEdit={() => {
+                      manualNoteEditor.onBeginEdit(index);
+                    }}
+                    onSave={manualNoteEditor.onSave}
+                    onCancel={manualNoteEditor.onCancel}
+                    onDelete={() => {
+                      void manualNoteEditor.onDelete(index);
+                    }}
+                    saveDisabled={manualNoteEditor.saveDisabled}
+                    saveLoading={manualNoteEditor.saveLoading}
+                  />
                 ))}
               </View>
             )}
@@ -1376,60 +1449,16 @@ const DailyDetailView = () => {
         onSave={handleSaveMemory}
         onDelete={handleDeleteMemory}
       />
-      <Modal
-        visible={editingNote !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setEditingNote(null)}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={styles.editNoteBackdrop}
-        >
-          <Pressable
-            style={StyleSheet.absoluteFillObject}
-            onPress={() => setEditingNote(null)}
-          />
-          <View style={styles.editNoteCard}>
-            <Text style={styles.editNoteTitle}>Edit note</Text>
-            <TextInput
-              style={[styles.input, styles.editNoteInput]}
-              value={editingNote?.value ?? ""}
-              onChangeText={(value) =>
-                setEditingNote((current) =>
-                  current ? { ...current, value } : current,
-                )
-              }
-              placeholder="Note text"
-              placeholderTextColor={c.textTertiary}
-              multiline
-              autoFocus
-              accessibilityLabel="Edit note text"
-            />
-            <View style={styles.editNoteActions}>
-              <AppButton
-                title="Cancel"
-                variant="secondary"
-                onPress={() => setEditingNote(null)}
-                size="md"
-                style={{ flex: 1 }}
-              />
-              <AppButton
-                title="Save"
-                onPress={handleSaveEditedNote}
-                disabled={
-                  !editingNote ||
-                  !editingNote.value.trim() ||
-                  isEditingNoteSaving
-                }
-                loading={isEditingNoteSaving}
-                size="md"
-                style={{ flex: 1 }}
-              />
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+      <UndoToast
+        visible={undoToastVisible}
+        message="Note deleted"
+        actionLabel="Undo"
+        onUndo={() => {
+          void handleUndoDelete();
+        }}
+        onDismiss={dismissUndoToast}
+        colors={c}
+      />
     </SafeAreaView>
   );
 };
@@ -1687,56 +1716,6 @@ function createStyles(c: ThemeColors) {
       color: c.textSecondary,
     },
 
-    // Notes
-    noteRow: {
-      flexDirection: "row",
-      alignItems: "flex-start",
-      marginBottom: Spacing.sm,
-    },
-    noteBullet: {
-      width: 6,
-      height: 6,
-      borderRadius: 3,
-      backgroundColor: c.tint,
-      marginTop: 7,
-      marginRight: Spacing.sm,
-    },
-    noteText: {
-      ...Typography.body,
-      color: c.text,
-      flex: 1,
-    },
-    noteAction: {
-      marginLeft: Spacing.sm,
-      opacity: 0.6,
-    },
-    editNoteBackdrop: {
-      flex: 1,
-      backgroundColor: c.overlay,
-      justifyContent: "center",
-      paddingHorizontal: Spacing.xl,
-    },
-    editNoteCard: {
-      backgroundColor: c.surface,
-      borderRadius: Radius.xl,
-      borderWidth: 1,
-      borderColor: c.border,
-      padding: Spacing.xl,
-      gap: Spacing.md,
-    },
-    editNoteTitle: {
-      ...Typography.title3,
-      color: c.text,
-    },
-    editNoteInput: {
-      minHeight: 96,
-      textAlignVertical: "top",
-      paddingTop: Spacing.md,
-    },
-    editNoteActions: {
-      flexDirection: "row",
-      gap: Spacing.sm,
-    },
     input: {
       backgroundColor: c.surface,
       borderRadius: Radius.md,
