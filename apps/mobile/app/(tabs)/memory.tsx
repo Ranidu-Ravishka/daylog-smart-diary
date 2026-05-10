@@ -8,6 +8,10 @@ import {
   ScrollView,
   RefreshControl,
   Alert,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from "react-native";
@@ -57,6 +61,8 @@ import {
   type AppleCalendarTimelineEvent,
 } from "@/lib/apple-calendar-sync";
 import { captureException, logInfo, logWarn } from "@/lib/observability";
+import { getTodayDayKey, shiftDayKey } from "@/lib/day-key";
+import { formatLastSyncTime } from "@/lib/format-sync-status";
 
 type MemoryDoc = MemoryItem;
 
@@ -124,44 +130,6 @@ function toProviderLabel(provider: string): string {
       provider as keyof typeof INTEGRATION_PROVIDER_META
     ]?.label ?? provider
   );
-}
-
-function getTodayDayKey(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-}
-
-function shiftDayKey(dayKey: string, deltaDays: number): string {
-  const [year, month, day] = dayKey.split("-").map((value) => Number(value));
-  const date = new Date(year, Math.max(0, month - 1), day);
-  date.setDate(date.getDate() + deltaDays);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function formatRelativeElapsed(lastSyncAt: number, now: number): string {
-  const elapsedSeconds = Math.max(0, Math.floor((now - lastSyncAt) / 1000));
-  if (elapsedSeconds < 60) return `${elapsedSeconds}s ago`;
-
-  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
-  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
-
-  const elapsedHours = Math.floor(elapsedMinutes / 60);
-  if (elapsedHours < 24) return `${elapsedHours}h ago`;
-
-  const elapsedDays = Math.floor(elapsedHours / 24);
-  return `${elapsedDays}d ago`;
-}
-
-function formatLastSyncTime(lastSyncAt: number | null, now: number): string {
-  if (lastSyncAt === null) return "Last sync: pending";
-
-  const absolute = new Date(lastSyncAt).toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-
-  return `Last sync: ${absolute} • Updated ${formatRelativeElapsed(lastSyncAt, now)}`;
 }
 
 function formatDurationLabel(durationMinutes: number): string {
@@ -697,8 +665,11 @@ const DailyDetailView = () => {
 
   const moodFromMemories =
     resolvedMemories.length > 0 ? (resolvedMemories[0]?.mood ?? null) : null;
+  const moodSummaryEmoji = moodFromMemories
+    ? (MOOD_EMOJI[moodFromMemories] ?? null)
+    : null;
   const moodSummaryLabel = moodFromMemories
-    ? `${MOOD_EMOJI[moodFromMemories] ?? ""} ${MOOD_LABELS[moodFromMemories] ?? moodFromMemories}`.trim()
+    ? (MOOD_LABELS[moodFromMemories] ?? moodFromMemories)
     : null;
   const availableTags = React.useMemo(() => {
     const merged = resolvedMemories.flatMap((memory) => memory.tags ?? []);
@@ -732,6 +703,9 @@ const DailyDetailView = () => {
           memoryId: memory._id as GenericId<"memories">,
           title: patch.title,
           description: patch.description,
+          mood: patch.mood,
+          happenedAt: patch.happenedAt,
+          dayKey: patch.dayKey,
           location: patch.location,
           tags: patch.tags,
           linkedPeople: patch.linkedPeople,
@@ -746,6 +720,85 @@ const DailyDetailView = () => {
       }
     },
     [updateMemory],
+  );
+
+  const [editingNote, setEditingNote] = useState<{
+    index: number;
+    value: string;
+  } | null>(null);
+  const [isEditingNoteSaving, setIsEditingNoteSaving] = useState(false);
+
+  const handleSaveEditedNote = useCallback(async () => {
+    if (!editingNote) return;
+    const trimmed = editingNote.value.trim();
+    if (!trimmed) return;
+    if (trimmed === manualNotes[editingNote.index]) {
+      setEditingNote(null);
+      return;
+    }
+    const nextNotes = manualNotes.map((entry, i) =>
+      i === editingNote.index ? trimmed : entry,
+    );
+    setIsEditingNoteSaving(true);
+    try {
+      await upsertDay({ dayKey, manualNotes: nextNotes });
+      setEditingNote(null);
+    } catch (error) {
+      captureException("mobile_day_note_edit_failed", error, {
+        dayKey,
+        index: editingNote.index,
+      });
+      Alert.alert("Error", "Could not update this note.");
+    } finally {
+      setIsEditingNoteSaving(false);
+    }
+  }, [editingNote, manualNotes, dayKey, upsertDay]);
+
+  const handleDeleteNote = useCallback(
+    (index: number) => {
+      const current = manualNotes[index];
+      if (typeof current !== "string") return;
+      Alert.alert("Delete note?", current, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            const nextNotes = manualNotes.filter((_, i) => i !== index);
+            try {
+              await upsertDay({ dayKey, manualNotes: nextNotes });
+            } catch (error) {
+              captureException("mobile_day_note_delete_failed", error, {
+                dayKey,
+                index,
+              });
+              Alert.alert("Error", "Could not delete this note.");
+            }
+          },
+        },
+      ]);
+    },
+    [manualNotes, dayKey, upsertDay],
+  );
+
+  const handleNotePress = useCallback(
+    (index: number) => {
+      const current = manualNotes[index];
+      if (typeof current !== "string") return;
+      Alert.alert("Manual note", current, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Edit",
+          onPress: () => setEditingNote({ index, value: current }),
+        },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => handleDeleteNote(index),
+        },
+      ]);
+    },
+    [manualNotes, handleDeleteNote],
   );
 
   const handleDeleteMemory = useCallback(
@@ -810,9 +863,19 @@ const DailyDetailView = () => {
         {/* ── Quick Metrics ───────────────────────────── */}
         <View style={styles.metricsRow}>
           <View style={styles.metricChip}>
-            <Ionicons name="happy-outline" size={14} color={c.tint} />
+            {moodSummaryEmoji ? (
+              <Text
+                style={styles.metricEmoji}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              >
+                {moodSummaryEmoji}
+              </Text>
+            ) : (
+              <Ionicons name="happy-outline" size={14} color={c.tint} />
+            )}
             <Text style={styles.metricText}>
-              {moodSummaryLabel || "No mood"}
+              {moodSummaryLabel ?? "No mood"}
             </Text>
           </View>
           <View style={styles.metricChip}>
@@ -1146,10 +1209,23 @@ const DailyDetailView = () => {
             {manualNotes.length > 0 && (
               <View style={{ marginBottom: Spacing.lg }}>
                 {manualNotes.map((note: string, index: number) => (
-                  <View key={index} style={styles.noteRow}>
+                  <TouchableOpacity
+                    key={`${index}-${note}`}
+                    style={styles.noteRow}
+                    onPress={() => handleNotePress(index)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Note: ${note}. Tap for edit or delete.`}
+                    activeOpacity={0.7}
+                  >
                     <View style={styles.noteBullet} />
                     <Text style={styles.noteText}>{note}</Text>
-                  </View>
+                    <Ionicons
+                      name="ellipsis-horizontal"
+                      size={16}
+                      color={c.textTertiary}
+                      style={styles.noteAction}
+                    />
+                  </TouchableOpacity>
                 ))}
               </View>
             )}
@@ -1238,6 +1314,60 @@ const DailyDetailView = () => {
         onSave={handleSaveMemory}
         onDelete={handleDeleteMemory}
       />
+      <Modal
+        visible={editingNote !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditingNote(null)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.editNoteBackdrop}
+        >
+          <Pressable
+            style={StyleSheet.absoluteFillObject}
+            onPress={() => setEditingNote(null)}
+          />
+          <View style={styles.editNoteCard}>
+            <Text style={styles.editNoteTitle}>Edit note</Text>
+            <TextInput
+              style={[styles.input, styles.editNoteInput]}
+              value={editingNote?.value ?? ""}
+              onChangeText={(value) =>
+                setEditingNote((current) =>
+                  current ? { ...current, value } : current,
+                )
+              }
+              placeholder="Note text"
+              placeholderTextColor={c.textTertiary}
+              multiline
+              autoFocus
+              accessibilityLabel="Edit note text"
+            />
+            <View style={styles.editNoteActions}>
+              <AppButton
+                title="Cancel"
+                variant="secondary"
+                onPress={() => setEditingNote(null)}
+                size="md"
+                style={{ flex: 1 }}
+              />
+              <AppButton
+                title="Save"
+                onPress={handleSaveEditedNote}
+                disabled={
+                  !editingNote ||
+                  !editingNote.value.trim() ||
+                  isEditingNoteSaving
+                }
+                loading={isEditingNoteSaving}
+                size="md"
+                style={{ flex: 1 }}
+              />
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -1303,6 +1433,10 @@ function createStyles(c: ThemeColors) {
     metricText: {
       ...Typography.caption1,
       color: c.tint,
+    },
+    metricEmoji: {
+      fontSize: 14,
+      lineHeight: 16,
     },
 
     // Section
@@ -1524,6 +1658,37 @@ function createStyles(c: ThemeColors) {
       ...Typography.body,
       color: c.text,
       flex: 1,
+    },
+    noteAction: {
+      marginLeft: Spacing.sm,
+      opacity: 0.6,
+    },
+    editNoteBackdrop: {
+      flex: 1,
+      backgroundColor: c.overlay,
+      justifyContent: "center",
+      paddingHorizontal: Spacing.xl,
+    },
+    editNoteCard: {
+      backgroundColor: c.surface,
+      borderRadius: Radius.xl,
+      borderWidth: 1,
+      borderColor: c.border,
+      padding: Spacing.xl,
+      gap: Spacing.md,
+    },
+    editNoteTitle: {
+      ...Typography.title3,
+      color: c.text,
+    },
+    editNoteInput: {
+      minHeight: 96,
+      textAlignVertical: "top",
+      paddingTop: Spacing.md,
+    },
+    editNoteActions: {
+      flexDirection: "row",
+      gap: Spacing.sm,
     },
     input: {
       backgroundColor: c.surface,

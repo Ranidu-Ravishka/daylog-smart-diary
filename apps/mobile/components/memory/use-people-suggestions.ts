@@ -4,6 +4,7 @@ import { useQuery } from "convex/react";
 import { api } from "@repo/backend/convex";
 import { Alert } from "react-native";
 import type { MemoryItem } from "@/components/memory/types";
+import { extractNameCandidatesFromText } from "@/lib/extract-people";
 
 export type IntegrationDailyDataForPeople = {
   signals?: string[];
@@ -71,18 +72,6 @@ function getSuggestionGroup(
     return "recent";
   }
   return "occasional";
-}
-
-function extractNameCandidatesFromText(value: string): string[] {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  if (!normalized) return [];
-  const split = normalized
-    .split(/[,&/]| and | with /gi)
-    .map((part) => normalizePersonName(part))
-    .filter(Boolean);
-  return split.filter((part) =>
-    /^[A-Za-z][A-Za-z.'-]*(\s+[A-Za-z][A-Za-z.'-]*)*$/.test(part),
-  );
 }
 
 function getContactsModule(): ContactsModuleLike | null {

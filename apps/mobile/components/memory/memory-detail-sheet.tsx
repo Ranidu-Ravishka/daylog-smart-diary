@@ -8,8 +8,19 @@ import {
   TextInput,
   Image,
   Alert,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
+import DateTimePicker, {
+  type DateTimePickerEvent,
+} from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
+import { MOOD_OPTIONS, MOOD_EMOJI, MOOD_LABELS } from "@repo/ui/lib/constants";
+import {
+  getDayKeyForTimestamp,
+  getResolvedTimeZone,
+} from "@repo/ui/lib/day-window";
 import {
   Radius,
   Spacing,
@@ -33,6 +44,9 @@ type MemoryDetailSheetProps = {
 export type MemoryPatchPayload = {
   title: string;
   description?: string;
+  mood?: string;
+  happenedAt?: number;
+  dayKey?: string;
   location?: string;
   tags?: string[];
   linkedPeople?: string[];
@@ -60,6 +74,9 @@ export function MemoryDetailSheet({
   const [isEditMode, setIsEditMode] = React.useState(false);
   const [title, setTitle] = React.useState("");
   const [description, setDescription] = React.useState("");
+  const [mood, setMood] = React.useState<string | undefined>(undefined);
+  const [happenedAt, setHappenedAt] = React.useState<number | null>(null);
+  const [isDatePickerVisible, setIsDatePickerVisible] = React.useState(false);
   const [location, setLocation] = React.useState("");
   const [tagsInput, setTagsInput] = React.useState("");
   const [linkedPeopleInput, setLinkedPeopleInput] = React.useState("");
@@ -68,21 +85,30 @@ export function MemoryDetailSheet({
     if (!memory) return;
     setTitle(memory.title ?? "");
     setDescription(memory.description ?? "");
+    setMood(memory.mood);
+    setHappenedAt(memory.happenedAt ?? null);
     setLocation(memory.location ?? "");
     setTagsInput((memory.tags ?? []).join(", "));
     setLinkedPeopleInput((memory.linkedPeople ?? []).join(", "));
     setIsEditMode(false);
+    setIsDatePickerVisible(false);
   }, [memory]);
 
   const handleSave = async () => {
     if (!memory || !title.trim()) return;
-    await onSave(memory, {
+    const patch: MemoryPatchPayload = {
       title: title.trim(),
       description: description.trim() || undefined,
+      mood: mood?.trim() ? mood.trim() : undefined,
       location: location.trim() || undefined,
       tags: splitCsv(tagsInput),
       linkedPeople: splitCsv(linkedPeopleInput),
-    });
+    };
+    if (happenedAt !== null && happenedAt !== memory.happenedAt) {
+      patch.happenedAt = happenedAt;
+      patch.dayKey = getDayKeyForTimestamp(happenedAt, getResolvedTimeZone());
+    }
+    await onSave(memory, patch);
     setIsEditMode(false);
   };
 
@@ -104,6 +130,24 @@ export function MemoryDetailSheet({
     );
   };
 
+  const handleTimestampChange = (
+    event: DateTimePickerEvent,
+    selectedDate?: Date,
+  ) => {
+    if (Platform.OS === "android") {
+      setIsDatePickerVisible(false);
+    }
+    if (event.type === "dismissed" || !selectedDate) return;
+    setHappenedAt(selectedDate.getTime());
+  };
+
+  const dateLabel = happenedAt
+    ? new Date(happenedAt).toLocaleString()
+    : "Not set";
+  const moodEmojiForBadge = mood ? MOOD_EMOJI[mood] : null;
+  const moodLabelForBadge = mood ? (MOOD_LABELS[mood] ?? mood) : null;
+  const hasImage = Boolean(memory?.thumbnailUrl);
+
   return (
     <Modal
       visible={visible}
@@ -111,111 +155,264 @@ export function MemoryDetailSheet({
       animationType="slide"
       onRequestClose={onClose}
     >
-      <View style={styles.backdrop}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={styles.backdrop}
+      >
         <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
         <View style={styles.sheet}>
+          <View style={styles.handle} />
           <View style={styles.headerRow}>
-            <Text style={styles.headerTitle}>Memory details</Text>
+            <Text style={styles.headerTitle}>
+              {isEditMode ? "Edit memory" : "Memory details"}
+            </Text>
             <Pressable
               onPress={onClose}
               accessibilityLabel="Close memory details"
+              accessibilityRole="button"
+              hitSlop={8}
             >
               <Ionicons name="close" size={22} color={colors.textSecondary} />
             </Pressable>
           </View>
+
           {memory ? (
-            <>
-              {memory.thumbnailUrl ? (
+            <ScrollView
+              style={styles.scrollWrap}
+              contentContainerStyle={styles.scrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              {hasImage ? (
                 <Image
-                  source={{ uri: memory.thumbnailUrl }}
+                  source={{ uri: memory.thumbnailUrl ?? undefined }}
                   style={styles.image}
                 />
+              ) : moodEmojiForBadge ? (
+                <View style={styles.moodHero}>
+                  <Text
+                    style={styles.moodHeroEmoji}
+                    accessibilityElementsHidden
+                    importantForAccessibility="no"
+                  >
+                    {moodEmojiForBadge}
+                  </Text>
+                  <Text style={styles.moodHeroLabel}>{moodLabelForBadge}</Text>
+                </View>
               ) : null}
+
               <View style={styles.formWrap}>
-                <TextInput
-                  style={styles.input}
-                  value={title}
-                  onChangeText={setTitle}
-                  editable={isEditMode && !isSaving}
-                  accessibilityLabel="Memory title"
-                />
-                <TextInput
-                  style={[styles.input, styles.textArea]}
-                  value={description}
-                  onChangeText={setDescription}
-                  editable={isEditMode && !isSaving}
-                  multiline
-                  accessibilityLabel="Memory description"
-                />
-                <TextInput
-                  style={styles.input}
-                  value={tagsInput}
-                  onChangeText={setTagsInput}
-                  editable={isEditMode && !isSaving}
-                  placeholder="tags"
-                  placeholderTextColor={colors.textTertiary}
-                  accessibilityLabel="Memory tags"
-                />
-                <TextInput
-                  style={styles.input}
-                  value={location}
-                  onChangeText={setLocation}
-                  editable={isEditMode && !isSaving}
-                  placeholder="location"
-                  placeholderTextColor={colors.textTertiary}
-                  accessibilityLabel="Memory location"
-                />
-                <TextInput
-                  style={styles.input}
-                  value={linkedPeopleInput}
-                  onChangeText={setLinkedPeopleInput}
-                  editable={isEditMode && !isSaving}
-                  placeholder="linked people"
-                  placeholderTextColor={colors.textTertiary}
-                  accessibilityLabel="Linked people"
-                />
+                <Field label="Title">
+                  <TextInput
+                    style={styles.input}
+                    value={title}
+                    onChangeText={setTitle}
+                    editable={isEditMode && !isSaving}
+                    placeholderTextColor={colors.textTertiary}
+                    accessibilityLabel="Memory title"
+                  />
+                </Field>
+
+                <Field label="Description">
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    value={description}
+                    onChangeText={setDescription}
+                    editable={isEditMode && !isSaving}
+                    placeholder="Describe what made this moment matter…"
+                    placeholderTextColor={colors.textTertiary}
+                    multiline
+                    accessibilityLabel="Memory description"
+                  />
+                </Field>
+
+                <Field label="Mood">
+                  {isEditMode ? (
+                    <View style={styles.moodRow}>
+                      {MOOD_OPTIONS.map((option) => {
+                        const isSelected = mood === option.value;
+                        return (
+                          <Pressable
+                            key={option.value}
+                            style={({ pressed }) => [
+                              styles.moodChip,
+                              isSelected && styles.moodChipSelected,
+                              pressed && styles.moodChipPressed,
+                            ]}
+                            onPress={() => setMood(option.value)}
+                            disabled={isSaving}
+                            accessibilityRole="button"
+                            accessibilityLabel={`${option.label} mood`}
+                            accessibilityState={{ selected: isSelected }}
+                          >
+                            <Text
+                              style={styles.moodChipEmoji}
+                              accessibilityElementsHidden
+                              importantForAccessibility="no"
+                            >
+                              {option.emoji}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.moodChipLabel,
+                                isSelected && styles.moodChipLabelSelected,
+                              ]}
+                            >
+                              {option.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  ) : (
+                    <View style={styles.moodReadonly}>
+                      {moodEmojiForBadge ? (
+                        <Text
+                          style={styles.moodReadonlyEmoji}
+                          accessibilityElementsHidden
+                          importantForAccessibility="no"
+                        >
+                          {moodEmojiForBadge}
+                        </Text>
+                      ) : null}
+                      <Text style={styles.moodReadonlyLabel}>
+                        {moodLabelForBadge ?? "No mood set"}
+                      </Text>
+                    </View>
+                  )}
+                </Field>
+
+                <Field label="When">
+                  <Pressable
+                    style={styles.inputButton}
+                    onPress={() => {
+                      if (isEditMode && !isSaving) {
+                        setIsDatePickerVisible(true);
+                      }
+                    }}
+                    disabled={!isEditMode || isSaving}
+                    accessibilityLabel="Memory date and time"
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.inputValue}>{dateLabel}</Text>
+                  </Pressable>
+                  {isDatePickerVisible && happenedAt !== null ? (
+                    <DateTimePicker
+                      value={new Date(happenedAt)}
+                      mode="datetime"
+                      display={Platform.OS === "ios" ? "inline" : "default"}
+                      onChange={handleTimestampChange}
+                    />
+                  ) : null}
+                </Field>
+
+                <Field label="Tags">
+                  <TextInput
+                    style={styles.input}
+                    value={tagsInput}
+                    onChangeText={setTagsInput}
+                    editable={isEditMode && !isSaving}
+                    placeholder="work, gym, friends"
+                    placeholderTextColor={colors.textTertiary}
+                    accessibilityLabel="Memory tags"
+                  />
+                </Field>
+
+                <Field label="Location">
+                  <TextInput
+                    style={styles.input}
+                    value={location}
+                    onChangeText={setLocation}
+                    editable={isEditMode && !isSaving}
+                    placeholder="Add a place"
+                    placeholderTextColor={colors.textTertiary}
+                    accessibilityLabel="Memory location"
+                  />
+                </Field>
+
+                <Field label="People">
+                  <TextInput
+                    style={styles.input}
+                    value={linkedPeopleInput}
+                    onChangeText={setLinkedPeopleInput}
+                    editable={isEditMode && !isSaving}
+                    placeholder="Alice, Bob"
+                    placeholderTextColor={colors.textTertiary}
+                    accessibilityLabel="Linked people"
+                  />
+                </Field>
               </View>
-              <View style={styles.actions}>
-                {isEditMode ? (
-                  <>
-                    <AppButton
-                      title="Cancel"
-                      variant="secondary"
-                      onPress={() => setIsEditMode(false)}
-                      size="md"
-                    />
-                    <AppButton
-                      title="Save"
-                      onPress={handleSave}
-                      loading={isSaving}
-                      disabled={!title.trim() || isSaving}
-                      size="md"
-                    />
-                  </>
-                ) : (
-                  <>
-                    <AppButton
-                      title="Edit"
-                      onPress={() => setIsEditMode(true)}
-                      size="md"
-                    />
-                    <AppButton
-                      title="Delete"
-                      variant="secondary"
-                      onPress={handleDelete}
-                      loading={isDeleting}
-                      size="md"
-                    />
-                  </>
-                )}
-              </View>
-            </>
+            </ScrollView>
           ) : null}
+
+          <View style={styles.actions}>
+            {isEditMode ? (
+              <>
+                <AppButton
+                  title="Cancel"
+                  variant="secondary"
+                  onPress={() => setIsEditMode(false)}
+                  size="md"
+                  style={styles.actionButton}
+                />
+                <AppButton
+                  title="Save"
+                  onPress={handleSave}
+                  loading={isSaving}
+                  disabled={!title.trim() || isSaving}
+                  size="md"
+                  style={styles.actionButton}
+                />
+              </>
+            ) : (
+              <>
+                <AppButton
+                  title="Delete"
+                  variant="secondary"
+                  onPress={handleDelete}
+                  loading={isDeleting}
+                  size="md"
+                  style={styles.actionButton}
+                />
+                <AppButton
+                  title="Edit"
+                  onPress={() => setIsEditMode(true)}
+                  size="md"
+                  style={styles.actionButton}
+                />
+              </>
+            )}
+          </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <View style={fieldStyles.wrap}>
+      <Text style={fieldStyles.label}>{label}</Text>
+      {children}
+    </View>
+  );
+}
+
+const fieldStyles = StyleSheet.create({
+  wrap: {
+    gap: Spacing.xs,
+  },
+  label: {
+    ...Typography.label,
+    opacity: 0.85,
+  },
+});
 
 function createStyles(c: ThemeColors) {
   return StyleSheet.create({
@@ -232,28 +429,60 @@ function createStyles(c: ThemeColors) {
       borderLeftWidth: 1,
       borderRightWidth: 1,
       borderColor: c.border,
-      paddingHorizontal: Spacing.xl,
-      paddingTop: Spacing.lg,
-      paddingBottom: Spacing["2xl"],
-      gap: Spacing.md,
+      paddingTop: Spacing.sm,
+      paddingBottom: Spacing.lg,
+      maxHeight: "92%",
+    },
+    handle: {
+      alignSelf: "center",
+      width: 40,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: c.border,
+      marginBottom: Spacing.md,
     },
     headerRow: {
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
+      paddingHorizontal: Spacing.xl,
+      marginBottom: Spacing.md,
     },
     headerTitle: {
       ...Typography.title3,
       color: c.text,
     },
+    scrollWrap: {
+      flexGrow: 0,
+    },
+    scrollContent: {
+      paddingHorizontal: Spacing.xl,
+      paddingBottom: Spacing.lg,
+      gap: Spacing.lg,
+    },
     image: {
       width: "100%",
-      height: 140,
+      height: 180,
       borderRadius: Radius.lg,
       backgroundColor: c.surfaceSecondary,
     },
+    moodHero: {
+      backgroundColor: c.tintLight,
+      borderRadius: Radius.xl,
+      paddingVertical: Spacing.xl,
+      paddingHorizontal: Spacing.xl,
+      alignItems: "center",
+      gap: Spacing.xs,
+    },
+    moodHeroEmoji: {
+      fontSize: 56,
+    },
+    moodHeroLabel: {
+      ...Typography.bodyMedium,
+      color: c.tint,
+    },
     formWrap: {
-      gap: Spacing.sm,
+      gap: Spacing.md,
     },
     input: {
       borderWidth: 1,
@@ -266,14 +495,87 @@ function createStyles(c: ThemeColors) {
       color: c.text,
       backgroundColor: c.surface,
     },
+    inputButton: {
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: Radius.md,
+      paddingHorizontal: Spacing.lg,
+      paddingVertical: Spacing.md,
+      minHeight: 48,
+      backgroundColor: c.surface,
+      justifyContent: "center",
+    },
+    inputValue: {
+      ...Typography.body,
+      color: c.text,
+    },
     textArea: {
-      minHeight: 90,
+      minHeight: 96,
       textAlignVertical: "top",
+      paddingTop: Spacing.md,
+    },
+    moodRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: Spacing.xs,
+    },
+    moodChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.sm,
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: Radius.full,
+      backgroundColor: c.surface,
+    },
+    moodChipPressed: {
+      opacity: 0.85,
+    },
+    moodChipSelected: {
+      backgroundColor: c.tintLight,
+      borderColor: c.tint,
+    },
+    moodChipEmoji: {
+      fontSize: 16,
+    },
+    moodChipLabel: {
+      ...Typography.caption1,
+      color: c.textSecondary,
+    },
+    moodChipLabelSelected: {
+      color: c.tint,
+      ...Typography.label,
+    },
+    moodReadonly: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: Spacing.sm,
+      paddingHorizontal: Spacing.lg,
+      paddingVertical: Spacing.md,
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: Radius.md,
+      backgroundColor: c.surfaceSecondary,
+    },
+    moodReadonlyEmoji: {
+      fontSize: 18,
+    },
+    moodReadonlyLabel: {
+      ...Typography.body,
+      color: c.text,
     },
     actions: {
       flexDirection: "row",
       gap: Spacing.sm,
-      justifyContent: "space-between",
+      paddingHorizontal: Spacing.xl,
+      paddingTop: Spacing.md,
+      borderTopWidth: 1,
+      borderTopColor: c.divider,
+    },
+    actionButton: {
+      flex: 1,
     },
   });
 }

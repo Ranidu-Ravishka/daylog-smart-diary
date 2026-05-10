@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   RefreshControl,
   Image,
+  Pressable,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -29,11 +30,9 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
 import { EmptyState } from "@/components/ui/empty-state";
 import { UserAvatar } from "@/components/ui/user-avatar";
-
-function getTodayDayKey(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-}
+import { getTodayDayKey } from "@/lib/day-key";
+import { formatLastSyncTime } from "@/lib/format-sync-status";
+import { lightImpact } from "@/lib/haptics";
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -49,32 +48,6 @@ function formatMemoryTime(timestamp: number): string {
   const ampm = h >= 12 ? "PM" : "AM";
   h = h % 12 || 12;
   return `${h}:${m} ${ampm}`;
-}
-
-function formatRelativeElapsed(lastSyncAt: number, now: number): string {
-  const elapsedSeconds = Math.max(0, Math.floor((now - lastSyncAt) / 1000));
-  if (elapsedSeconds < 60) return `${elapsedSeconds}s ago`;
-
-  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
-  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
-
-  const elapsedHours = Math.floor(elapsedMinutes / 60);
-  if (elapsedHours < 24) return `${elapsedHours}h ago`;
-
-  const elapsedDays = Math.floor(elapsedHours / 24);
-  return `${elapsedDays}d ago`;
-}
-
-function formatLastSyncTime(lastSyncAt: number | null, now: number): string {
-  if (lastSyncAt === null) return "Last sync: pending";
-
-  const absolute = new Date(lastSyncAt).toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-
-  return `Last sync: ${absolute} • Updated ${formatRelativeElapsed(lastSyncAt, now)}`;
 }
 
 // ── Loading skeleton ────────────────────────────────────────
@@ -102,6 +75,46 @@ function HomeScreenSkeleton() {
         <SkeletonCard lines={2} style={{ marginHorizontal: Spacing.xl }} />
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+type StatCardProps = {
+  icon: React.ComponentProps<typeof Ionicons>["name"];
+  iconColor: string;
+  value: string;
+  label: string;
+  onPress: () => void;
+  styles: ReturnType<typeof createStyles>;
+  accessibilityLabel: string;
+};
+
+function StatCard({
+  icon,
+  iconColor,
+  value,
+  label,
+  onPress,
+  styles,
+  accessibilityLabel,
+}: StatCardProps) {
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.statCard,
+        pressed && styles.statCardPressed,
+      ]}
+      onPress={() => {
+        void lightImpact();
+        onPress();
+      }}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      hitSlop={4}
+    >
+      <Ionicons name={icon} size={20} color={iconColor} />
+      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -251,6 +264,8 @@ const HomeScreen = () => {
           <TouchableOpacity
             onPress={() => router.push("/profile")}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Open profile"
           >
             <UserAvatar
               colors={c}
@@ -263,25 +278,41 @@ const HomeScreen = () => {
 
         {/* ── Stats ─────────────────────────────────────── */}
         <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <Ionicons name="book-outline" size={20} color={c.text} />
-            <Text style={styles.statValue}>{todayMemories.length}</Text>
-            <Text style={styles.statLabel}>Memories</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Ionicons name="star-outline" size={20} color={c.text} />
-            <Text style={styles.statValue}>
-              {todayDay?.rating ? `${todayDay.rating}/5` : "—"}
-            </Text>
-            <Text style={styles.statLabel}>Rating</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Ionicons name="walk-outline" size={20} color={c.text} />
-            <Text style={styles.statValue}>
-              {todaySummary?.metrics?.steps?.toLocaleString() ?? "—"}
-            </Text>
-            <Text style={styles.statLabel}>Steps</Text>
-          </View>
+          <StatCard
+            icon="book-outline"
+            iconColor={c.text}
+            value={String(todayMemories.length)}
+            label="Memories"
+            onPress={() => router.push("/memory")}
+            styles={styles}
+            accessibilityLabel={`${todayMemories.length} memories today. Tap to view.`}
+          />
+          <StatCard
+            icon="star-outline"
+            iconColor={c.text}
+            value={todayDay?.rating ? `${todayDay.rating}/5` : "—"}
+            label="Rating"
+            onPress={() => router.push("/memory")}
+            styles={styles}
+            accessibilityLabel={
+              todayDay?.rating
+                ? `Today's rating ${todayDay.rating} out of 5. Tap to change.`
+                : "Today is unrated. Tap to rate."
+            }
+          />
+          <StatCard
+            icon="walk-outline"
+            iconColor={c.text}
+            value={todaySummary?.metrics?.steps?.toLocaleString() ?? "—"}
+            label="Steps"
+            onPress={() => router.push("/insights")}
+            styles={styles}
+            accessibilityLabel={
+              todaySummary?.metrics?.steps
+                ? `${todaySummary.metrics.steps.toLocaleString()} steps today. Tap to see insights.`
+                : "Step data not available. Tap to view insights."
+            }
+          />
         </View>
 
         {/* ── Daily Summary ─────────────────────────────── */}
@@ -342,16 +373,19 @@ const HomeScreen = () => {
               <TouchableOpacity
                 key={i}
                 style={styles.actionItem}
-                onPress={() =>
+                onPress={() => {
+                  void lightImpact();
                   router.push(
                     a.route as
                       | "/add-memory"
                       | "/memory"
                       | "/insights"
                       | "/profile",
-                  )
-                }
+                  );
+                }}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={`${a.label} quick action`}
               >
                 <View style={styles.actionIcon}>
                   <Ionicons name={a.icon} size={22} color={c.text} />
@@ -381,45 +415,60 @@ const HomeScreen = () => {
             </AppCard>
           ) : (
             <AppCard padded={false}>
-              {memories.map((mem, idx) => (
-                <View
-                  key={mem._id}
-                  style={[
-                    styles.memoryRow,
-                    idx < memories.length - 1 && styles.memoryBorder,
-                  ]}
-                >
-                  <View style={styles.moodDot}>
-                    <Text style={{ fontSize: 16 }}>
-                      {MOOD_EMOJI[mem.mood ?? ""] ?? "📝"}
-                    </Text>
-                  </View>
-                  <View style={styles.memoryInfo}>
-                    <Text style={styles.memoryTitle} numberOfLines={1}>
-                      {mem.title ?? "Untitled memory"}
-                    </Text>
-                    {mem.mood && (
-                      <Text style={styles.memoryMood}>
-                        {MOOD_LABELS[mem.mood] ?? mem.mood}
+              {memories.map((mem, idx) => {
+                const thumb = thumbnailByMemoryId.get(String(mem._id));
+                const moodEmoji = mem.mood ? MOOD_EMOJI[mem.mood] : null;
+                const moodLabel = mem.mood
+                  ? (MOOD_LABELS[mem.mood] ?? mem.mood)
+                  : null;
+                return (
+                  <View
+                    key={mem._id}
+                    style={[
+                      styles.memoryRow,
+                      idx < memories.length - 1 && styles.memoryBorder,
+                    ]}
+                  >
+                    <View style={styles.moodDot}>
+                      {moodEmoji ? (
+                        <Text
+                          style={styles.moodDotEmoji}
+                          accessibilityElementsHidden
+                          importantForAccessibility="no"
+                        >
+                          {moodEmoji}
+                        </Text>
+                      ) : (
+                        <Ionicons
+                          name="document-text-outline"
+                          size={18}
+                          color={c.textSecondary}
+                        />
+                      )}
+                    </View>
+                    <View style={styles.memoryInfo}>
+                      <Text style={styles.memoryTitle} numberOfLines={1}>
+                        {mem.title ?? "Untitled memory"}
                       </Text>
-                    )}
+                      {moodLabel ? (
+                        <Text style={styles.memoryMood}>{moodLabel}</Text>
+                      ) : null}
+                    </View>
+                    {thumb ? (
+                      <Image
+                        source={{ uri: thumb }}
+                        style={styles.memoryThumb}
+                      />
+                    ) : null}
+                    <View style={styles.memoryTime}>
+                      <Text style={styles.timeText}>
+                        {formatMemoryTime(mem.happenedAt)}
+                      </Text>
+                      <Text style={styles.dayText}>{mem.dayKey}</Text>
+                    </View>
                   </View>
-                  {thumbnailByMemoryId.get(String(mem._id)) ? (
-                    <Image
-                      source={{
-                        uri: thumbnailByMemoryId.get(String(mem._id))!,
-                      }}
-                      style={styles.memoryThumb}
-                    />
-                  ) : null}
-                  <View style={styles.memoryTime}>
-                    <Text style={styles.timeText}>
-                      {formatMemoryTime(mem.happenedAt)}
-                    </Text>
-                    <Text style={styles.dayText}>{mem.dayKey}</Text>
-                  </View>
-                </View>
-              ))}
+                );
+              })}
             </AppCard>
           )}
         </View>
@@ -491,6 +540,10 @@ function createStyles(c: ThemeColors) {
       borderWidth: 1,
       borderColor: c.border,
       ...Shadows.sm,
+    },
+    statCardPressed: {
+      opacity: 0.85,
+      transform: [{ scale: 0.97 }],
     },
     statValue: {
       ...Typography.title2,
@@ -576,6 +629,9 @@ function createStyles(c: ThemeColors) {
       alignItems: "center",
       justifyContent: "center",
       marginRight: Spacing.md,
+    },
+    moodDotEmoji: {
+      fontSize: 16,
     },
     memoryInfo: {
       flex: 1,
