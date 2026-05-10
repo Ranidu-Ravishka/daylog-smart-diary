@@ -28,11 +28,7 @@ import {
 } from "convex/react";
 import { api } from "@repo/backend/convex";
 import type { GenericId } from "convex/values";
-import {
-  INTEGRATION_PROVIDER_META,
-  MOOD_EMOJI,
-  MOOD_LABELS,
-} from "@repo/ui/lib/constants";
+import { INTEGRATION_PROVIDER_META, MOOD_LABELS } from "@repo/ui/lib/constants";
 import {
   Spacing,
   Typography,
@@ -45,6 +41,8 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
 import { EmptyState } from "@/components/ui/empty-state";
 import { AppButton } from "@/components/ui/app-button";
+import { MoodEmoji } from "@/components/ui/mood-emoji";
+import { TabBarSpacer } from "@/components/ui/tab-bar-spacer";
 import {
   MemoryDetailSheet,
   type MemoryPatchPayload,
@@ -665,9 +663,6 @@ const DailyDetailView = () => {
 
   const moodFromMemories =
     resolvedMemories.length > 0 ? (resolvedMemories[0]?.mood ?? null) : null;
-  const moodSummaryEmoji = moodFromMemories
-    ? (MOOD_EMOJI[moodFromMemories] ?? null)
-    : null;
   const moodSummaryLabel = moodFromMemories
     ? (MOOD_LABELS[moodFromMemories] ?? moodFromMemories)
     : null;
@@ -863,14 +858,8 @@ const DailyDetailView = () => {
         {/* ── Quick Metrics ───────────────────────────── */}
         <View style={styles.metricsRow}>
           <View style={styles.metricChip}>
-            {moodSummaryEmoji ? (
-              <Text
-                style={styles.metricEmoji}
-                accessibilityElementsHidden
-                importantForAccessibility="no"
-              >
-                {moodSummaryEmoji}
-              </Text>
+            {moodFromMemories ? (
+              <MoodEmoji mood={moodFromMemories} size={16} />
             ) : (
               <Ionicons name="happy-outline" size={14} color={c.tint} />
             )}
@@ -1302,7 +1291,7 @@ const DailyDetailView = () => {
           </AppCard>
         </View>
 
-        <View style={{ height: 100 }} />
+        <TabBarSpacer />
       </ScrollView>
       <MemoryDetailSheet
         visible={Boolean(selectedMemory)}
@@ -1433,10 +1422,6 @@ function createStyles(c: ThemeColors) {
     metricText: {
       ...Typography.caption1,
       color: c.tint,
-    },
-    metricEmoji: {
-      fontSize: 14,
-      lineHeight: 16,
     },
 
     // Section

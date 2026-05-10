@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -8,13 +8,14 @@ import {
   StyleSheet,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { MOOD_EMOJI, MOOD_LABELS } from "@repo/ui/lib/constants";
+import { MOOD_LABELS } from "@repo/ui/lib/constants";
 import {
   Radius,
   Spacing,
   Typography,
   type ThemeColors,
 } from "@/constants/theme";
+import { MoodEmoji } from "@/components/ui/mood-emoji";
 import type { MemoryItem } from "@/components/memory/types";
 
 type MemoryCarouselProps = {
@@ -28,7 +29,7 @@ export function MemoryCarousel({
   memories,
   onOpen,
 }: MemoryCarouselProps) {
-  const styles = React.useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   return (
     <ScrollView
@@ -40,92 +41,102 @@ export function MemoryCarousel({
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.carouselWrap}
     >
-      {memories.map((memory) => {
-        const hasImage = Boolean(memory.thumbnailUrl);
-        const dateLabel = memory.happenedAt
-          ? new Date(memory.happenedAt).toLocaleDateString()
-          : null;
-        const moodEmoji = memory.mood ? MOOD_EMOJI[memory.mood] : null;
-        const moodLabel = memory.mood
-          ? (MOOD_LABELS[memory.mood] ?? memory.mood)
-          : null;
-
-        return (
-          <Pressable
-            key={memory._id}
-            style={({ pressed }) => [
-              styles.card,
-              !hasImage && styles.cardContentOnly,
-              pressed && styles.cardPressed,
-            ]}
-            onPress={() => onOpen(memory)}
-            accessibilityRole="button"
-            accessibilityLabel={`Open memory ${memory.title ?? "Untitled"}`}
-          >
-            {hasImage ? (
-              <Image
-                source={{ uri: memory.thumbnailUrl ?? undefined }}
-                style={styles.image}
-              />
-            ) : null}
-
-            <View style={styles.content}>
-              {!hasImage && moodEmoji ? (
-                <View style={styles.moodBadge}>
-                  <Text
-                    style={styles.moodBadgeEmoji}
-                    accessibilityElementsHidden
-                    importantForAccessibility="no"
-                  >
-                    {moodEmoji}
-                  </Text>
-                </View>
-              ) : null}
-
-              <Text
-                style={[styles.title, !hasImage && styles.titleLarge]}
-                numberOfLines={hasImage ? 1 : 2}
-              >
-                {memory.title ?? "Untitled memory"}
-              </Text>
-
-              {memory.description ? (
-                <Text
-                  style={styles.description}
-                  numberOfLines={hasImage ? 2 : 4}
-                >
-                  {memory.description}
-                </Text>
-              ) : null}
-
-              <View style={styles.metaRow}>
-                {moodLabel ? (
-                  <View style={styles.metaItem}>
-                    {hasImage && moodEmoji ? (
-                      <Text
-                        style={styles.metaMoodEmoji}
-                        accessibilityElementsHidden
-                        importantForAccessibility="no"
-                      >
-                        {moodEmoji}
-                      </Text>
-                    ) : (
-                      <Ionicons name="ellipse" size={6} color={colors.tint} />
-                    )}
-                    <Text style={styles.metaText}>{moodLabel}</Text>
-                  </View>
-                ) : null}
-                {dateLabel ? (
-                  <Text style={styles.metaText}>{dateLabel}</Text>
-                ) : null}
-              </View>
-            </View>
-          </Pressable>
-        );
-      })}
+      {memories.map((memory) => (
+        <MemoryCarouselCard
+          key={memory._id}
+          memory={memory}
+          colors={colors}
+          styles={styles}
+          onOpen={onOpen}
+        />
+      ))}
     </ScrollView>
   );
 }
+
+type CarouselStyles = ReturnType<typeof createStyles>;
+
+type MemoryCarouselCardProps = {
+  memory: MemoryItem;
+  colors: ThemeColors;
+  styles: CarouselStyles;
+  onOpen: (memory: MemoryItem) => void;
+};
+
+function MemoryCarouselCardComponent({
+  memory,
+  colors,
+  styles,
+  onOpen,
+}: MemoryCarouselCardProps) {
+  const hasImage = Boolean(memory.thumbnailUrl);
+  const dateLabel = memory.happenedAt
+    ? new Date(memory.happenedAt).toLocaleDateString()
+    : null;
+  const moodLabel = memory.mood
+    ? (MOOD_LABELS[memory.mood] ?? memory.mood)
+    : null;
+  const handlePress = useCallback(() => {
+    onOpen(memory);
+  }, [memory, onOpen]);
+
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.card,
+        !hasImage && styles.cardContentOnly,
+        pressed && styles.cardPressed,
+      ]}
+      onPress={handlePress}
+      accessibilityRole="button"
+      accessibilityLabel={`Open memory ${memory.title ?? "Untitled"}`}
+    >
+      {hasImage ? (
+        <Image
+          source={{ uri: memory.thumbnailUrl ?? undefined }}
+          style={styles.image}
+        />
+      ) : null}
+
+      <View style={styles.content}>
+        {!hasImage && memory.mood ? (
+          <View style={styles.moodBadge}>
+            <MoodEmoji mood={memory.mood} size={22} />
+          </View>
+        ) : null}
+
+        <Text
+          style={[styles.title, !hasImage && styles.titleLarge]}
+          numberOfLines={hasImage ? 1 : 2}
+        >
+          {memory.title ?? "Untitled memory"}
+        </Text>
+
+        {memory.description ? (
+          <Text style={styles.description} numberOfLines={hasImage ? 2 : 4}>
+            {memory.description}
+          </Text>
+        ) : null}
+
+        <View style={styles.metaRow}>
+          {moodLabel ? (
+            <View style={styles.metaItem}>
+              {hasImage && memory.mood ? (
+                <MoodEmoji mood={memory.mood} size={14} />
+              ) : (
+                <Ionicons name="ellipse" size={6} color={colors.tint} />
+              )}
+              <Text style={styles.metaText}>{moodLabel}</Text>
+            </View>
+          ) : null}
+          {dateLabel ? <Text style={styles.metaText}>{dateLabel}</Text> : null}
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
+const MemoryCarouselCard = React.memo(MemoryCarouselCardComponent);
 
 const CARD_WIDTH = 280;
 const IMAGE_HEIGHT = 130;
@@ -172,9 +183,6 @@ function createStyles(c: ThemeColors) {
       justifyContent: "center",
       marginBottom: Spacing.sm,
     },
-    moodBadgeEmoji: {
-      fontSize: 20,
-    },
     title: {
       ...Typography.bodyMedium,
       color: c.text,
@@ -199,9 +207,6 @@ function createStyles(c: ThemeColors) {
       alignItems: "center",
       gap: 6,
       flexShrink: 1,
-    },
-    metaMoodEmoji: {
-      fontSize: 14,
     },
     metaText: {
       ...Typography.caption2,

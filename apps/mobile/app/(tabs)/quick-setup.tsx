@@ -26,11 +26,11 @@ import { useUser } from "@clerk/clerk-expo";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "@repo/backend/convex";
 import { normalizeUserSettings } from "@repo/user-settings/lib/user-settings";
-import { Colors, Radius, Spacing, Typography } from "@/constants/theme";
+import { Radius, Spacing, Typography } from "@/constants/theme";
+import { useAppTheme } from "@/components/theme-provider";
 import { FocusAreasStep } from "@/components/onboarding/focus-areas-step";
 import { ReminderStep } from "@/components/onboarding/reminder-step";
 import { FinishStep } from "@/components/onboarding/finish-step";
-import { useColorScheme } from "@/hooks/use-color-scheme";
 import {
   ensureReminderPermissions,
   syncReminderNotifications,
@@ -41,8 +41,7 @@ const TOTAL_STEPS = 3;
 
 export default function QuickSetupScreen() {
   const router = useRouter();
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? "light"];
+  const { colors } = useAppTheme();
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useConvexAuth();
   const { user } = useUser();
   const syncUserPreferences = useMutation(

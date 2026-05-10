@@ -27,6 +27,10 @@ import {
   Text,
   View,
 } from "react-native";
+// Importing the named export below side-effect-initializes the gesture handler
+// module, so we don't need a separate bare `import "react-native-gesture-handler"`.
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import {
   ConvexReactClient,
@@ -629,50 +633,61 @@ export default function RootLayout() {
     const isDark = colorScheme === "dark";
 
     return (
-      <ThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
-        <StartupConfigErrorScreen
-          isDark={isDark}
-          message={
-            startupError?.message ??
-            "Convex client could not be initialized at startup."
-          }
-        />
-        <StatusBar style={isDark ? "light" : "dark"} />
-      </ThemeProvider>
+      <GestureHandlerRootView style={styles.rootHost}>
+        <SafeAreaProvider>
+          <ThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
+            <StartupConfigErrorScreen
+              isDark={isDark}
+              message={
+                startupError?.message ??
+                "Convex client could not be initialized at startup."
+              }
+            />
+            <StatusBar style={isDark ? "light" : "dark"} />
+          </ThemeProvider>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
     );
   }
 
   return (
-    <ClerkProvider publishableKey={clerkPublishableKey}>
-      <ConvexAuthProvider client={convexClient}>
-        <AppThemeProvider>
-          <AppThemedShell>
-            <SyncClerkUserToConvex />
-            <RootAuthBoundary>
-              <Stack>
-                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                <Stack.Screen
-                  name="oauth-complete"
-                  options={{ headerShown: false }}
-                />
-                <Stack.Screen
-                  name="(auth)/sign-in"
-                  options={{ headerShown: false }}
-                />
-                <Stack.Screen
-                  name="(auth)/sign-up"
-                  options={{ headerShown: false }}
-                />
-                <Stack.Screen
-                  name="(auth)/forgot-password"
-                  options={{ headerShown: false }}
-                />
-              </Stack>
-            </RootAuthBoundary>
-          </AppThemedShell>
-        </AppThemeProvider>
-      </ConvexAuthProvider>
-    </ClerkProvider>
+    <GestureHandlerRootView style={styles.rootHost}>
+      <SafeAreaProvider>
+        <ClerkProvider publishableKey={clerkPublishableKey}>
+          <ConvexAuthProvider client={convexClient}>
+            <AppThemeProvider>
+              <AppThemedShell>
+                <SyncClerkUserToConvex />
+                <RootAuthBoundary>
+                  <Stack>
+                    <Stack.Screen
+                      name="(tabs)"
+                      options={{ headerShown: false }}
+                    />
+                    <Stack.Screen
+                      name="oauth-complete"
+                      options={{ headerShown: false }}
+                    />
+                    <Stack.Screen
+                      name="(auth)/sign-in"
+                      options={{ headerShown: false }}
+                    />
+                    <Stack.Screen
+                      name="(auth)/sign-up"
+                      options={{ headerShown: false }}
+                    />
+                    <Stack.Screen
+                      name="(auth)/forgot-password"
+                      options={{ headerShown: false }}
+                    />
+                  </Stack>
+                </RootAuthBoundary>
+              </AppThemedShell>
+            </AppThemeProvider>
+          </ConvexAuthProvider>
+        </ClerkProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
@@ -733,6 +748,9 @@ const styles = StyleSheet.create({
     ...Typography.button,
   },
   themedShellContainer: {
+    flex: 1,
+  },
+  rootHost: {
     flex: 1,
   },
 });

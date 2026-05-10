@@ -16,7 +16,7 @@ import DateTimePicker, {
   type DateTimePickerEvent,
 } from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
-import { MOOD_OPTIONS, MOOD_EMOJI, MOOD_LABELS } from "@repo/ui/lib/constants";
+import { MOOD_OPTIONS, MOOD_LABELS } from "@repo/ui/lib/constants";
 import {
   getDayKeyForTimestamp,
   getResolvedTimeZone,
@@ -28,6 +28,8 @@ import {
   type ThemeColors,
 } from "@/constants/theme";
 import { AppButton } from "@/components/ui/app-button";
+import { Field } from "@/components/ui/field";
+import { MoodEmoji } from "@/components/ui/mood-emoji";
 import type { MemoryItem } from "@/components/memory/types";
 
 type MemoryDetailSheetProps = {
@@ -144,7 +146,6 @@ export function MemoryDetailSheet({
   const dateLabel = happenedAt
     ? new Date(happenedAt).toLocaleString()
     : "Not set";
-  const moodEmojiForBadge = mood ? MOOD_EMOJI[mood] : null;
   const moodLabelForBadge = mood ? (MOOD_LABELS[mood] ?? mood) : null;
   const hasImage = Boolean(memory?.thumbnailUrl);
 
@@ -188,15 +189,9 @@ export function MemoryDetailSheet({
                   source={{ uri: memory.thumbnailUrl ?? undefined }}
                   style={styles.image}
                 />
-              ) : moodEmojiForBadge ? (
+              ) : mood ? (
                 <View style={styles.moodHero}>
-                  <Text
-                    style={styles.moodHeroEmoji}
-                    accessibilityElementsHidden
-                    importantForAccessibility="no"
-                  >
-                    {moodEmojiForBadge}
-                  </Text>
+                  <MoodEmoji mood={mood} size={64} />
                   <Text style={styles.moodHeroLabel}>{moodLabelForBadge}</Text>
                 </View>
               ) : null}
@@ -245,13 +240,7 @@ export function MemoryDetailSheet({
                             accessibilityLabel={`${option.label} mood`}
                             accessibilityState={{ selected: isSelected }}
                           >
-                            <Text
-                              style={styles.moodChipEmoji}
-                              accessibilityElementsHidden
-                              importantForAccessibility="no"
-                            >
-                              {option.emoji}
-                            </Text>
+                            <MoodEmoji mood={option.value} size={18} />
                             <Text
                               style={[
                                 styles.moodChipLabel,
@@ -266,15 +255,7 @@ export function MemoryDetailSheet({
                     </View>
                   ) : (
                     <View style={styles.moodReadonly}>
-                      {moodEmojiForBadge ? (
-                        <Text
-                          style={styles.moodReadonlyEmoji}
-                          accessibilityElementsHidden
-                          importantForAccessibility="no"
-                        >
-                          {moodEmojiForBadge}
-                        </Text>
-                      ) : null}
+                      {mood ? <MoodEmoji mood={mood} size={20} /> : null}
                       <Text style={styles.moodReadonlyLabel}>
                         {moodLabelForBadge ?? "No mood set"}
                       </Text>
@@ -389,31 +370,6 @@ export function MemoryDetailSheet({
   );
 }
 
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <View style={fieldStyles.wrap}>
-      <Text style={fieldStyles.label}>{label}</Text>
-      {children}
-    </View>
-  );
-}
-
-const fieldStyles = StyleSheet.create({
-  wrap: {
-    gap: Spacing.xs,
-  },
-  label: {
-    ...Typography.label,
-    opacity: 0.85,
-  },
-});
-
 function createStyles(c: ThemeColors) {
   return StyleSheet.create({
     backdrop: {
@@ -472,10 +428,7 @@ function createStyles(c: ThemeColors) {
       paddingVertical: Spacing.xl,
       paddingHorizontal: Spacing.xl,
       alignItems: "center",
-      gap: Spacing.xs,
-    },
-    moodHeroEmoji: {
-      fontSize: 56,
+      gap: Spacing.sm,
     },
     moodHeroLabel: {
       ...Typography.bodyMedium,
@@ -537,9 +490,6 @@ function createStyles(c: ThemeColors) {
       backgroundColor: c.tintLight,
       borderColor: c.tint,
     },
-    moodChipEmoji: {
-      fontSize: 16,
-    },
     moodChipLabel: {
       ...Typography.caption1,
       color: c.textSecondary,
@@ -558,9 +508,6 @@ function createStyles(c: ThemeColors) {
       borderColor: c.border,
       borderRadius: Radius.md,
       backgroundColor: c.surfaceSecondary,
-    },
-    moodReadonlyEmoji: {
-      fontSize: 18,
     },
     moodReadonlyLabel: {
       ...Typography.body,

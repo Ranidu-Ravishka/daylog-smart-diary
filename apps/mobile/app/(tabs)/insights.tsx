@@ -21,7 +21,6 @@ import { useQuery, useConvexAuth, useAction, useMutation } from "convex/react";
 import { api } from "@repo/backend/convex";
 import type { GenericId } from "convex/values";
 import { captureException } from "@/lib/observability";
-import { MOOD_EMOJI, MOOD_LABELS } from "@repo/ui/lib/constants";
 import {
   Spacing,
   Typography,
@@ -35,6 +34,9 @@ import { AppButton } from "@/components/ui/app-button";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
 import { EmptyState } from "@/components/ui/empty-state";
+import { TabBarSpacer } from "@/components/ui/tab-bar-spacer";
+import { MoodTrendChart } from "@/components/insights/mood-trend-chart";
+import { MoodDistributionBar } from "@/components/insights/mood-distribution-bar";
 import {
   formatLastSyncTime,
   formatRelativeElapsed,
@@ -406,106 +408,6 @@ const InsightsScreen = () => {
     );
   }
 
-  const renderMoodChart = () => {
-    const maxValue = Math.max(...moodValues, 1);
-    const chartHeight = 120;
-
-    return (
-      <View
-        style={{
-          height: chartHeight,
-          marginBottom: Spacing.lg,
-          position: "relative",
-        }}
-      >
-        {/* Grid lines */}
-        {[0, 0.25, 0.5, 0.75, 1].map((pct) => (
-          <View
-            key={pct}
-            style={{
-              position: "absolute",
-              top: chartHeight * pct,
-              left: 0,
-              right: 0,
-              height: 1,
-              backgroundColor: c.divider,
-            }}
-          />
-        ))}
-        {/* Data points + lines */}
-        {moodTrendsData.map((item, index) => {
-          if (item.value === null) {
-            return (
-              <View
-                key={index}
-                style={{
-                  position: "absolute",
-                  left: (index * CHART_WIDTH) / 6 - 3,
-                  top: chartHeight - 3,
-                  width: 6,
-                  height: 6,
-                  borderRadius: 3,
-                  backgroundColor: c.textTertiary,
-                  opacity: 0.45,
-                }}
-              />
-            );
-          }
-
-          const nextItem = moodTrendsData[index + 1];
-          const xPos = (index * CHART_WIDTH) / 6;
-          const yPos = chartHeight - (item.value / maxValue) * chartHeight;
-
-          const canLinkToNext = nextItem?.value !== null;
-          const nextValue = nextItem?.value ?? item.value;
-
-          return (
-            <View
-              key={index}
-              style={{
-                position: "absolute",
-                left: xPos - 4,
-                top: yPos - 4,
-                width: 8,
-                height: 8,
-                borderRadius: 4,
-                backgroundColor: c.tint,
-              }}
-            >
-              {canLinkToNext && (
-                <View
-                  style={{
-                    position: "absolute",
-                    height: 2,
-                    backgroundColor: c.tint,
-                    opacity: 0.6,
-                    left: 4,
-                    top: 3,
-                    width: Math.sqrt(
-                      Math.pow(CHART_WIDTH / 6, 2) +
-                        Math.pow(
-                          ((item.value - nextValue) / maxValue) * chartHeight,
-                          2,
-                        ),
-                    ),
-                    transform: [
-                      {
-                        rotate: `${Math.atan2(
-                          ((item.value - nextValue) / maxValue) * chartHeight,
-                          CHART_WIDTH / 6,
-                        )}rad`,
-                      },
-                    ],
-                  }}
-                />
-              )}
-            </View>
-          );
-        })}
-      </View>
-    );
-  };
-
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView
@@ -649,14 +551,11 @@ const InsightsScreen = () => {
             action={`${moodDaysTracked}/7 days with mood data`}
           />
           <AppCard>
-            {renderMoodChart()}
-            <View style={styles.daysRow}>
-              {moodTrendsData.map((item, index) => (
-                <Text key={index} style={styles.dayLabel}>
-                  {item.day}
-                </Text>
-              ))}
-            </View>
+            <MoodTrendChart
+              data={moodTrendsData}
+              colors={c}
+              width={CHART_WIDTH}
+            />
           </AppCard>
         </View>
 
@@ -665,29 +564,15 @@ const InsightsScreen = () => {
           <View style={styles.section}>
             <SectionHeader title="Mood Distribution" />
             <AppCard>
-              {topMoods.map(([mood, count]) => (
-                <View key={mood} style={styles.distRow}>
-                  <Text
-                    style={styles.distEmoji}
-                    accessibilityElementsHidden
-                    importantForAccessibility="no"
-                  >
-                    {MOOD_EMOJI[mood] ?? "❓"}
-                  </Text>
-                  <Text style={styles.distLabel}>
-                    {MOOD_LABELS[mood] ??
-                      mood.charAt(0).toUpperCase() + mood.slice(1)}
-                  </Text>
-                  <View style={styles.barOuter}>
-                    <View
-                      style={[
-                        styles.barInner,
-                        { width: `${(count / maxMoodCount) * 100}%` },
-                      ]}
-                    />
-                  </View>
-                  <Text style={styles.distCount}>{count}</Text>
-                </View>
+              {topMoods.map(([mood, count], idx) => (
+                <MoodDistributionBar
+                  key={mood}
+                  mood={mood}
+                  count={count}
+                  maxCount={maxMoodCount}
+                  index={idx}
+                  colors={c}
+                />
               ))}
             </AppCard>
           </View>
@@ -742,7 +627,7 @@ const InsightsScreen = () => {
           </View>
         )}
 
-        <View style={{ height: 100 }} />
+        <TabBarSpacer />
       </ScrollView>
 
       <Modal
@@ -949,53 +834,6 @@ function createStyles(c: ThemeColors) {
       minHeight: 320,
       justifyContent: "center",
       paddingHorizontal: Spacing.xl,
-    },
-
-    // Days of week
-    daysRow: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-    },
-    dayLabel: {
-      ...Typography.caption1,
-      color: c.textSecondary,
-      flex: 1,
-      textAlign: "center",
-    },
-
-    // Mood distribution
-    distRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      marginBottom: Spacing.md,
-    },
-    distEmoji: {
-      fontSize: 16,
-      marginRight: Spacing.sm,
-    },
-    distLabel: {
-      ...Typography.callout,
-      color: c.text,
-      width: 72,
-    },
-    barOuter: {
-      flex: 1,
-      height: 8,
-      backgroundColor: c.surfaceSecondary,
-      borderRadius: Radius.full,
-      marginHorizontal: Spacing.md,
-      overflow: "hidden",
-    },
-    barInner: {
-      height: "100%",
-      backgroundColor: c.tint,
-      borderRadius: Radius.full,
-    },
-    distCount: {
-      ...Typography.caption1,
-      color: c.textSecondary,
-      width: 24,
-      textAlign: "right",
     },
 
     // Stories

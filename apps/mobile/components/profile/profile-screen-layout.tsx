@@ -13,6 +13,7 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Spacing, Typography } from "@/constants/theme";
+import { TabBarSpacer } from "@/components/ui/tab-bar-spacer";
 import type { ProfileScreenLoadedProps } from "@/hooks/useProfileScreen";
 import type { DeletionState } from "@/components/profile/types";
 import { ProfileOverviewSection } from "@/components/profile/profile-overview-section";
@@ -388,7 +389,7 @@ export function ProfileScreenLayout({
           />
         ) : null}
 
-        <View style={{ height: 100 }} />
+        <TabBarSpacer />
       </ScrollView>
 
       <Modal transparent animationType="slide" visible={showAppPasswordModal}>

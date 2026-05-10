@@ -16,7 +16,7 @@ import { useUser } from "@clerk/clerk-expo";
 import { useQuery, useConvexAuth } from "convex/react";
 import { api } from "@repo/backend/convex";
 import type { GenericId } from "convex/values";
-import { MOOD_EMOJI, MOOD_LABELS } from "@repo/ui/lib/constants";
+import { MOOD_LABELS } from "@repo/ui/lib/constants";
 import {
   Spacing,
   Typography,
@@ -30,6 +30,8 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
 import { EmptyState } from "@/components/ui/empty-state";
 import { UserAvatar } from "@/components/ui/user-avatar";
+import { MoodEmoji } from "@/components/ui/mood-emoji";
+import { TabBarSpacer } from "@/components/ui/tab-bar-spacer";
 import { getTodayDayKey } from "@/lib/day-key";
 import { formatLastSyncTime } from "@/lib/format-sync-status";
 import { lightImpact } from "@/lib/haptics";
@@ -417,7 +419,6 @@ const HomeScreen = () => {
             <AppCard padded={false}>
               {memories.map((mem, idx) => {
                 const thumb = thumbnailByMemoryId.get(String(mem._id));
-                const moodEmoji = mem.mood ? MOOD_EMOJI[mem.mood] : null;
                 const moodLabel = mem.mood
                   ? (MOOD_LABELS[mem.mood] ?? mem.mood)
                   : null;
@@ -430,14 +431,8 @@ const HomeScreen = () => {
                     ]}
                   >
                     <View style={styles.moodDot}>
-                      {moodEmoji ? (
-                        <Text
-                          style={styles.moodDotEmoji}
-                          accessibilityElementsHidden
-                          importantForAccessibility="no"
-                        >
-                          {moodEmoji}
-                        </Text>
+                      {mem.mood ? (
+                        <MoodEmoji mood={mem.mood} size={22} />
                       ) : (
                         <Ionicons
                           name="document-text-outline"
@@ -473,7 +468,7 @@ const HomeScreen = () => {
           )}
         </View>
 
-        <View style={{ height: 100 }} />
+        <TabBarSpacer />
       </ScrollView>
     </SafeAreaView>
   );
@@ -629,9 +624,6 @@ function createStyles(c: ThemeColors) {
       alignItems: "center",
       justifyContent: "center",
       marginRight: Spacing.md,
-    },
-    moodDotEmoji: {
-      fontSize: 16,
     },
     memoryInfo: {
       flex: 1,

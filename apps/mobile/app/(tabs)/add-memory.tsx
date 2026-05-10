@@ -34,6 +34,8 @@ import {
 } from "@/constants/theme";
 import { useAppTheme } from "@/components/theme-provider";
 import { AppButton } from "@/components/ui/app-button";
+import { MoodEmoji } from "@/components/ui/mood-emoji";
+import { TabBarSpacer } from "@/components/ui/tab-bar-spacer";
 import {
   enqueueOfflineCreateMemory,
   enqueueOfflineMemoryMediaUpload,
@@ -495,7 +497,9 @@ export default function AddMemoryScreen() {
                   disabled={isSubmitting}
                   activeOpacity={0.7}
                 >
-                  <Text style={styles.moodEmoji}>{item.emoji}</Text>
+                  <View style={styles.moodEmojiWrap}>
+                    <MoodEmoji mood={item.value} size={26} />
+                  </View>
                   <Text
                     style={[
                       styles.moodLabel,
@@ -612,7 +616,7 @@ export default function AddMemoryScreen() {
           />
         </View>
 
-        <View style={{ height: 100 }} />
+        <TabBarSpacer />
       </ScrollView>
     </SafeAreaView>
   );
@@ -725,8 +729,7 @@ function createStyles(c: ThemeColors) {
       backgroundColor: c.tintLight,
       borderColor: c.tint,
     },
-    moodEmoji: {
-      fontSize: 22,
+    moodEmojiWrap: {
       marginBottom: 4,
     },
     moodLabel: {

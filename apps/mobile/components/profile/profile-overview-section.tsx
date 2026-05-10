@@ -1,11 +1,12 @@
 import React from "react";
-import { View, Text, TouchableOpacity } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { MOOD_OPTIONS, SETTINGS_DEFAULTS } from "@repo/ui/lib/constants";
 import { Spacing, type ThemeColors } from "@/constants/theme";
 import { AppCard } from "@/components/ui/app-card";
 import { SectionHeader } from "@/components/ui/section-header";
 import { UserAvatar } from "@/components/ui/user-avatar";
+import { MoodEmoji } from "@/components/ui/mood-emoji";
 import type { OutboxLastSyncResult, PreferencesSnapshot } from "./types";
 import type { ProfileStyles } from "./profile-styles";
 import { ProfileToggleRow } from "./profile-toggle-row";
@@ -188,14 +189,17 @@ export function ProfileOverviewSection({
                   onPress={() => onChangeDefaultMemoryMood(option.value)}
                   disabled={isPreferencesMissing}
                 >
-                  <Text
-                    style={[
-                      styles.moodChipLabel,
-                      selected && styles.moodChipLabelSelected,
-                    ]}
-                  >
-                    {option.emoji} {option.label}
-                  </Text>
+                  <View style={moodChipInnerStyles.row}>
+                    <MoodEmoji mood={option.value} size={16} />
+                    <Text
+                      style={[
+                        styles.moodChipLabel,
+                        selected && styles.moodChipLabelSelected,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </View>
                 </TouchableOpacity>
               );
             })}
@@ -367,3 +371,11 @@ export function ProfileOverviewSection({
     </>
   );
 }
+
+const moodChipInnerStyles = StyleSheet.create({
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+});
