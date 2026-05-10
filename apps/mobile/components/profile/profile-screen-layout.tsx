@@ -219,7 +219,7 @@ export function ProfileScreenLayout({
             reminderDeliveryEnabled={Boolean(reminderRuntime?.deliveryEnabled)}
             locationTrackingEnabled={locationTrackingEnabled}
             backgroundLocationStatusLabel={backgroundLocationStatusLabel}
-            onOpenQuickSetup={() => router.push("/quick-setup")}
+            onOpenQuickSetup={() => router.push("/(tabs)/quick-setup")}
             showAdvancedStatus={showAdvancedStatus}
             onToggleAdvancedStatus={() =>
               setShowAdvancedStatus((previous) => !previous)

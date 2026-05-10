@@ -441,7 +441,7 @@ export function useProfileScreen() {
         Alert.alert("Complete quick setup", "Set your preferences first.", [
           {
             text: "Open Setup",
-            onPress: () => router.push("/quick-setup"),
+            onPress: () => router.push("/(tabs)/quick-setup"),
           },
           { text: "Cancel", style: "cancel" },
         ]);
@@ -850,7 +850,7 @@ export function useProfileScreen() {
           [
             {
               text: "Open Setup",
-              onPress: () => router.push("/quick-setup"),
+              onPress: () => router.push("/(tabs)/quick-setup"),
             },
             { text: "Cancel", style: "cancel" },
           ],
@@ -1067,7 +1067,7 @@ export function useProfileScreen() {
       Alert.alert("Complete quick setup", "Set your preferences first.", [
         {
           text: "Open Setup",
-          onPress: () => router.push("/quick-setup"),
+          onPress: () => router.push("/(tabs)/quick-setup"),
         },
         { text: "Cancel", style: "cancel" },
       ]);
@@ -1150,7 +1150,7 @@ export function useProfileScreen() {
     Alert.alert("Complete quick setup", "Set your preferences first.", [
       {
         text: "Open Setup",
-        onPress: () => router.push("/quick-setup"),
+        onPress: () => router.push("/(tabs)/quick-setup"),
       },
       { text: "Cancel", style: "cancel" },
     ]);

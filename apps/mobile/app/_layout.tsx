@@ -443,7 +443,9 @@ function RootAuthBoundary({ children }: { children: React.ReactNode }) {
   const segments = useSegments();
   const { isLoaded, isSignedIn, signOut, userId } = useAuth();
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useConvexAuth();
-  const accountDeletionQueryArgs = isSignedIn
+  const canQueryAccountDeletion =
+    isLoaded && isSignedIn && isAuthenticated && !isConvexAuthLoading;
+  const accountDeletionQueryArgs = canQueryAccountDeletion
     ? ACCOUNT_DELETION_STATUS_QUERY_ARGS
     : "skip";
   const accountDeletionStatus = useQuery(
@@ -544,7 +546,10 @@ function RootAuthBoundary({ children }: { children: React.ReactNode }) {
   }
 
   if (isSignedIn && isAuthRoute) {
-    return <Redirect href="/(tabs)" />;
+    // Send onboarding through quick-setup; that screen redirects home when prefs exist.
+    // Avoid imperative /quick-setup from auth screens (races with this redirect and can
+    // dispatch a nested REPLACE to "(tabs)" before the tab navigator is mounted).
+    return <Redirect href="/(tabs)/quick-setup" />;
   }
 
   if (!isSignedIn) {

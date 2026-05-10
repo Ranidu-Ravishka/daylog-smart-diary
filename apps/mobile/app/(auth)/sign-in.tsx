@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -54,12 +54,6 @@ export default function SignInScreen() {
   const [focusedField, setFocusedField] = useState<FocusedField>(null);
   const [showPassword, setShowPassword] = useState(false);
 
-  useEffect(() => {
-    if (authLoaded && isSignedIn) {
-      router.replace("/quick-setup");
-    }
-  }, [authLoaded, isSignedIn, router]);
-
   const isDisabled = useMemo(() => {
     return (
       !emailAddress.trim() || password.length < 8 || !isLoaded || isPending
@@ -86,7 +80,6 @@ export default function SignInScreen() {
         if (setActive) {
           await setActive({ session: oauthResult.createdSessionId });
         }
-        router.replace("/quick-setup");
       } else {
         setErrorMessage("OAuth sign-in did not complete. Please try again.");
       }
@@ -118,7 +111,6 @@ export default function SignInScreen() {
         if (setActive) {
           await setActive({ session: result.createdSessionId });
         }
-        router.replace("/quick-setup");
       } else if (result.status === "needs_first_factor") {
         if (
           result.firstFactorVerification?.strategy === "email_link" ||

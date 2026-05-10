@@ -1,6 +1,7 @@
 import { Tabs, Redirect } from "expo-router";
 import React, { useMemo } from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Platform, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAuth } from "@clerk/clerk-expo";
 import { useConvexAuth, useQuery } from "convex/react";
@@ -19,6 +20,7 @@ import { useOfflineQueue } from "@/hooks/tab-orchestration/use-offline-queue";
 
 export default function TabLayout() {
   const { colors: theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
   const { isLoaded, isSignedIn, sessionId, userId } = useAuth();
   const { isLoading: isConvexAuthLoading, isAuthenticated } = useConvexAuth();
   const canUseIntegrationQueries = isLoaded && isSignedIn && isAuthenticated;
@@ -58,6 +60,7 @@ export default function TabLayout() {
       tabBarLabelPosition: "below-icon" as const,
       tabBarItemStyle: {
         flex: 1,
+        minWidth: 0,
         justifyContent: "center" as const,
         alignItems: "center" as const,
       },
@@ -72,17 +75,37 @@ export default function TabLayout() {
         position: "absolute" as const,
         left: 16,
         right: 16,
-        bottom: 10,
+        // iOS: small float margin only. Do NOT add `insets.bottom` here — BottomTabBar already
+        // merges `paddingBottom: insets.bottom` before `tabBarStyle`; adding inset to `bottom`
+        // stacks full home-indicator clearance as empty space below the pill (feels “too high”).
+        // Android (edge-to-edge): offset by bottom inset so the bar clears the gesture/nav bar.
+        bottom: Platform.OS === "ios" ? 12 : 12 + insets.bottom,
         height: 70,
         paddingTop: 6,
+        // Keep modest inner padding; tab content stays above the home indicator visually
+        // without shrinking the flex row inside a height that already includes icon+label.
         paddingBottom: 8,
         backgroundColor: theme.surface,
         borderTopWidth: 1,
         borderTopColor: theme.border,
         borderRadius: 20,
+        ...(Platform.OS === "ios"
+          ? {
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.08,
+              shadowRadius: 12,
+            }
+          : { elevation: 6 }),
       },
     }),
-    [theme.border, theme.surface, theme.tabIconDefault, theme.tint],
+    [
+      insets.bottom,
+      theme.border,
+      theme.surface,
+      theme.tabIconDefault,
+      theme.tint,
+    ],
   );
 
   useOfflineQueue({
@@ -148,8 +171,10 @@ export default function TabLayout() {
             name="quick-setup"
             options={{
               title: "Quick Setup",
+              // `href: null` removes this route from the tab bar row (no phantom flex slot).
+              // `tabBarButton: () => null` alone still leaves BottomTabItem's outer View as flex:1.
+              href: null,
               tabBarStyle: { display: "none" },
-              tabBarButton: () => null,
             }}
           />
 

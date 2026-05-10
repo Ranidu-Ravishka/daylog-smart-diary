@@ -11,7 +11,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { Link, useRouter } from "expo-router";
+import { Link } from "expo-router";
 import { useAuth, useOAuth, useSignUp } from "@clerk/clerk-expo";
 import * as WebBrowser from "expo-web-browser";
 import { Ionicons } from "@expo/vector-icons";
@@ -52,7 +52,6 @@ function getClerkError(error: unknown): ClerkErrorLike {
 }
 
 export default function SignUpScreen() {
-  const router = useRouter();
   const { colors } = useAppTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -77,12 +76,6 @@ export default function SignUpScreen() {
   const [resendCooldown, setResendCooldown] = useState(0);
   const [focusedField, setFocusedField] = useState<FocusedField>(null);
   const [showPassword, setShowPassword] = useState(false);
-
-  useEffect(() => {
-    if (authLoaded && isSignedIn) {
-      router.replace("/quick-setup");
-    }
-  }, [authLoaded, isSignedIn, router]);
 
   useEffect(() => {
     if (resendCooldown > 0) {
@@ -130,7 +123,6 @@ export default function SignUpScreen() {
         if (setActive) {
           await setActive({ session: oauthResult.createdSessionId });
         }
-        router.replace("/quick-setup");
       }
     } catch (err) {
       if (err instanceof Error) {
@@ -230,7 +222,6 @@ export default function SignUpScreen() {
         if (setActive) {
           await setActive({ session: result.createdSessionId });
         }
-        router.replace("/quick-setup");
       } else if (result.status === "missing_requirements") {
         setErrorMessage(
           "Additional information is required to complete sign-up.",
