@@ -47,7 +47,8 @@ import {
   MemoryDetailSheet,
   type MemoryPatchPayload,
 } from "@/components/memory/memory-detail-sheet";
-import { MemoryCarousel } from "@/components/memory/memory-carousel";
+import { DayMemoryTimeline } from "@/components/memory/day-memory-timeline";
+import { MemoryEmptyIllustration } from "@/components/memory/memory-empty-illustration";
 import { PeopleYouMetSection } from "@/components/memory/people-you-met-section";
 import type { MemoryItem } from "@/components/memory/types";
 import {
@@ -61,6 +62,7 @@ import {
 import { captureException, logInfo, logWarn } from "@/lib/observability";
 import { getTodayDayKey, shiftDayKey } from "@/lib/day-key";
 import { formatLastSyncTime } from "@/lib/format-sync-status";
+import { buildDayTimelineEntries } from "@/lib/day-timeline";
 
 type MemoryDoc = MemoryItem;
 
@@ -683,6 +685,29 @@ const DailyDetailView = () => {
     });
   }, [resolvedMemories, searchQuery, selectedTag]);
 
+  const includeNotesInTimeline =
+    searchQuery.trim() === "" && selectedTag === null;
+
+  const timelineEntries = React.useMemo(
+    () =>
+      buildDayTimelineEntries(filteredMemories, manualNotes, {
+        includeNotes: includeNotesInTimeline,
+      }),
+    [filteredMemories, manualNotes, includeNotesInTimeline],
+  );
+
+  const peopleMentionCounts = React.useMemo(() => {
+    const map = new Map<string, number>();
+    for (const memory of filteredMemories) {
+      for (const raw of memory.linkedPeople ?? []) {
+        const name = raw.trim();
+        if (!name) continue;
+        map.set(name, (map.get(name) ?? 0) + 1);
+      }
+    }
+    return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
+  }, [filteredMemories]);
+
   const sourcesUsed = summary?.sourcesUsed ?? [];
   const hasDataSources =
     sourcesUsed.length > 0 || integrationDailyData.length > 0;
@@ -1042,92 +1067,140 @@ const DailyDetailView = () => {
           </AppCard>
         </View>
 
-        {/* ── Today's Memories ─────────────────────────── */}
-        {resolvedMemories.length > 0 ? (
+        {/* ── Today's timeline (memories + notes) ───────── */}
+        {resolvedMemories.length > 0 || manualNotes.length > 0 ? (
           <View style={styles.section}>
-            <SectionHeader title="Today's Memories" />
-            <TextInput
-              style={styles.input}
-              placeholder="Search memories..."
-              placeholderTextColor={c.textTertiary}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
+            <SectionHeader
+              title="Today's timeline"
+              action={
+                includeNotesInTimeline ? "Memories & notes" : "Filtered view"
+              }
             />
-            {availableTags.length > 0 ? (
+            {resolvedMemories.length > 0 ? (
+              <>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Search memories..."
+                  placeholderTextColor={c.textTertiary}
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  accessibilityLabel="Search memories for this day"
+                />
+                {availableTags.length > 0 ? (
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.filterChipsWrap}
+                    contentContainerStyle={{ gap: Spacing.xs }}
+                  >
+                    <TouchableOpacity
+                      style={[
+                        styles.filterChip,
+                        selectedTag === null && styles.filterChipSelected,
+                      ]}
+                      onPress={() => setSelectedTag(null)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Show all tags"
+                      accessibilityState={{ selected: selectedTag === null }}
+                    >
+                      <Text
+                        style={[
+                          styles.filterChipText,
+                          selectedTag === null && styles.filterChipTextSelected,
+                        ]}
+                      >
+                        All
+                      </Text>
+                    </TouchableOpacity>
+                    {availableTags.map((tag) => (
+                      <TouchableOpacity
+                        key={tag}
+                        style={[
+                          styles.filterChip,
+                          selectedTag === tag && styles.filterChipSelected,
+                        ]}
+                        onPress={() => setSelectedTag(tag)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Filter by tag ${tag}`}
+                        accessibilityState={{ selected: selectedTag === tag }}
+                      >
+                        <Text
+                          style={[
+                            styles.filterChipText,
+                            selectedTag === tag &&
+                              styles.filterChipTextSelected,
+                          ]}
+                        >
+                          #{tag}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                ) : null}
+              </>
+            ) : null}
+
+            {peopleMentionCounts.length > 0 ? (
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                style={styles.filterChipsWrap}
-                contentContainerStyle={{ gap: Spacing.xs }}
+                style={styles.mentionStrip}
+                contentContainerStyle={{ gap: Spacing.sm }}
               >
-                <TouchableOpacity
-                  style={[
-                    styles.filterChip,
-                    selectedTag === null && styles.filterChipSelected,
-                  ]}
-                  onPress={() => setSelectedTag(null)}
-                >
-                  <Text
-                    style={[
-                      styles.filterChipText,
-                      selectedTag === null && styles.filterChipTextSelected,
-                    ]}
+                {peopleMentionCounts.map(([name, count]) => (
+                  <View
+                    key={name}
+                    style={[styles.mentionChip, { borderColor: c.border }]}
                   >
-                    All
-                  </Text>
-                </TouchableOpacity>
-                {availableTags.map((tag) => (
-                  <TouchableOpacity
-                    key={tag}
-                    style={[
-                      styles.filterChip,
-                      selectedTag === tag && styles.filterChipSelected,
-                    ]}
-                    onPress={() => setSelectedTag(tag)}
-                  >
-                    <Text
-                      style={[
-                        styles.filterChipText,
-                        selectedTag === tag && styles.filterChipTextSelected,
-                      ]}
-                    >
-                      #{tag}
+                    <Ionicons name="person-outline" size={12} color={c.tint} />
+                    <Text style={styles.mentionChipName} numberOfLines={1}>
+                      {name}
                     </Text>
-                  </TouchableOpacity>
+                    <Text style={styles.mentionChipCount}>{count}</Text>
+                  </View>
                 ))}
               </ScrollView>
             ) : null}
-            <AppCard padded={false}>
-              {filteredMemories.length > 0 ? (
-                <MemoryCarousel
+
+            <AppCard padded={false} style={{ paddingHorizontal: Spacing.md }}>
+              {timelineEntries.length > 0 ? (
+                <DayMemoryTimeline
+                  entries={timelineEntries}
                   colors={c}
-                  memories={filteredMemories}
-                  onOpen={(memory) => setSelectedMemory(memory)}
+                  onOpenMemory={(memory) => setSelectedMemory(memory)}
+                  onPressNote={handleNotePress}
                 />
               ) : (
                 <EmptyState
                   icon="search-outline"
-                  title="No matching memories"
-                  subtitle="Try a different search or tag filter."
+                  title="No matching items"
+                  subtitle="Try clearing search or picking a different tag."
                 />
               )}
             </AppCard>
-            {isLoadingMoreMemories ? (
-              <Text style={styles.loadMoreText}>Loading more memories...</Text>
-            ) : canLoadMoreMemories ? (
-              <Text style={styles.loadMoreText}>Scroll to load more</Text>
+            {resolvedMemories.length > 0 ? (
+              <>
+                {isLoadingMoreMemories ? (
+                  <Text style={styles.loadMoreText}>
+                    Loading more memories...
+                  </Text>
+                ) : canLoadMoreMemories ? (
+                  <Text style={styles.loadMoreText}>Scroll to load more</Text>
+                ) : null}
+              </>
             ) : null}
           </View>
         ) : (
           <View style={styles.section}>
-            <SectionHeader title="Today's Memories" />
+            <SectionHeader title="Today's timeline" />
             <AppCard>
               <EmptyState
                 icon="time-outline"
-                title="No memories today"
-                subtitle="Everything is working—this day just has no memories yet. Add one to get started."
+                title="Nothing on this timeline yet"
+                subtitle="Capture a memory or add a quick note below—both show up here in order."
                 actionLabel="Add Memory"
                 onAction={() => router.push("/add-memory")}
+                illustration={<MemoryEmptyIllustration colors={c} />}
               />
             </AppCard>
           </View>
@@ -1551,41 +1624,30 @@ function createStyles(c: ThemeColors) {
       color: c.tint,
     },
 
-    // Memories list
-    memoryRow: {
+    mentionStrip: {
+      marginBottom: Spacing.md,
+      maxHeight: 40,
+    },
+    mentionChip: {
       flexDirection: "row",
       alignItems: "center",
-      paddingHorizontal: Spacing.xl,
-      paddingVertical: Spacing.lg,
-    },
-    memoryBorder: {
-      borderBottomWidth: 1,
-      borderBottomColor: c.divider,
-    },
-    moodDot: {
-      width: 32,
-      height: 32,
-      borderRadius: 10,
+      gap: 6,
+      maxWidth: 200,
+      borderWidth: 1,
+      borderRadius: Radius.full,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.xs,
       backgroundColor: c.surfaceSecondary,
-      alignItems: "center",
-      justifyContent: "center",
-      marginRight: Spacing.md,
     },
-    memoryTitle: {
-      ...Typography.bodyMedium,
+    mentionChipName: {
+      ...Typography.caption1,
       color: c.text,
+      flexShrink: 1,
     },
-    memoryDesc: {
-      ...Typography.callout,
+    mentionChipCount: {
+      ...Typography.caption2,
       color: c.textSecondary,
-      marginTop: 2,
-    },
-    memoryThumb: {
-      width: 42,
-      height: 42,
-      borderRadius: Radius.md,
-      marginLeft: Spacing.md,
-      backgroundColor: c.surfaceSecondary,
+      fontVariant: ["tabular-nums"],
     },
     loadMoreText: {
       ...Typography.caption2,
