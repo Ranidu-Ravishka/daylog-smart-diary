@@ -1,155 +1,35 @@
 @import "tailwindcss";
+@import "@repo/theme/css/palette.css";
+@import "@repo/theme/css/tailwind-theme.css";
+@import "@repo/theme/css/utilities.css";
+@import "@repo/theme/css/base-typography.css";
 
-:root {
-  --background: 60 4% 97%;
-  --foreground: 0 0% 10%;
-  --card: 0 0% 95%;
-  --card-foreground: 0 0% 10%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 0 0% 10%;
-  --primary: 203 20% 23%;
-  --primary-foreground: 0 0% 98%;
-  --secondary: 0 0% 100%;
-  --secondary-foreground: 0 0% 10%;
-  --muted: 0 0% 93%;
-  --muted-foreground: 0 0% 40%;
-  --accent: 133 19% 59%;
-  --accent-foreground: 0 0% 10%;
-  --premium: 41 44% 60%;
-  --premium-foreground: 0 0% 10%;
-  --destructive: 12 76% 61%;
-  --destructive-foreground: 0 0% 98%;
-  --success: 119 30% 61%;
-  --success-foreground: 0 0% 10%;
-  --warning: 43 74% 66%;
-  --warning-foreground: 0 0% 10%;
-  --info: 211 73% 59%;
-  --info-foreground: 0 0% 98%;
-  --border: 0 0% 89%;
-  --input: 0 0% 100%;
-  --input-border: 0 0% 83%;
-  --ring: 203 20% 23%;
-  --radius: 0.5rem;
-  --font-family-sans: var(--font-satoshi), "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-family-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+/* react-day-picker — calm, accessible focus */
+.rdp-root {
+  --rdp-accent-color: hsl(var(--primary));
+  --rdp-background-color: hsl(var(--muted));
+  font-size: 0.875rem;
 }
 
-.dark {
-  --background: 0 0% 7%;
-  --foreground: 0 0% 93%;
-  --card: 0 0% 12%;
-  --card-foreground: 0 0% 92%;
-  --popover: 0 0% 12%;
-  --popover-foreground: 0 0% 92%;
-  --primary: 203 24% 30%;
-  --primary-foreground: 0 0% 98%;
-  --secondary: 0 0% 12%;
-  --secondary-foreground: 0 0% 92%;
-  --muted: 0 0% 17%;
-  --muted-foreground: 0 0% 67%;
-  --accent: 133 20% 66%;
-  --accent-foreground: 0 0% 98%;
-  --premium: 41 46% 67%;
-  --premium-foreground: 0 0% 10%;
-  --destructive: 12 78% 66%;
-  --destructive-foreground: 0 0% 98%;
-  --success: 119 34% 68%;
-  --success-foreground: 0 0% 10%;
-  --warning: 43 77% 70%;
-  --warning-foreground: 0 0% 10%;
-  --info: 211 75% 66%;
-  --info-foreground: 0 0% 98%;
-  --border: 0 0% 21%;
-  --input: 0 0% 12%;
-  --input-border: 0 0% 24%;
-  --ring: 203 24% 30%;
+.rdp-day_button {
+  border-radius: 0.65rem;
 }
 
-@theme inline {
-  --color-background: hsl(var(--background));
-  --color-foreground: hsl(var(--foreground));
-  --color-card: hsl(var(--card));
-  --color-card-foreground: hsl(var(--card-foreground));
-  --color-popover: hsl(var(--popover));
-  --color-popover-foreground: hsl(var(--popover-foreground));
-  --color-primary: hsl(var(--primary));
-  --color-primary-foreground: hsl(var(--primary-foreground));
-  --color-secondary: hsl(var(--secondary));
-  --color-secondary-foreground: hsl(var(--secondary-foreground));
-  --color-muted: hsl(var(--muted));
-  --color-muted-foreground: hsl(var(--muted-foreground));
-  --color-accent: hsl(var(--accent));
-  --color-accent-foreground: hsl(var(--accent-foreground));
-  --color-destructive: hsl(var(--destructive));
-  --color-destructive-foreground: hsl(var(--destructive-foreground));
-  --color-success: hsl(var(--success));
-  --color-success-foreground: hsl(var(--success-foreground));
-  --color-warning: hsl(var(--warning));
-  --color-warning-foreground: hsl(var(--warning-foreground));
-  --color-info: hsl(var(--info));
-  --color-info-foreground: hsl(var(--info-foreground));
-  --color-premium: hsl(var(--premium));
-  --color-premium-foreground: hsl(var(--premium-foreground));
-  --color-border: hsl(var(--border));
-  --color-input: hsl(var(--input));
-  --color-input-border: hsl(var(--input-border));
-  --color-ring: hsl(var(--ring));
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: var(--font-family-sans);
-  --font-mono: var(--font-family-mono);
+.rdp-selected .rdp-day_button {
+  color: hsl(var(--primary-foreground));
 }
 
-@layer base {
-  * {
-    box-sizing: border-box;
-    border-color: hsl(var(--border));
-  }
-
-  html,
-  body {
-    max-width: 100vw;
-    overflow-x: hidden;
-  }
-
-  body {
-    color: hsl(var(--foreground));
-    background: hsl(var(--background));
-    font-family: var(--font-sans);
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    line-height: 1.6;
-  }
-
-  h1,
-  .text-h1 {
-    font-size: 2rem;
-    line-height: 1.2;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-  }
-
-  h2,
-  .text-h2 {
-    font-size: 1.5rem;
-    line-height: 1.3;
-    font-weight: 600;
-    letter-spacing: -0.008em;
-  }
-
-  h3,
-  .text-h3 {
-    font-size: 1.25rem;
-    line-height: 1.35;
-    font-weight: 600;
-    letter-spacing: -0.006em;
-  }
-
-  a {
-    color: inherit;
-    text-decoration: none;
-  }
+.rdp-today:not(.rdp-outside) .rdp-day_button {
+  border: 1px solid hsl(var(--primary) / 0.45);
 }
 
+.rdp-button_next,
+.rdp-button_previous {
+  border-radius: 0.65rem;
+}
+
+.rdp-nav:focus-visible,
+.rdp-day_button:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}

@@ -319,7 +319,7 @@ export default function AccountPage() {
         : "Permanently delete";
 
   return (
-    <div className="max-w-xl">
+    <div className="mx-auto w-full max-w-xl pb-8 lg:max-w-2xl">
       <h1 className="text-xl font-semibold tracking-tight mb-1">Account</h1>
       <p className="text-sm text-muted-foreground mb-8">
         Manage your account settings and data.

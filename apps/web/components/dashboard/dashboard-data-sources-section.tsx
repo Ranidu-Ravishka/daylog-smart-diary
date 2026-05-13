@@ -1,4 +1,5 @@
 import { Database, MapPin } from "lucide-react";
+import { DashboardSectionLabel } from "@/components/dashboard/dashboard-section-label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import type { DashboardIntegrationSource } from "@/lib/types/dashboard";
@@ -17,11 +18,12 @@ export function DashboardDataSourcesSection({
   providerLabelMap,
 }: DashboardDataSourcesSectionProps) {
   return (
-    <section className="mb-8">
-      <div className="mb-3 flex items-center gap-2">
-        <Database className="h-4 w-4 text-primary" />
-        <h2 className="text-sm font-medium">Data sources for this day</h2>
-      </div>
+    <section className="mb-10">
+      <DashboardSectionLabel
+        icon={Database}
+        title="Data sources"
+        description="Integration signals attached to this day."
+      />
 
       {(integrationDailyData ?? undefined) === undefined ? (
         <DashboardSummarySkeleton />

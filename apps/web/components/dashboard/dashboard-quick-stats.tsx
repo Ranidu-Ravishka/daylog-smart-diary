@@ -15,21 +15,27 @@ export function DashboardQuickStats({
   dayRating,
 }: DashboardQuickStatsProps) {
   return (
-    <div className="mb-8 grid grid-cols-3 gap-3">
-      <Card>
-        <CardContent className="bg-secondary/80 p-4 text-center">
-          <p className="text-xl">{latestMemoryMood}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Latest mood</p>
+    <div className="mb-10 grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <Card className="overflow-hidden border-border/60 bg-gradient-to-b from-secondary/50 to-card/80">
+        <CardContent className="p-4 text-center sm:p-5">
+          <p className="text-xl sm:text-2xl">{latestMemoryMood}</p>
+          <p className="mt-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+            Latest mood
+          </p>
         </CardContent>
       </Card>
-      <Card>
-        <CardContent className="bg-secondary/80 p-4 text-center">
-          <p className="text-xl font-semibold">{memoryCount}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Memories</p>
+      <Card className="overflow-hidden border-border/60 bg-gradient-to-b from-secondary/50 to-card/80">
+        <CardContent className="p-4 text-center sm:p-5">
+          <p className="text-2xl font-semibold tabular-nums tracking-tight">
+            {memoryCount}
+          </p>
+          <p className="mt-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+            Memories
+          </p>
         </CardContent>
       </Card>
-      <Card>
-        <CardContent className="bg-secondary/80 p-4 text-center">
+      <Card className="overflow-hidden border-border/60 bg-gradient-to-b from-secondary/50 to-card/80">
+        <CardContent className="flex min-h-[112px] items-center justify-center p-4 sm:p-5">
           <DayRating dayKey={dayKey} initialRating={dayRating ?? null} />
         </CardContent>
       </Card>

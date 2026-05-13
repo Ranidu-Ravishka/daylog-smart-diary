@@ -15,9 +15,9 @@ const satoshi = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "DayLog — AI-Powered Daily Reflection",
+  title: "DayLog — AI Journaling",
   description:
-    "Capture your day, get AI-generated summaries, and discover personal insights. DayLog helps you build a meaningful daily reflection habit.",
+    "A private, emotionally gentle space for daily reflection—memories, mood, and AI summaries that feel supportive, not loud.",
 };
 
 const themeBootstrapScript = `(() => {

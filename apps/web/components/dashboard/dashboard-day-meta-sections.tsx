@@ -1,4 +1,5 @@
 import { FileText, Users } from "lucide-react";
+import { DashboardSectionLabel } from "@/components/dashboard/dashboard-section-label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import type { DashboardDay } from "@/lib/types/dashboard";
@@ -13,11 +14,8 @@ export function DashboardDayMetaSections({
   return (
     <>
       {day?.manualNotes && day.manualNotes.length > 0 && (
-        <section className="mb-8">
-          <div className="mb-3 flex items-center gap-2">
-            <FileText className="h-4 w-4 text-primary" />
-            <h2 className="text-sm font-medium">Notes</h2>
-          </div>
+        <section className="mb-10">
+          <DashboardSectionLabel icon={FileText} title="Notes" />
           <Card>
             <CardContent className="p-5">
               <ul className="space-y-1.5">
@@ -38,10 +36,7 @@ export function DashboardDayMetaSections({
 
       {day?.peopleTags && day.peopleTags.length > 0 && (
         <section>
-          <div className="mb-3 flex items-center gap-2">
-            <Users className="h-4 w-4 text-primary" />
-            <h2 className="text-sm font-medium">People</h2>
-          </div>
+          <DashboardSectionLabel icon={Users} title="People" />
           <div className="flex flex-wrap gap-1.5">
             {day.peopleTags.map((person, i) => (
               <Badge key={i} variant="outline">

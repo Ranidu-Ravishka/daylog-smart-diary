@@ -4,7 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export function DashboardLoadingSkeleton() {
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="mx-auto w-full max-w-2xl space-y-6 pb-6 lg:max-w-3xl">
       <div className="flex items-center gap-4">
         <Skeleton className="h-8 w-8" />
         <Skeleton className="h-7 w-56" />

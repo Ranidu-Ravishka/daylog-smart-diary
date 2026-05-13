@@ -415,7 +415,7 @@ export function MemoryForm({
   };
 
   return (
-    <Card className="mb-8">
+    <Card className="mb-8 border-border/60 shadow-soft">
       <CardHeader>
         <CardTitle>{memoryId ? "Edit Memory" : "Create Memory"}</CardTitle>
       </CardHeader>

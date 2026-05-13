@@ -1,0 +1,85 @@
+/**
+ * DayLog design tokens — HSL components (use as hsl(var(--token))).
+ * Single source of truth for web + admin; native hex lives in ../src/native.ts.
+ */
+:root {
+  color-scheme: light;
+  --background: 270 14% 99%;
+  --foreground: 230 18% 16%;
+  --card: 0 0% 100%;
+  --card-foreground: 230 18% 16%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 230 18% 16%;
+  --primary: 262 30% 44%;
+  --primary-foreground: 45 35% 98%;
+  --secondary: 220 18% 96%;
+  --secondary-foreground: 230 16% 20%;
+  --muted: 260 12% 95%;
+  --muted-foreground: 225 9% 42%;
+  --accent: 208 28% 46%;
+  --accent-foreground: 45 35% 98%;
+  --premium: 38 38% 58%;
+  --premium-foreground: 230 18% 16%;
+  --destructive: 8 50% 52%;
+  --destructive-foreground: 0 0% 99%;
+  --success: 152 32% 40%;
+  --success-foreground: 0 0% 99%;
+  --warning: 36 58% 52%;
+  --warning-foreground: 230 18% 16%;
+  --info: 215 45% 48%;
+  --info-foreground: 0 0% 99%;
+  --border: 220 14% 88%;
+  --input: 0 0% 100%;
+  --input-border: 220 12% 82%;
+  --ring: 262 30% 44%;
+  --radius: 0.875rem;
+  --divider: 260 10% 92%;
+  --text-tertiary: 225 8% 58%;
+  --font-family-sans: var(--font-satoshi), "Inter", ui-sans-serif, system-ui,
+    sans-serif;
+  --font-family-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --glow-1: 265 45% 80%;
+  --glow-2: 210 50% 82%;
+  --glow-3: 200 42% 85%;
+  --shadow-soft: 0 22px 60px -24px hsl(230 22% 22% / 0.12);
+  --shadow-card: 0 18px 48px -20px hsl(230 20% 20% / 0.1);
+}
+
+.dark {
+  color-scheme: dark;
+  --background: 232 16% 12%;
+  --foreground: 40 12% 94%;
+  --card: 232 14% 15%;
+  --card-foreground: 40 10% 94%;
+  --popover: 232 14% 15%;
+  --popover-foreground: 40 10% 94%;
+  --primary: 262 28% 72%;
+  --primary-foreground: 232 18% 11%;
+  --secondary: 232 12% 19%;
+  --secondary-foreground: 40 10% 92%;
+  --muted: 232 10% 20%;
+  --muted-foreground: 220 10% 68%;
+  --accent: 208 25% 58%;
+  --accent-foreground: 232 18% 11%;
+  --premium: 38 42% 65%;
+  --premium-foreground: 232 18% 11%;
+  --destructive: 8 45% 62%;
+  --destructive-foreground: 0 0% 99%;
+  --success: 152 28% 48%;
+  --success-foreground: 232 18% 11%;
+  --warning: 36 52% 62%;
+  --warning-foreground: 232 18% 11%;
+  --info: 215 40% 62%;
+  --info-foreground: 232 18% 11%;
+  --border: 232 10% 22%;
+  --input: 232 12% 17%;
+  --input-border: 232 10% 26%;
+  --ring: 262 28% 72%;
+  --divider: 232 10% 20%;
+  --text-tertiary: 220 8% 52%;
+  --glow-1: 265 32% 40%;
+  --glow-2: 215 35% 38%;
+  --glow-3: 200 30% 34%;
+  --shadow-soft: 0 26px 72px -18px hsl(230 25% 5% / 0.45);
+  --shadow-card: 0 20px 50px -22px hsl(230 30% 4% / 0.4);
+}

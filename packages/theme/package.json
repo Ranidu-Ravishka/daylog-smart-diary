@@ -1,0 +1,21 @@
+{
+  "name": "@repo/theme",
+  "version": "0.0.0",
+  "private": true,
+  "exports": {
+    "./css/palette.css": "./css/palette.css",
+    "./css/tailwind-theme.css": "./css/tailwind-theme.css",
+    "./css/utilities.css": "./css/utilities.css",
+    "./css/base-typography.css": "./css/base-typography.css",
+    "./motion": "./src/motion.ts",
+    "./native": "./src/native.ts"
+  },
+  "scripts": {
+    "lint": "tsc --noEmit",
+    "check-types": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "workspace:*",
+    "typescript": "5.9.2"
+  }
+}

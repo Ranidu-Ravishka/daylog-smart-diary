@@ -58,8 +58,8 @@ export function DashboardDatePicker({
   };
 
   return (
-    <Card className="mb-8">
-      <CardContent className="p-4 md:p-5">
+    <Card className="mb-8 overflow-hidden border-border/60 shadow-soft">
+      <CardContent className="p-4 md:p-6">
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
@@ -95,7 +95,7 @@ export function DashboardDatePicker({
           </Button>
         </div>
 
-        <div className="mt-4 rounded-md border border-border p-3">
+        <div className="mt-5 rounded-xl border border-border/50 bg-muted/20 p-3 dark:bg-muted/10">
           <div className="mb-2 flex items-center gap-2 text-sm text-muted-foreground">
             <CalendarDays className="h-4 w-4" />
             Pick a date

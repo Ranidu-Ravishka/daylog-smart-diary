@@ -1,4 +1,5 @@
 import { Clock } from "lucide-react";
+import { DashboardSectionLabel } from "@/components/dashboard/dashboard-section-label";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { MemoryCard, type MemoryData } from "@/components/MemoryCard";
@@ -26,11 +27,12 @@ export function DashboardMemoriesSection({
   onDeleteSuccess,
 }: DashboardMemoriesSectionProps) {
   return (
-    <section className="mb-8">
-      <div className="mb-3 flex items-center gap-2">
-        <Clock className="h-4 w-4 text-primary" />
-        <h2 className="text-sm font-medium">Memories</h2>
-      </div>
+    <section className="mb-10">
+      <DashboardSectionLabel
+        icon={Clock}
+        title="Memories"
+        description="Moments you saved for this day."
+      />
       {isMemoriesLoading ? (
         <DashboardMemoriesSkeleton />
       ) : memories.length > 0 ? (

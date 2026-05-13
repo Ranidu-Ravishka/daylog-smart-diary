@@ -46,7 +46,7 @@ export default function DashboardPage() {
   if (isLoading) return <DashboardLoadingSkeleton />;
 
   return (
-    <div className="max-w-2xl pb-4">
+    <div className="mx-auto w-full max-w-2xl pb-6 lg:max-w-3xl">
       <DashboardDatePicker
         selectedDate={selectedDate}
         onSelectDate={setSelectedDate}
@@ -95,8 +95,11 @@ export default function DashboardPage() {
       )}
 
       {!showMemoryForm && (
-        <Button onClick={openNewMemoryForm} className="mb-8">
-          + Add Memory
+        <Button
+          onClick={openNewMemoryForm}
+          className="mb-10 rounded-full px-6 shadow-soft"
+        >
+          + Add memory
         </Button>
       )}
 

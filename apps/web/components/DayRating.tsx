@@ -62,8 +62,8 @@ export function DayRating({
             <Star
               className={`h-5 w-5 ${
                 star <= displayRating
-                  ? "fill-yellow-400 text-yellow-400"
-                  : "text-muted-foreground"
+                  ? "fill-primary/85 text-primary"
+                  : "text-muted-foreground/70"
               } transition-colors`}
             />
           </button>

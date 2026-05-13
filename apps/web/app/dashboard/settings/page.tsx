@@ -83,10 +83,10 @@ function areNumberArraysEqual(a: number[], b: number[]): boolean {
 function LoadingSkeleton() {
   return (
     <div className="max-w-xl space-y-6">
-      <Skeleton className="h-7 w-24" />
-      <Skeleton className="h-24" />
-      <Skeleton className="h-32" />
-      <Skeleton className="h-32" />
+      <Skeleton className="h-7 w-56 rounded-xl" />
+      <Skeleton className="h-24 rounded-2xl" />
+      <Skeleton className="h-32 rounded-2xl" />
+      <Skeleton className="h-32 rounded-2xl" />
     </div>
   );
 }
@@ -489,7 +489,7 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="max-w-xl pb-4">
+    <div className="mx-auto w-full max-w-xl pb-8 lg:max-w-2xl">
       <h1 className="text-xl font-semibold tracking-tight mb-1">Settings</h1>
       <p className="text-sm text-muted-foreground mb-8">
         Manage your preferences and reflection schedule.

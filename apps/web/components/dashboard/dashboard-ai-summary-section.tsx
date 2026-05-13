@@ -1,4 +1,5 @@
 import { Activity, FileText, Sparkles } from "lucide-react";
+import { DashboardSectionLabel } from "@/components/dashboard/dashboard-section-label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -29,15 +30,19 @@ export function DashboardAiSummarySection({
   onGenerateSummary,
 }: DashboardAiSummarySectionProps) {
   return (
-    <section className="mb-8">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-primary" />
-          <h2 className="text-sm font-medium">AI Summary</h2>
+    <section className="mb-10">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <DashboardSectionLabel
+            icon={Sparkles}
+            title="AI summary"
+            description="A gentle recap of your day—generated when you choose."
+          />
         </div>
         <Button
           variant="outline"
           size="sm"
+          className="shrink-0 self-start rounded-full sm:self-auto"
           onClick={onGenerateSummary}
           disabled={isGeneratingSummary || !hasSummarySourceData}
         >
@@ -61,7 +66,7 @@ export function DashboardAiSummarySection({
       ) : summary ? (
         <Card>
           <CardContent className="p-5">
-            <p className="text-sm text-muted-foreground leading-relaxed">
+            <p className="text-[15px] leading-[1.75] text-muted-foreground md:text-base">
               {summary.story}
             </p>
             {summary.highlights && summary.highlights.length > 0 && (

@@ -3,130 +3,10 @@
 /* Manual dark mode (next-themes sets class on <html>) */
 @custom-variant dark (&:where(.dark, .dark *));
 
-@layer base {
-  :root {
-    color-scheme: light;
-    --background: #f8f8f7;
-    --foreground: #1a1a1a;
-    --card: #f2f2f2;
-    --card-foreground: #1a1a1a;
-    --primary: #2f3e46;
-    --primary-foreground: #ffffff;
-    --secondary: #ffffff;
-    --secondary-foreground: #1a1a1a;
-    --accent: #84a98c;
-    --accent-foreground: #1a1a1a;
-    --premium: #c6a96b;
-    --premium-foreground: #1a1a1a;
-    --border: #e3e3e3;
-    --divider: #eeeeee;
-    --input: #ffffff;
-    --input-border: #dadada;
-    --muted: #f2f2f2;
-    --muted-foreground: #666666;
-    --text-tertiary: #a0a0a0;
-    --success: #7fb77e;
-    --warning: #e9c46a;
-    --destructive: #e76f51;
-    --info: #4a90e2;
-    --ring: #2f3e46;
-    --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.04);
-    --font-family-sans: var(--font-satoshi), "Inter", ui-sans-serif, system-ui, sans-serif;
-    --font-family-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-
-  .dark {
-    color-scheme: dark;
-    --background: #121212;
-    --foreground: #eaeaea;
-    --card: #1e1e1e;
-    --card-foreground: #eaeaea;
-    --primary: #3f5661;
-    --primary-foreground: #ffffff;
-    --secondary: #1e1e1e;
-    --secondary-foreground: #eaeaea;
-    --accent: #91b49a;
-    --accent-foreground: #121212;
-    --premium: #d2b67c;
-    --premium-foreground: #121212;
-    --border: #2f2f2f;
-    --divider: #2a2a2a;
-    --input: #1e1e1e;
-    --input-border: #353535;
-    --muted: #232323;
-    --muted-foreground: #ababab;
-    --text-tertiary: #949494;
-    --success: #89c287;
-    --warning: #f0ce7f;
-    --destructive: #ef8268;
-    --info: #5fa0ea;
-    --ring: #3f5661;
-    --shadow-card: none;
-  }
-
-  body {
-    background-color: var(--background);
-    color: var(--foreground);
-    font-family: var(--font-family-sans);
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    overflow-x: hidden;
-    line-height: 1.6;
-  }
-
-  h1,
-  .text-h1 {
-    font-size: 2rem;
-    line-height: 1.2;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-  }
-
-  h2,
-  .text-h2 {
-    font-size: 1.5rem;
-    line-height: 1.3;
-    font-weight: 600;
-    letter-spacing: -0.008em;
-  }
-
-  h3,
-  .text-h3 {
-    font-size: 1.25rem;
-    line-height: 1.35;
-    font-weight: 600;
-    letter-spacing: -0.006em;
-  }
-}
-
-@theme inline {
-  --font-sans: var(--font-family-sans);
-  --font-mono: var(--font-family-mono);
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-border: var(--border);
-  --color-divider: var(--divider);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-text-tertiary: var(--text-tertiary);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-input-border: var(--input-border);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-premium: var(--premium);
-  --color-premium-foreground: var(--premium-foreground);
-  --color-success: var(--success);
-  --color-warning: var(--warning);
-  --color-destructive: var(--destructive);
-  --color-info: var(--info);
-}
+@import "@repo/theme/css/palette.css";
+@import "@repo/theme/css/tailwind-theme.css";
+@import "@repo/theme/css/utilities.css";
+@import "@repo/theme/css/base-typography.css";
 
 .container {
   @apply mx-auto max-w-7xl;
@@ -136,8 +16,8 @@
   width: 100%;
   max-width: 520px;
   border-radius: 16px;
-  border: 1px solid var(--border);
-  background: var(--card);
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
   padding: 28px;
   box-shadow: var(--shadow-card);
   text-align: center;
@@ -145,21 +25,21 @@
 
 .main-title {
   font-size: 1.6rem;
-  font-weight: 700;
+  font-weight: 600;
   margin-bottom: 18px;
-  color: var(--foreground);
+  color: hsl(var(--foreground));
 }
 
 .action-card {
   border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--muted);
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--muted));
   padding: 20px;
 }
 
 .action-text {
   margin: 0 0 16px;
-  color: var(--muted-foreground);
+  color: hsl(var(--muted-foreground));
   font-size: 0.95rem;
 }
 
@@ -173,7 +53,7 @@
 .logged-in-message {
   margin: 0;
   font-weight: 600;
-  color: var(--muted-foreground);
+  color: hsl(var(--muted-foreground));
 }
 
 .profile-card {
@@ -183,34 +63,34 @@
   gap: 10px;
   width: 100%;
   border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--card);
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
   padding: 18px;
 }
 
 .profile-picture {
   border-radius: 50%;
-  border: 2px solid var(--border);
-  background: var(--card);
+  border: 2px solid hsl(var(--border));
+  background: hsl(var(--card));
 }
 
 .profile-name {
   margin: 0;
   font-size: 1.1rem;
   font-weight: 600;
-  color: var(--foreground);
+  color: hsl(var(--foreground));
 }
 
 .profile-email {
   margin: 0;
   font-size: 0.9rem;
-  color: var(--muted-foreground);
+  color: hsl(var(--muted-foreground));
 }
 
 .loading-state {
   padding: 16px;
   text-align: center;
-  color: var(--muted-foreground);
+  color: hsl(var(--muted-foreground));
 }
 
 .loading-text {

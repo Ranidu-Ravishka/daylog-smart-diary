@@ -1,20 +1,27 @@
 import Link from "next/link";
 import { SignIn } from "@clerk/nextjs";
+import { AmbientPageBackdrop } from "@/components/marketing/ambient-page-backdrop";
 
 export default function SignInPage() {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4">
-      <Link href="/" className="mb-8 text-sm font-semibold tracking-tight">
+    <div className="relative flex min-h-screen flex-col items-center justify-center px-4 py-14">
+      <AmbientPageBackdrop />
+      <Link
+        href="/"
+        className="relative z-10 mb-10 text-sm font-semibold tracking-tight text-foreground/90 transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md"
+      >
         DayLog
       </Link>
-      <SignIn
-        appearance={{
-          elements: {
-            rootBox: "w-full max-w-sm",
-            card: "shadow-sm border rounded-lg",
-          },
-        }}
-      />
+      <div className="relative z-10 w-full max-w-sm">
+        <SignIn
+          appearance={{
+            elements: {
+              rootBox: "w-full",
+              card: "rounded-2xl border border-border/60 bg-card/80 shadow-soft backdrop-blur-xl",
+            },
+          }}
+        />
+      </div>
     </div>
   );
 }
