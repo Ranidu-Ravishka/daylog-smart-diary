@@ -1,7 +1,7 @@
 # DayLog Production Engineering Workflow
 
 > Status: Active
-> Last Updated: 2026-04-14
+> Last Updated: 2026-05-15
 > Audience: Engineers, reviewers, release drivers
 > Standard: [CONTRIBUTING.md](CONTRIBUTING.md)
 
@@ -20,10 +20,10 @@ This workflow is strict by default. Any exception must be documented and approve
 ## 2) Operating Principles
 
 1. `main` is always releasable.
-1. Prefer small, reversible changes over large batch changes.
-1. Every production-affecting change must be backed by automated evidence.
-1. Security, privacy, and data integrity are non-negotiable.
-1. Cross-surface compatibility is required for shared contracts.
+2. Prefer small, reversible changes over large batch changes.
+3. Every production-affecting change must be backed by automated evidence.
+4. Security, privacy, and data integrity are non-negotiable.
+5. Cross-surface compatibility is required for shared contracts.
 
 ## 3) Repository Boundaries
 

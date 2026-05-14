@@ -1,95 +1,110 @@
 # DayLog
 
-> Status: Active
-> Last Updated: 2026-04-14
-> Audience: All engineers
+> Status: Active  
+> Last Updated: 2026-05-15  
+> Audience: Engineers and operators  
 > Standard: [CONTRIBUTING.md](CONTRIBUTING.md)
 
-DayLog is a production-grade, cross-platform life journaling system built as a pnpm/turbo monorepo.
-It combines personal memory capture, daily AI summaries, integrations, and privacy-aware life context signals.
+**DayLog** is a cross-platform life journaling product: capture memories, connect integrations, and generate daily summaries—with a shared **Convex** backend and **Clerk** authentication across **web**, **admin**, and **mobile**.
 
-## 1. Project Overview
+---
 
-### What DayLog is
+## Product snapshot
 
-DayLog helps users track what happened during the day, connect external data sources, and generate high-quality day summaries.
-The same backend powers web, admin, and mobile clients.
+| Capability | Description |
+| ---------- | ----------- |
+| **Memories** | Create, edit, list, and delete day-scoped memories; mood and day ratings. |
+| **Summaries** | OpenAI-backed daily summaries from memories and integration context. |
+| **Integrations** | OAuth providers wired in-repo: **Google Calendar**, **Google Fit**, **Spotify**, **Apple Health** uploads. |
+| **Life context** | Optional, consent-gated contextual signals (location, fitness, calendar aggregates). See [LIFE_CONTEXT_TRACKING_BLUEPRINT.md](LIFE_CONTEXT_TRACKING_BLUEPRINT.md). |
+| **Surfaces** | **Web** and **Admin** (Next.js 16), **Mobile** (Expo 54 / React Native). |
 
-### Core features
+### Screenshots
 
-- Memory tracking
-  - Create, edit, list, and delete day-scoped memories.
-  - Mood tagging and day ratings.
-- Daily summaries
-  - OpenAI-backed summary generation from memories and integration context.
-- Integrations
-  - OAuth-backed providers currently implemented in this repository:
-    - Google Calendar
-    - Google Fit
-    - Spotify
-    - Apple Health daily uploads
-- Life context tracking
-  - Optional and privacy-gated contextual signals (for example location/activity summaries).
-  - Designed around data minimization and retention controls.
-- Cross-platform support
-  - Web app (Next.js)
-  - Admin app (Next.js)
-  - Mobile app (Expo / React Native)
+Add product imagery under `docs/assets/` and link it here, for example:
 
-## 2. Tech Stack
-
-- Web: Next.js 16, React 19, TypeScript
-- Admin: Next.js 16, React 19, TypeScript
-- Mobile: Expo 54, React Native 0.81, Expo Router
-- Backend: Convex (TypeScript functions, schema, scheduled jobs)
-- Auth: Clerk (client auth + webhook sync + Convex JWT template)
-- AI: OpenAI API (summary generation)
-- Observability: Sentry + structured JSON logging
-- Tooling: pnpm workspaces, Turbo, Vitest, ESLint, Prettier
-
-## 3. Monorepo Structure
-
-Core production surfaces:
-
-- `apps/web`
-  - User-facing Next.js application.
-  - Runs on port `3000` by default.
-- `apps/admin`
-  - Internal/admin Next.js application.
-  - Runs on port `3001`.
-- `apps/mobile`
-  - Expo / React Native client.
-  - Uses the same backend contracts as web/admin.
-- `packages/backend`
-  - Shared Convex backend for all surfaces.
-  - Owns schema, auth boundaries, integrations, summaries, export flows, retention jobs.
-
-Supporting shared packages:
-
-- `packages/ui`: shared UI primitives/utilities
-- `packages/user-settings`: shared user settings contracts
-- `packages/eslint-config`, `packages/typescript-config`: workspace standards
-
-## Getting Started (Step-by-step)
-
-### 1. Clone repo
-
-```bash
-git clone <repo-url>
-cd <repo>
+```markdown
+![DayLog dashboard](docs/assets/web-dashboard.png)
 ```
 
-Replace `<repo-url>` with your actual DayLog repository URL.
+Until those files exist, this section is intentionally a placeholder so marketing and engineering can drop assets without reworking the README structure.
 
-### 2. Install dependencies
+---
+
+## Tech stack
+
+| Layer | Choices |
+| ----- | ------- |
+| **Web / Admin** | Next.js 16, React 19, TypeScript, Tailwind CSS 4 |
+| **Mobile** | Expo 54, React Native 0.81, Expo Router |
+| **Backend** | Convex (queries, mutations, actions, HTTP routes, crons) |
+| **Auth** | Clerk (JWT to Convex + Svix-signed webhooks) |
+| **AI** | OpenAI API (summary generation in Convex) |
+| **Observability** | Sentry, structured JSON logs |
+| **Monorepo** | pnpm workspaces, Turborepo, Vitest, ESLint, Prettier |
+
+---
+
+## Monorepo layout
+
+```
+apps/
+  web/          # User-facing Next.js (default dev port 3000)
+  admin/        # Internal Next.js (dev port 3001)
+  mobile/       # Expo client
+packages/
+  backend/      # Convex schema + functions (@repo/backend)
+  ui/           # Shared React primitives (@repo/ui)
+  theme/        # Design tokens, motion, palette (@repo/theme)
+  user-settings/# Shared settings contracts (@repo/user-settings)
+  sentry-sanitize/ # Shared Sentry scrubbing (@repo/sentry-sanitize)
+  eslint-config/
+  typescript-config/
+docs/           # Architecture, testing, design system, etc.
+```
+
+---
+
+## Documentation index
+
+| Doc | Use when |
+| --- | -------- |
+| [docs/README.md](docs/README.md) | Hub for all guides |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design and package roles |
+| [docs/ENVIRONMENT_SETUP.md](docs/ENVIRONMENT_SETUP.md) | Env vars by surface |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Deploy order and CI |
+| [docs/TESTING.md](docs/TESTING.md) | Commands and coverage |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common failures |
+| [docs/DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md) | Tokens, typography, motion |
+| [docs/API_OVERVIEW.md](docs/API_OVERVIEW.md) | How clients use Convex |
+| [docs/RELEASE_WORKFLOW.md](docs/RELEASE_WORKFLOW.md) | Short release checklist |
+| [CONVEX_SETUP.md](CONVEX_SETUP.md) | Backend + Clerk checklist |
+| [workflow.md](workflow.md) | Engineering policy (risk levels, reviews) |
+| [DEPLOY_RUNBOOK.md](DEPLOY_RUNBOOK.md) | Production operations |
+| [SECURITY.md](SECURITY.md) | Secrets and encryption |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
+| [LIFE_CONTEXT_TRACKING_BLUEPRINT.md](LIFE_CONTEXT_TRACKING_BLUEPRINT.md) | Context tracking architecture |
+
+---
+
+## Prerequisites
+
+- **Node.js** ≥ 18 (`package.json` engines). **Node 20** matches GitHub Actions.
+- **pnpm** 11.x (`packageManager` field in `package.json`).
+
+---
+
+## Quick start
+
+### 1. Install
 
 ```bash
+git clone <your-repo-url>
+cd <repository-directory>
 pnpm install
 ```
 
-### 3. Setup environment variables
-
-Create local env files:
+### 2. Environment files
 
 ```bash
 cp apps/web/.env.example apps/web/.env.local
@@ -98,290 +113,143 @@ cp apps/mobile/.env.example apps/mobile/.env.local
 cp packages/backend/.env.example packages/backend/.env.local
 ```
 
-DayLog uses app-specific variable names. If your team manages a single shared `CONVEX_URL` secret, copy it into:
+Fill values using [docs/ENVIRONMENT_SETUP.md](docs/ENVIRONMENT_SETUP.md). At minimum, set the **same** Convex deployment URL as:
 
-- `NEXT_PUBLIC_CONVEX_URL` (web/admin)
+- `NEXT_PUBLIC_CONVEX_URL` (web + admin)
 - `EXPO_PUBLIC_CONVEX_URL` (mobile)
 
-Required variables by surface:
-
-`apps/web/.env.local`
-
-```dotenv
-NEXT_PUBLIC_CONVEX_URL=
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
-CLERK_SECRET_KEY=
-NEXT_PUBLIC_APP_URL=http://localhost:3000
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-SPOTIFY_CLIENT_ID=
-SPOTIFY_CLIENT_SECRET=
-NEXT_PUBLIC_SENTRY_DSN=
-# Optional fallback for server-side web Sentry
-SENTRY_DSN=
-```
-
-`apps/admin/.env.local`
-
-```dotenv
-NEXT_PUBLIC_CONVEX_URL=
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
-CLERK_SECRET_KEY=
-ADMIN_CACHE_SECRET=
-```
-
-`apps/mobile/.env.local`
-
-```dotenv
-EXPO_PUBLIC_CONVEX_URL=
-EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=
-EXPO_PUBLIC_WEB_APP_URL=http://localhost:3000
-EXPO_PUBLIC_SENTRY_DSN=
-```
-
-Convex deployment environment variables (set in Convex dashboard):
-
-````dotenv
-CLERK_JWT_ISSUER_DOMAIN=
-CLERK_WEBHOOK_SECRET=
-EXPORT_SIGNING_SECRET=
-OPENAI_API_KEY=
-SUMMARY_DAILY_GENERATION_LIMIT=5
-
-RETENTION_MEMORIES_DAYS=
-RETENTION_DAYS_RECORDS_DAYS=
-RETENTION_DAY_SUMMARIES_DAYS=
-RETENTION_INTEGRATION_DATA_DAYS=
-RETENTION_SYNC_RUNS_DAYS=
-RETENTION_LOCATION_SIGNALS_DAYS=
-RETENTION_SUMMARY_EVENTS_DAYS=
-RETENTION_SUMMARY_QUALITY_DAYS=
-RETENTION_SUMMARY_QUOTAS_DAYS=
-RETENTION_INFO_EVENTS_DAYS=
-RETENTION_HEALTH_EVENTS_DAYS=
-RETENTION_AUDIT_LOGS_DAYS=
-RETENTION_PLATFORM_AUDIT_DAYS=
-RETENTION_EXPORT_JOBS_DAYS=
-RETENTION_RESTORE_JOBS_DAYS=
-RETENTION_USER_DELETION_JOBS_DAYS=
-
-# OAuth refresh + server-side provider sync
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-SPOTIFY_CLIENT_ID=
-SPOTIFY_CLIENT_SECRET=
-
-# Backend observability
-SENTRY_DSN=
-
-# Integration secret encryption (required for production OAuth token encryption)
-# Preferred (KMS-backed): set a KMS key id to avoid plaintext key material in envs.
-# - `INTEGRATION_SECRETS_KMS_KEY_ID` — Preferred production KMS key identifier (for example an AWS KMS KeyId or ARN). When set, the backend will use KMS to wrap/unwrap DEKs.
-# - `INTEGRATION_SECRETS_KEY_RING_URI` — Optional provider-specific key ring identifier for other KMS providers.
-# - `INTEGRATION_SECRETS_AUDIT_LOG_PATH` — Optional local path where the backend will append audit events during rotation.
-# Local-dev fallback (developer machines only):
-# - `INTEGRATION_SECRETS_LOCAL_KEK_PATH` — Path to a 0600 file containing a base64-encoded 32-byte AES key; generate with `scripts/init-local-integration-kms.mjs`.
-# Legacy (migration only):
-# - `INTEGRATION_SECRETS_KEYRING_JSON` — JSON mapping of key ids to base64-encoded AES-256 keys (deprecated for new deployments).
-# - `INTEGRATION_SECRETS_ACTIVE_KEY_ID` — active key id for the legacy keyring (deprecated once migrated).
-
-If you are migrating from the legacy keyring to KMS, a rotation helper is available in `scripts/rotate-integration-kms.mjs` which will set the KMS env and invoke an internal Convex rotation mutation to re-encrypt existing DB records. Example:
-
-```bash
-node scripts/rotate-integration-kms.mjs --target <target> --new-key-id <KMS_KEY_ID> --admin-subject <admin-identity>
-````
-
-Use `--dry-run` to preview changes first. Keep the legacy keyring readable until rotation completes and you have validated decryption across your deployment.
-
-````
-
-Use environment-specific retention values from [DEPLOY_RUNBOOK.md](DEPLOY_RUNBOOK.md#2-environment-matrix).
-
-Mapping for common names requested by teams:
-
-- `CONVEX_URL` -> copy to `NEXT_PUBLIC_CONVEX_URL` and `EXPO_PUBLIC_CONVEX_URL`
-- `BACKEND_SENTRY_DSN` -> set as Convex `SENTRY_DSN`
-
-Where to get each variable:
-
-- Clerk
-  - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`: Clerk dashboard -> API Keys.
-  - `CLERK_JWT_ISSUER_DOMAIN`: Clerk instance domain used by Convex JWT auth.
-  - `CLERK_WEBHOOK_SECRET`: Clerk webhook endpoint signing secret.
-- Convex
-  - `NEXT_PUBLIC_CONVEX_URL`, `EXPO_PUBLIC_CONVEX_URL`: your Convex deployment URL.
-  - Get this when you run `convex dev` or from Convex deployment settings.
-  - `EXPORT_SIGNING_SECRET`: dedicated backend secret used to sign export/restore integrity payloads.
-- OpenAI
-  - `OPENAI_API_KEY`: OpenAI dashboard -> API keys.
-- Sentry
-  - `NEXT_PUBLIC_SENTRY_DSN`: Sentry project DSN for web client.
-  - `EXPO_PUBLIC_SENTRY_DSN`: Sentry project DSN for mobile client.
-  - `SENTRY_DSN` (backend): Sentry DSN for Convex/backend runtime.
-- Google OAuth
-  - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`: Google Cloud Console -> OAuth 2.0 Client ID credentials.
-- Spotify OAuth
-  - `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`: Spotify Developer Dashboard -> app credentials.
-
-### 4. Run backend
+### 3. Run Convex
 
 ```bash
 pnpm dev:backend
-````
+```
 
-### 5. Run web
+### 4. Run clients (separate terminals)
 
 ```bash
-pnpm dev:web
+pnpm dev:web      # http://localhost:3000
+pnpm dev:admin    # http://localhost:3001
+pnpm dev:mobile   # Expo dev server
 ```
 
-## CI / Repository Secrets
+---
 
-This repository requires several sensitive values to be stored in your GitHub repository secrets (or your deployment platform). The CI job `validate-prod-env` runs `scripts/validate-prod-env.mjs` and will fail when required secrets are missing or invalid in CI/production mode.
+## Environment highlights
 
-Required repository secrets for production (store as GitHub Secrets):
+**Web** (`apps/web/.env.local`): Convex URL, Clerk keys, `NEXT_PUBLIC_APP_URL`, Google and Spotify OAuth client IDs/secrets, optional Sentry.
 
-- `CLERK_JWT_ISSUER_DOMAIN` — the Clerk JWT issuer domain (https URL). Example: `https://your-clerk-instance.clerk.dev`
-- `CLERK_WEBHOOK_SECRET` — Clerk webhook signing secret (must start with `whsec_`).
-- `OPENAI_API_KEY` — OpenAI API key (must start with `sk-`).
-- `EXPORT_SIGNING_SECRET` — secret used to sign export/restore payloads.
-- `INTEGRATION_SECRETS_KEYRING_JSON` — JSON mapping of key ids to base64-encoded AES-256 keys. Example format:
+**Admin** (`apps/admin/.env.local`): Convex URL, Clerk keys, `ADMIN_CACHE_SECRET`.
 
-```json
-{
-  "key-1": "<base64-32-byte-key>",
-  "key-2": "<base64-32-byte-key>"
-}
+**Mobile** (`apps/mobile/.env.local`): Convex URL, Clerk publishable key, `EXPO_PUBLIC_WEB_APP_URL` (must match the web origin used for OAuth handoff).
+
+**Convex dashboard**: Clerk JWT issuer + webhook secret, OpenAI key, export signing secret, retention `RETENTION_*` days, provider OAuth secrets, Sentry, integration encryption (**KMS preferred** or legacy keyring), sensitive-data keyring. Full lists: [CONVEX_SETUP.md](CONVEX_SETUP.md), [DEPLOY_RUNBOOK.md](DEPLOY_RUNBOOK.md).
+
+### Integration encryption (production)
+
+Prefer **KMS** (`INTEGRATION_SECRETS_KMS_KEY_ID` / `KMS_KEY_ID` / `KEY_RING_URI`). The legacy pair `INTEGRATION_SECRETS_KEYRING_JSON` + `INTEGRATION_SECRETS_ACTIVE_KEY_ID` remains supported for migration and development. CI strict mode requires **at least one** path (`scripts/validate-prod-env.mjs`).
+
+Rotation helper (when moving to KMS):
+
+```bash
+node scripts/rotate-integration-kms.mjs --target <target> --new-key-id <KMS_KEY_ID> --admin-subject <admin-identity>
 ```
 
-- `INTEGRATION_SECRETS_ACTIVE_KEY_ID` — the key id (one of the keys in `INTEGRATION_SECRETS_KEYRING_JSON`) used to encrypt new secrets.
+Use `--dry-run` first. Keep legacy keyring material readable until rotation is verified.
 
-Notes & guidance:
+---
 
-- Keep secrets out of code and `.env` files checked into source. Use repository secrets or an external secrets manager.
-- `INTEGRATION_SECRETS_KEYRING_JSON` must decode each base64 value to exactly 32 bytes (AES-256 key length). The validator enforces this.
-- For GitHub Actions, add the above names in the repository Settings → Secrets. The workflow `.github/workflows/validate-prod-env.yml` runs the validator before deployments.
-- In local development you can use less strict checks by running:
+## OAuth redirect URIs (web)
+
+Register these on each provider (local example uses port **3000**). The web app implements a single dynamic route: `/api/integrations/oauth/[provider]/callback` — use one of the `provider` values below.
+
+| Provider | `provider` segment |
+| -------- | ------------------ |
+| Google Calendar | `google_calendar` |
+| Google Fit | `google_fit` |
+| Spotify | `spotify` |
+
+Example local callback URL:
+
+`http://localhost:3000/api/integrations/oauth/google_calendar/callback`
+
+Production: `https://<your-domain>/api/integrations/oauth/<provider>/callback`.
+
+---
+
+## Repository scripts
+
+| Command | Purpose |
+| ------- | ------- |
+| `pnpm dev` | All dev tasks (Turbo) |
+| `pnpm dev:web` / `dev:admin` / `dev:mobile` / `dev:backend` | Single surface |
+| `pnpm lint` | ESLint across workspace |
+| `pnpm typecheck` | Typecheck all packages that define `check-types` |
+| `pnpm test` | Tests via Turbo |
+| `pnpm build` | Production builds |
+| `pnpm build:web` / `pnpm build:admin` | Shorthand web/admin builds |
+
+Mobile CI bundle: `pnpm --filter mobile build:ci`
+
+---
+
+## Testing and quality
+
+See [docs/TESTING.md](docs/TESTING.md). Common entry points:
+
+```bash
+pnpm lint && pnpm typecheck && pnpm test
+pnpm test:coverage:backend
+pnpm --filter web test:e2e
+```
+
+---
+
+## CI and secrets
+
+- **`backend-validation`** (`.github/workflows/backend-validation.yml`) — branch protection verification, `validate-prod-env`, lint, typecheck, tests, conditional app builds.
+- **`Validate Prod Env`** (`.github/workflows/validate-prod-env.yml`) — additional env validation on `main` and PRs.
+
+GitHub Actions secrets should include at least: `CLERK_JWT_ISSUER_DOMAIN`, `CLERK_WEBHOOK_SECRET`, `OPENAI_API_KEY`, `EXPORT_SIGNING_SECRET`, and **either** KMS-related secrets **or** `INTEGRATION_SECRETS_KEYRING_JSON` + `INTEGRATION_SECRETS_ACTIVE_KEY_ID`. Match the env block in `backend-validation.yml`.
+
+Local validation:
 
 ```bash
 node scripts/validate-prod-env.mjs --mode=local
-```
-
-For CI/production validation (fail-fast), run:
-
-```bash
 node scripts/validate-prod-env.mjs --mode=ci
 ```
 
-If you need help migrating the keyring to a KMS-backed flow, open an issue and we can add migration scripts and a secure onboarding guide.
+---
 
-### 6. Run mobile
+## Deployment
 
-```bash
-pnpm --filter mobile start
-```
+High level: **Convex → web/admin → mobile**. Details, retention matrix, smoke tests, and rollback: [DEPLOY_RUNBOOK.md](DEPLOY_RUNBOOK.md) and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
-### 7. Run admin
-
-```bash
-pnpm dev:admin
-```
-
-## Integrations Setup
-
-### Google OAuth setup
-
-1. Create an OAuth app in Google Cloud Console.
-2. Set OAuth consent screen (test users for non-published app).
-3. Add redirect URIs for DayLog callback routes:
-   - `http://localhost:3000/api/integrations/oauth/google_calendar/callback`
-   - `http://localhost:3000/api/integrations/oauth/google_fit/callback`
-4. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in both:
-   - `apps/web/.env.local`
-   - Convex deployment environment
-
-### Spotify OAuth setup
-
-1. Create app at Spotify Developer Dashboard.
-2. Add redirect URI:
-   - `http://localhost:3000/api/integrations/oauth/spotify/callback`
-3. Set `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` in both:
-   - `apps/web/.env.local`
-   - Convex deployment environment
-
-### Common OAuth issues and exact fixes
-
-- "redirect URI not secure"
-  - Provider requires `https` for non-local domains.
-  - Use `https://<your-domain>/api/integrations/oauth/<provider>/callback` in production.
-- Localhost callback mismatch
-  - `NEXT_PUBLIC_APP_URL` must match the host you used to start web locally.
-  - If web is not on `3000`, update provider redirect URI to the active local port.
-- Callback mismatch/400 during token exchange
-  - Ensure provider redirect URI exactly matches:
-    `NEXT_PUBLIC_APP_URL + /api/integrations/oauth/<provider>/callback`
-  - Verify client ID/secret pair matches the same OAuth app.
-- Google `access_denied` on test accounts
-  - Add your account in OAuth consent screen -> Audience -> Test users.
+---
 
 ## Observability
 
-### Sentry setup by surface
+| Surface | DSN / notes |
+| ------- | ----------- |
+| Web | `NEXT_PUBLIC_SENTRY_DSN`, optional `SENTRY_DSN` for server |
+| Mobile | `EXPO_PUBLIC_SENTRY_DSN` |
+| Convex | `SENTRY_DSN` |
 
-- Web
-  - Uses `NEXT_PUBLIC_SENTRY_DSN` (client).
-  - Server/edge paths can use `SENTRY_DSN` fallback.
-- Mobile
-  - Uses `EXPO_PUBLIC_SENTRY_DSN`.
-  - Optional test flag: `EXPO_PUBLIC_SENTRY_FORCE_TEST_EXCEPTION=true`.
-- Backend (Convex)
-  - Uses `SENTRY_DSN`.
-  - If your secrets manager uses `BACKEND_SENTRY_DSN`, map it to `SENTRY_DSN`.
+Structured logs for critical paths should include `event`, `userId`, `status`, and `errorMessage` (see [workflow.md](workflow.md)).
 
-### Structured logging format (required)
+---
 
-Structured logs are emitted as JSON and must include:
+## Security
 
-- `event`
-- `userId`
-- `status`
-- `errorMessage`
+Never commit real secrets. Policy, rotation, and encryption controls: [SECURITY.md](SECURITY.md).
 
-Additional envelope fields include app/surface/level/timestamp/context.
+---
 
-### Where to view logs and errors
+## Contributing
 
-- Backend logs: `pnpm --filter @repo/backend logs` or Convex dashboard logs.
-- Web/Admin runtime logs: hosting platform logs (for example Vercel logs).
-- Mobile runtime logs: Expo logs/dev client logs.
-- Cross-surface error monitoring: Sentry projects/dashboards.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and [workflow.md](workflow.md) before opening a PR. Risk level (R0–R3), validation commands, and documentation updates are required for non-trivial changes.
 
-## Testing
+---
 
-```bash
-pnpm test
-pnpm test:coverage
-```
+## License
 
-What is tested:
-
-- Backend: Convex behavior tests, integration logic, summary/export paths.
-- Web: OAuth abuse protection and integration callback behavior tests.
-- Admin: UI/server behavior tests configured in `apps/admin/vitest.config.ts`.
-- Mobile: app/library behavior tests configured in `apps/mobile/vitest.config.ts`.
-
-Coverage note:
-
-- `pnpm test:coverage` currently runs backend coverage (`@repo/backend`).
-
-## Deployment (High Level)
-
-- Web -> Vercel (or equivalent Next.js host)
-- Mobile -> Expo / EAS
-- Backend -> Convex deployment
-
-For release operations, use:
-
-- [workflow.md](workflow.md)
-- [DEPLOY_RUNBOOK.md](DEPLOY_RUNBOOK.md)
-- [SECURITY.md](SECURITY.md)
+This repository does **not** include a root `LICENSE` file. Distribution and reuse terms are defined by the project owners. Add a `LICENSE` when publishing publicly.

@@ -1,7 +1,7 @@
 # DayLog Security and Secrets Handling
 
 > Status: Active
-> Last Updated: 2026-04-14
+> Last Updated: 2026-05-15
 > Audience: Engineers and operators
 > Standard: [CONTRIBUTING.md](CONTRIBUTING.md)
 
@@ -42,8 +42,7 @@ OAuth providers:
 - `GOOGLE_CLIENT_SECRET`
 - `SPOTIFY_CLIENT_SECRET`
 
-Backend/integration encryption:
-Backend/integration encryption (preferred KMS-backed key management):
+Backend and integration encryption (preferred: KMS-backed key management):
 
 - `INTEGRATION_SECRETS_KMS_KEY_ID` — Preferred production config. Set this to your KMS key identifier (for example an AWS KMS KeyId or ARN). When present, the runtime will use KMS to wrap/unwrap data-encryption-keys (DEKs); do not store plaintext key material in environment variables.
 - `INTEGRATION_SECRETS_KEY_RING_URI` — Optional provider-specific key ring identifier (for multi-cloud setups).
@@ -79,7 +78,10 @@ Notes:
 Audit and monitoring:
 
 - The backend will emit best-effort structured audit events for encryption, decryption, and rotation. You can configure `INTEGRATION_SECRETS_AUDIT_LOG_PATH` to persist a local audit log (useful during rotation). For production, forward these events to a secure centralized audit sink.
-- `EXPORT_SIGNING_SECRET`
+
+Export integrity signing (Convex env):
+
+- `EXPORT_SIGNING_SECRET` — dedicated signing secret for export/restore payloads; rotate independently of integration keys.
 
 Observability:
 
@@ -102,13 +104,18 @@ Observability:
 
 ## 5) Integration Token Encryption Controls
 
-Production OAuth token storage depends on envelope encryption.
-These Convex env vars must be set correctly:
+Production OAuth token storage uses **envelope encryption**. Configure **one** of the following (CI strict mode enforces the same rule as `scripts/validate-prod-env.mjs`):
 
-- `INTEGRATION_SECRETS_KEYRING_JSON`
-- `INTEGRATION_SECRETS_ACTIVE_KEY_ID`
+**Preferred (production)**
 
-If either is missing/invalid, OAuth connect/sync paths can fail.
+- `INTEGRATION_SECRETS_KMS_KEY_ID` or `KMS_KEY_ID`, and/or a supported key ring URI (`KEY_RING_URI` / `INTEGRATION_SECRETS_KEY_RING_URI` per your deployment).
+
+**Legacy (migration / dev)**
+
+- `INTEGRATION_SECRETS_KEYRING_JSON` — JSON map of key id → base64 **32-byte** AES keys.
+- `INTEGRATION_SECRETS_ACTIVE_KEY_ID` — must exist in that map.
+
+If configuration is missing or invalid, OAuth connect, refresh, or sync paths can fail at runtime.
 
 ## 6) Branch Protection Verification Security
 

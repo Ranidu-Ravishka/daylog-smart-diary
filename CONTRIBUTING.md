@@ -1,115 +1,82 @@
-# DayLog Contributing Guide (Documentation)
+# DayLog contributing guide
 
-> Status: Active
-> Last Updated: 2026-04-14
-> Audience: All contributors
+> Status: Active  
+> Last Updated: 2026-05-15  
+> Audience: All contributors  
+> Standard: this document
 
-This guide defines how documentation must be updated in DayLog.
-Use it for all markdown changes in the repository.
+Thank you for improving DayLog. This guide covers **how to contribute code and documentation**, where policies live, and how we keep docs accurate.
 
-## 1) Core Rules
+## Before you start
 
-1. Do not invent features or behavior.
-2. Use repository code and scripts as source of truth.
-3. Keep onboarding steps exact and runnable.
-4. Do not leave placeholders unexplained.
-5. Keep one canonical source per topic.
+1. Read [README.md](README.md) for setup and commands.
+2. Read [workflow.md](workflow.md) for risk levels (R0–R3), required checks, and privacy expectations.
+3. For backend changes, follow [CONVEX_SETUP.md](CONVEX_SETUP.md) and Convex patterns in `packages/backend/convex/_generated/ai/guidelines.md`.
 
-## 2) Required Document Header Template
+## Contribution flow
 
-Every maintained markdown file should start with:
+1. **Branch** — Use `feature/...`, `fix/...`, `hotfix/...`, or `chore/...` prefixes (see [workflow.md](workflow.md)).
+2. **Implement** — Small, focused diffs; preserve shared contracts across web, admin, and mobile unless you ship a migration plan.
+3. **Validate** — Run the commands in [workflow.md](workflow.md) for every surface you touch. At minimum for non-docs work: `pnpm lint`, `pnpm typecheck`, `pnpm test`.
+4. **Document** — Update canonical docs when behavior, env vars, or CI changes (see “Documentation ownership” below).
+5. **Pull request** — Describe problem, intent, risk level, validation evidence, and rollback notes for R2/R3.
 
-- A single H1 title
-- A metadata block with:
-  - Status
-  - Last Updated
-  - Audience
-  - Standard link to this guide
+Commit messages: **Conventional Commits** (`feat:`, `fix:`, `docs:`, etc.), imperative subject, optional scope (for example `feat(web): ...`).
 
-Example structure:
+## CI and production secrets checklist
 
-- H1 title
-- Metadata blockquote lines
-- Intro paragraph
+When you change production configuration expectations:
 
-## 3) Ownership Boundaries
+1. Store secrets only in your host’s secret manager or GitHub **Actions secrets** — never in source.
+2. Ensure strict validation can succeed on `main`: run `node scripts/validate-prod-env.mjs --mode=ci` with the same variable **names** your pipeline sets.
+3. **Integration encryption** — Strict CI requires **either** KMS references (`INTEGRATION_SECRETS_KMS_KEY_ID`, `KMS_KEY_ID`, or `KEY_RING_URI` / related) **or** valid `INTEGRATION_SECRETS_KEYRING_JSON` + `INTEGRATION_SECRETS_ACTIVE_KEY_ID`. See `scripts/validate-prod-env.mjs` and [SECURITY.md](SECURITY.md).
+4. When adding new required env vars, update [README.md](README.md), [docs/ENVIRONMENT_SETUP.md](docs/ENVIRONMENT_SETUP.md), and extend the validator script in the same change when appropriate.
 
-- README.md:
-  - Canonical project onboarding, environment matrix, and run commands.
-- workflow.md:
-  - Engineering and production standards.
-- DEPLOY_RUNBOOK.md:
-  - Release and operational procedures.
-- SECURITY.md:
-  - Secret handling and rotation policy.
-- App/package READMEs:
-  - Surface-specific setup and troubleshooting only.
+## Documentation ownership
 
-Do not duplicate full onboarding across app-level READMEs.
-Link back to README.md for canonical setup.
+| Topic | Canonical location |
+| ----- | ------------------ |
+| Onboarding, scripts overview | [README.md](README.md) |
+| Doc index and deep guides | [docs/README.md](docs/README.md) |
+| Engineering policy | [workflow.md](workflow.md) |
+| Releases and operations | [DEPLOY_RUNBOOK.md](DEPLOY_RUNBOOK.md) |
+| Secrets and encryption | [SECURITY.md](SECURITY.md) |
+| Convex + Clerk setup | [CONVEX_SETUP.md](CONVEX_SETUP.md) |
+| App-specific quirks | `apps/<name>/README.md` |
+| Backend commands and Convex env | [packages/backend/README.md](packages/backend/README.md) |
 
-## 4) Environment Variable Documentation Rules
+Do **not** duplicate full onboarding in every app README — link to [README.md](README.md) instead.
 
-1. Document exact variable names from code.
-2. If teams use aliases, show explicit mapping (for example CONVEX_URL -> NEXT_PUBLIC_CONVEX_URL).
-3. Separate variables by surface (web, admin, mobile, backend).
-4. Mark production-critical variables clearly (auth, encryption, observability).
+## Documentation standards (required for `.md` changes)
 
-## 5) Command Documentation Rules
+1. **Truth** — Do not invent APIs, env vars, or features. Verify against code and scripts.
+2. **Runnable steps** — Commands must match `package.json` / app scripts.
+3. **One canonical topic** — Prefer linking to the table above instead of copying long env lists.
+4. **Headers** — Single H1 per file; use consistent `##` / `###` hierarchy.
+5. **Links** — Relative links only; update references when moving or deleting files.
+6. **Metadata** — Keep Status / Last Updated / Audience at the top of maintained docs.
+7. **Tone** — Professional, concise, minimal emoji.
 
-1. Document commands that exist in package.json scripts, or provide direct package commands.
-2. Prefer root-level commands for onboarding.
-3. Call out scope when a command is package-specific.
-4. Keep examples copy-paste safe.
+### Env and command rules
 
-## 6) Writing Style Rules
+- Document **exact** variable names from code (`.env.example`, `packages/backend/convex/env.ts`, etc.).
+- If teams use aliases (for example `CONVEX_URL`), show the mapping to `NEXT_PUBLIC_CONVEX_URL` / `EXPO_PUBLIC_CONVEX_URL`.
+- Prefer root `pnpm` scripts in onboarding examples; mention `pnpm --filter <pkg>` when scoped.
 
-1. Use short, direct sentences.
-2. Prefer numbered steps for procedures.
-3. Prefer bullets for requirements/checklists.
-4. Avoid ambiguous terms like "usually" and "might" in setup steps.
-5. Use consistent section naming across docs.
+### Before merge (docs)
 
-## 7) Links and References
+1. Commands still exist.
+2. Env names match source.
+3. Remove stale duplicates.
+4. Update **Last Updated** metadata.
 
-1. Use relative links to files in this repository.
-2. Keep links current when files move or are removed.
-3. If a file is removed, update all references in the same change.
+### Preferred change order (code + docs)
 
-## 8) Update Checklist (Before Merge)
+1. Code / config first.  
+2. Canonical docs (README, runbook, security).  
+3. Surface READMEs.  
+4. Migration or troubleshooting notes when behavior changes.
 
-1. Validate all commands still exist and run.
-2. Validate env var names against source files.
-3. Remove stale duplicate content.
-4. Update Last Updated metadata date.
-5. Ensure related docs remain consistent.
+## Questions
 
-## 9) Preferred Change Pattern
-
-When changing architecture or runtime behavior:
-
-1. Update code first.
-2. Update canonical doc second (README/workflow/runbook/security).
-3. Update surface docs third (apps/packages).
-4. Add migration/troubleshooting notes when behavior changed.
-
-## 10) CI Secrets & Validation Checklist
-
-Before merging changes that affect production configuration or deployment, run this checklist:
-
-1. Add or update required repository secrets (do not commit secrets to source):
-
-- `CLERK_JWT_ISSUER_DOMAIN`, `CLERK_WEBHOOK_SECRET`, `OPENAI_API_KEY`, `EXPORT_SIGNING_SECRET`, `INTEGRATION_SECRETS_KEYRING_JSON`, `INTEGRATION_SECRETS_ACTIVE_KEY_ID`.
-
-2. Run the validator locally to verify formats and keys:
-
-```bash
-node scripts/validate-prod-env.mjs --mode=local
-```
-
-3. Ensure CI will run the validator in strict mode (the repo contains `.github/workflows/validate-prod-env.yml`). The CI job will run in `--mode=ci` on `main` pushes and will fail the pipeline on invalid/missing secrets.
-4. Confirm `INTEGRATION_SECRETS_KEYRING_JSON` contains a JSON object mapping key ids to base64-encoded 32-byte keys and that `INTEGRATION_SECRETS_ACTIVE_KEY_ID` matches one of those keys.
-5. Do not use placeholder values in secrets; the validator rejects common placeholder tokens (for example `changeme`, `replace-me`, `your_...`).
-6. If adding new production env vars, document them in `README.md` and add validation in `scripts/validate-prod-env.mjs`.
-
-Follow this checklist to reduce accidental misconfiguration and deploy-time failures.
+Open a discussion or issue with the surface (web / admin / mobile / backend), what you tried, and redacted env **keys** (never values).
