@@ -69,7 +69,9 @@ jobs:
       # Dummy Convex URL so ConvexReactClient doesn't fail during Next.js build in CI
       NEXT_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
       EXPO_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
-      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ci_dummy"
+      # Syntactically valid Clerk test key (base64 decodes to `ci.build.local$`); not a real instance.
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
 
     steps:
       - name: Checkout repository
@@ -240,7 +242,9 @@ jobs:
     env:
       NEXT_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
       EXPO_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
-      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ci_dummy"
+      # Syntactically valid Clerk test key (base64 decodes to `ci.build.local$`); not a real instance.
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
 
     steps:
       - name: Checkout repository
