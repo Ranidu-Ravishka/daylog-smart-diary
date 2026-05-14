@@ -11,7 +11,9 @@
     "check-types": "BASELINE_BROWSER_MAPPING_IGNORE_OLD_DATA=true next typegen && tsc --noEmit",
     "check:boundaries": "node ./scripts/check-backend-boundary-imports.mjs",
     "test": "pnpm test:oauth-abuse",
-    "test:oauth-abuse": "vitest run --config vitest.config.ts"
+    "test:oauth-abuse": "vitest run --config vitest.config.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install chromium"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.37.3",
@@ -23,6 +25,7 @@
     "@radix-ui/react-separator": "^1.1.8",
     "@radix-ui/react-slot": "^1.2.4",
     "@repo/backend": "workspace:*",
+    "@repo/sentry-sanitize": "workspace:*",
     "@repo/theme": "workspace:*",
     "@repo/ui": "workspace:*",
     "@repo/user-settings": "workspace:*",
@@ -33,10 +36,10 @@
     "framer-motion": "^12.38.0",
     "import-in-the-middle": "^3.0.0",
     "lucide-react": "^0.577.0",
-    "next": "^16.0.1",
-    "react": "^19.2.0",
+    "next": "16.0.3",
+    "react": "19.2.3",
     "react-day-picker": "^9.14.0",
-    "react-dom": "^19.2.0",
+    "react-dom": "19.2.3",
     "require-in-the-middle": "^8.0.1",
     "tailwind-merge": "^3.5.0"
   },
@@ -49,6 +52,7 @@
     "@types/react-dom": "19.2.2",
     "baseline-browser-mapping": "^2.10.29",
     "eslint": "^9.39.1",
+    "@playwright/test": "^1.56.1",
     "tailwindcss": "^4.1.17",
     "typescript": "5.9.2",
     "vitest": "^4.1.2"

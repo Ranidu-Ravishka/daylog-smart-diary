@@ -191,6 +191,35 @@ jobs:
       - name: Mobile build validation (Expo web export)
         run: pnpm --filter mobile build:ci
 
+      - name: Check mobile web bundle budgets
+        run: pnpm check:bundle-budgets
+
+      - name: Ensure web build for Playwright E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f apps/web/.next/BUILD_ID ]; then
+            echo "No apps/web/.next/BUILD_ID — building web for E2E…"
+            pnpm run build:web
+          else
+            echo "Reusing existing web .next from earlier step."
+          fi
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Playwright (Chromium)
+        run: pnpm --filter web exec playwright install chromium --with-deps
+
+      - name: Web Playwright E2E (OAuth proxy)
+        run: pnpm --filter web test:e2e
+        env:
+          PLAYWRIGHT_WEB_PORT: "3010"
+          CI: "true"
+
   app-test-matrix:
     name: app-tests-${{ matrix.app }}
     # Block test matrix until branch protection verification passes.

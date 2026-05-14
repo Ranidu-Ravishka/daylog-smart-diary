@@ -5,8 +5,9 @@ const MAX_ARRAY_ITEMS = 50;
 const MAX_OBJECT_KEYS = 50;
 const MAX_DEPTH = 6;
 
+/** Keys that may carry credentials, sessions, or long-form user-generated content (journals, notes). */
 const SENSITIVE_KEY_PATTERN =
-  /(pass(word)?|secret|token|authorization|cookie|session|api[-_]?key|client[-_]?secret|refresh[-_]?token|access[-_]?token|private[-_]?key|set-cookie|cvv|ssn|social[-_]?security|dsn)/i;
+  /(pass(word)?|secret|token|authorization|cookie|session|api[-_]?key|client[-_]?secret|refresh[-_]?token|access[-_]?token|private[-_]?key|set-cookie|cvv|ssn|social[-_]?security|dsn|journal|reflection|transcript|storytext|memorybody|notebody|daycontent|manualnotes|peopletags|rawentry|caption|plaintext)/i;
 
 const SENSITIVE_QUERY_KEY_PATTERN =
   /(token|secret|password|api[-_]?key|signature|session|code|state|credential)/i;

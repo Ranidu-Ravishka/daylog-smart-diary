@@ -23,6 +23,7 @@
     "test:coverage:backend": "vitest run --coverage"
   },
   "dependencies": {
+    "@repo/sentry-sanitize": "workspace:*",
     "@repo/user-settings": "workspace:*",
     "@aws-sdk/client-kms": "^3.500.0",
     "@sentry/node": "^10.48.0",
