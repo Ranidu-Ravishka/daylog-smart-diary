@@ -3,19 +3,21 @@ import localFont from "next/font/local";
 import "./globals.css";
 import { Providers } from "./providers";
 
-const geistSans = localFont({
-  src: "./fonts/GeistVF.woff",
-  variable: "--font-geist-sans",
-});
-const geistMono = localFont({
-  src: "./fonts/GeistMonoVF.woff",
-  variable: "--font-geist-mono",
+const satoshi = localFont({
+  src: [
+    { path: "./fonts/Satoshi-Regular.woff2", weight: "400", style: "normal" },
+    { path: "./fonts/Satoshi-Medium.woff2", weight: "500", style: "normal" },
+    { path: "./fonts/Satoshi-Bold.woff2", weight: "600", style: "normal" },
+    { path: "./fonts/Satoshi-Bold.woff2", weight: "700", style: "normal" },
+  ],
+  variable: "--font-satoshi",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "DayLog — AI-Powered Daily Reflection",
+  title: "DayLog — AI Journaling",
   description:
-    "Capture your day, get AI-generated summaries, and discover personal insights. DayLog helps you build a meaningful daily reflection habit.",
+    "A private, emotionally gentle space for daily reflection—memories, mood, and AI summaries that feel supportive, not loud.",
 };
 
 const themeBootstrapScript = `(() => {
@@ -48,9 +50,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+      <body className={`${satoshi.variable} antialiased`}>
         <script dangerouslySetInnerHTML={{ __html: themeBootstrapScript }} />
         <Providers>{children}</Providers>
       </body>

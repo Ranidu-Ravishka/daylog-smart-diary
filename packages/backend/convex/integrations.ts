@@ -1510,7 +1510,10 @@ export const purgeExpiredOAuthMobileHandoffsInternal = internalMutation({
 
 // ── Disconnect an integration ───────────────────────────────
 export const disconnectIntegration = mutation({
-  args: { integrationId: v.id("integrations") },
+  args: {
+    integrationId: v.id("integrations"),
+    reason: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
     const integration = await ctx.db.get(args.integrationId);
@@ -1523,7 +1526,7 @@ export const disconnectIntegration = mutation({
 
     await ctx.db.patch(args.integrationId, {
       status: "disconnected" as const,
-      lastError: undefined,
+      lastError: args.reason,
       tokenRef: undefined,
     });
 
@@ -2377,6 +2380,10 @@ export const syncMyIntegrationForDay = action({
     timeZone: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized");
+    }
     return await syncMyIntegrationForDayImpl(ctx, args);
   },
 });

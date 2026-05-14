@@ -256,9 +256,8 @@ function createStyles(c: ThemeColors) {
       gap: Spacing.sm,
     },
     peopleGroupTitle: {
-      ...Typography.caption1,
+      ...Typography.label,
       color: c.textSecondary,
-      fontWeight: "600",
     },
     peopleSuggestionCard: {
       backgroundColor: c.surface,
@@ -282,9 +281,10 @@ function createStyles(c: ThemeColors) {
       justifyContent: "center",
     },
     peopleAvatarText: {
-      ...Typography.caption1,
+      ...Typography.h3,
+      fontSize: 12,
+      lineHeight: 18,
       color: c.tint,
-      fontWeight: "700",
     },
     peopleSuggestionName: {
       ...Typography.bodyMedium,

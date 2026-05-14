@@ -5,6 +5,7 @@ import { useAppTheme } from "@/components/theme-provider";
 
 interface SectionHeaderProps {
   title: string;
+  /** Optional right-side caption when not using a tappable action. */
   action?: string;
   onAction?: () => void;
 }
@@ -13,21 +14,26 @@ export function SectionHeader({ title, action, onAction }: SectionHeaderProps) {
   const { colors } = useAppTheme();
   const styles = React.useMemo(() => createStyles(colors), [colors]);
 
+  const rightSide =
+    action && onAction ? (
+      <Pressable
+        onPress={onAction}
+        hitSlop={8}
+        style={({ pressed }) => [
+          styles.actionPressable,
+          pressed && styles.actionPressablePressed,
+        ]}
+      >
+        <Text style={styles.action}>{action}</Text>
+      </Pressable>
+    ) : action ? (
+      <Text style={styles.actionCaption}>{action}</Text>
+    ) : null;
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>{title}</Text>
-      {action && onAction && (
-        <Pressable
-          onPress={onAction}
-          hitSlop={8}
-          style={({ pressed }) => [
-            styles.actionPressable,
-            pressed && styles.actionPressablePressed,
-          ]}
-        >
-          <Text style={styles.action}>{action}</Text>
-        </Pressable>
-      )}
+      {rightSide}
     </View>
   );
 }
@@ -45,9 +51,15 @@ function createStyles(c: ThemeColors) {
       color: c.text,
     },
     action: {
-      ...Typography.callout,
+      ...Typography.button,
       color: c.tint,
-      fontWeight: "600",
+    },
+    actionCaption: {
+      ...Typography.caption2,
+      color: c.textSecondary,
+      textAlign: "right",
+      flexShrink: 1,
+      marginLeft: Spacing.md,
     },
     actionPressable: {
       opacity: 1,

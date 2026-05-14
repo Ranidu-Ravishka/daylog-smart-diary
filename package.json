@@ -22,6 +22,8 @@
     "test:backend": "pnpm --filter @repo/backend test:run",
     "test:admin": "pnpm --filter admin test",
     "test:mobile": "pnpm --filter mobile test",
+    "test:e2e:web": "pnpm --filter web test:e2e",
+    "check:bundle-budgets": "node scripts/check-bundle-budgets.mjs",
     "test:coverage": "pnpm test:coverage:backend",
     "test:coverage:backend": "pnpm --filter @repo/backend test:coverage:backend",
     "check:baseline-browser-mapping": "node scripts/check-baseline-browser-mapping-freshness.mjs",
@@ -45,11 +47,12 @@
       "esbuild",
       "@tailwindcss/oxide",
       "@sentry/cli",
-      "sharp"
+      "sharp",
+      "playwright"
     ]
   },
-  "packageManager": "pnpm@10.33.2",
+  "packageManager": "pnpm@11.1.1",
   "engines": {
-    "node": ">=18"
+    "node": ">=22.13"
   }
 }

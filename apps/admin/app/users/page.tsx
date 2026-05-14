@@ -1,6 +1,7 @@
 "use client";
 
 import AdminGuard from "@/components/admin-guard";
+import { captureException } from "@/lib/observability";
 import type { AdminDeleteUserResult } from "@/lib/types/adminQueries";
 import {
   buildActiveDeletionStatusByUserId,
@@ -647,7 +648,11 @@ export default function UsersPage() {
   }, []);
 
   const queueUserDeletion = React.useCallback(
-    async (row: { _id: (typeof users)[number]["_id"]; email: string }) => {
+    async (row: {
+      _id: (typeof users)[number]["_id"];
+      email: string;
+      clerkUserId: string;
+    }) => {
       const rowId = String(row._id);
 
       if (deletingByUserId[rowId] || activeDeletionByUserId.has(rowId)) {
@@ -690,8 +695,60 @@ export default function UsersPage() {
           return;
         }
 
+        try {
+          const clerkResponse = await fetch("/api/admin/delete-clerk-user", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ clerkUserId: row.clerkUserId }),
+          });
+
+          const clerkPayload = (await clerkResponse
+            .json()
+            .catch(() => null)) as { error?: unknown } | null;
+
+          if (!clerkResponse.ok) {
+            const clerkMessage =
+              clerkPayload &&
+              typeof clerkPayload === "object" &&
+              typeof clerkPayload.error === "string"
+                ? clerkPayload.error
+                : clerkResponse.statusText;
+            throw new Error(
+              clerkMessage ||
+                "Failed to remove the Clerk authentication account",
+            );
+          }
+        } catch (clerkError) {
+          const message =
+            clerkError instanceof Error
+              ? clerkError.message
+              : "Convex deletion queued, but Clerk user removal failed";
+          captureException("admin_user_delete_clerk_step_failed", clerkError, {
+            targetClerkUserId: row.clerkUserId,
+            convexUserId: rowId,
+          });
+
+          pushToast(
+            "error",
+            `${message}. The Convex cleanup job is still running — retry from Clerk dashboard if needed.`,
+          );
+
+          setOptimisticallyHiddenByUserId((current) => {
+            const next = { ...current };
+            delete next[rowId];
+            return next;
+          });
+
+          refreshUserRow(rowId);
+          return;
+        }
+
         const now = Date.now();
-        pushToast("info", `Deletion requested for ${row.email}.`);
+        pushToast(
+          "success",
+          `Deletion started for ${row.email}. Clerk sign-in is disabled and Convex cleanup is running.`,
+        );
 
         setDismissedDeletionJobIds((current) => {
           if (!current[jobId]) {
@@ -942,6 +999,7 @@ export default function UsersPage() {
                                   void queueUserDeletion({
                                     _id: row._id,
                                     email: row.email,
+                                    clerkUserId: row.clerkUserId,
                                   })
                                 }
                               >

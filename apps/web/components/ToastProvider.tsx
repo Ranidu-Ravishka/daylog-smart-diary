@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { X } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 type Toast = {
   id: string;
@@ -16,14 +17,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     const handleToast = (event: Event) => {
       const customEvent = event as CustomEvent;
       const { message, type } = customEvent.detail;
-      const id = Math.random().toString(36).substr(2, 9);
+      const id = Math.random().toString(36).slice(2, 11);
 
       setToasts((prev) => [...prev, { id, message, type }]);
 
-      // Auto-remove after 3 seconds
       setTimeout(() => {
         setToasts((prev) => prev.filter((t) => t.id !== id));
-      }, 3000);
+      }, 4000);
     };
 
     window.addEventListener("toast", handleToast);
@@ -37,23 +37,30 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <>
       {children}
-      {/* Toast Container */}
-      <div className="fixed bottom-0 right-0 z-50 flex flex-col gap-2 p-4 max-w-sm">
+      <div
+        className="fixed bottom-0 right-0 z-[100] flex max-w-sm flex-col gap-2 p-4 sm:p-5"
+        role="region"
+        aria-label="Notifications"
+      >
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium shadow-lg animate-in slide-in-from-right-full ${
-              toast.type === "success"
-                ? "bg-green-50 text-green-900 border border-green-200"
-                : toast.type === "error"
-                  ? "bg-red-50 text-red-900 border border-red-200"
-                  : "bg-blue-50 text-blue-900 border border-blue-200"
-            }`}
+            className={cn(
+              "flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm font-medium shadow-soft backdrop-blur-md",
+              toast.type === "success" &&
+                "border-success/25 bg-success/12 text-foreground dark:bg-success/16",
+              toast.type === "error" &&
+                "border-destructive/30 bg-destructive/12 text-foreground dark:bg-destructive/18",
+              toast.type === "info" &&
+                "border-info/25 bg-info/12 text-foreground dark:bg-info/16",
+            )}
           >
-            <span className="flex-1">{toast.message}</span>
+            <span className="flex-1 leading-snug">{toast.message}</span>
             <button
+              type="button"
               onClick={() => removeToast(toast.id)}
-              className="shrink-0 opacity-70 hover:opacity-100 transition-opacity"
+              className="shrink-0 rounded-md p-1 text-current opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label="Dismiss notification"
             >
               <X className="h-4 w-4" />
             </button>

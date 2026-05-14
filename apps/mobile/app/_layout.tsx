@@ -1,4 +1,10 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   DarkTheme,
   DefaultTheme,
@@ -6,26 +12,44 @@ import {
   type Theme as NavigationTheme,
 } from "@react-navigation/native";
 import Constants from "expo-constants";
+import { useFonts } from "expo-font";
 import * as Notifications from "expo-notifications";
-import { Stack, useRouter, useSegments } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
+import { Redirect, Stack, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import "react-native-reanimated";
 import {
   ActivityIndicator,
   Animated,
   Easing,
+  Pressable,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+// Importing the named export below side-effect-initializes the gesture handler
+// module, so we don't need a separate bare `import "react-native-gesture-handler"`.
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
-import { ConvexReactClient, useConvexAuth, useMutation } from "convex/react";
+import {
+  ConvexReactClient,
+  useConvexAuth,
+  useMutation,
+  useQuery,
+} from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
 
 import { ClerkProvider, useAuth, useUser } from "@clerk/clerk-expo";
+import {
+  PlusJakartaSans_400Regular,
+  PlusJakartaSans_500Medium,
+  PlusJakartaSans_600SemiBold,
+  PlusJakartaSans_700Bold,
+} from "@expo-google-fonts/plus-jakarta-sans";
 import { api } from "@repo/backend/convex";
 import { MotionTokens } from "@/constants/motion";
-import { Colors } from "@/constants/theme";
+import { Colors, Typography } from "@/constants/theme";
 import { AppThemeProvider, useAppTheme } from "@/components/theme-provider";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import {
@@ -168,21 +192,29 @@ function bootstrapClerkKey(): ClerkBootstrap {
 }
 
 const clerkBootstrap = bootstrapClerkKey();
+void SplashScreen.preventAutoHideAsync();
 
 export const unstable_settings = {
   anchor: "(tabs)",
 };
 
+const ACCOUNT_DELETION_STATUS_QUERY_ARGS = { pollToken: 0 } as const;
+
 function SyncClerkUserToConvex() {
-  const { isLoaded, isSignedIn, user } = useUser();
+  const { isLoaded, isSignedIn, sessionId } = useAuth();
+  const { user } = useUser();
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useConvexAuth();
   const syncUser = useMutation(api.users.syncUserFromClerk);
-  const lastSyncedUserId = useRef<string | null>(null);
+  const lastSyncedIdentity = useRef<string | null>(null);
 
-  useEffect(() => {
-    if (!isLoaded || !isSignedIn || !user) return;
-    if (isConvexAuthLoading || !isAuthenticated) return;
-    if (lastSyncedUserId.current === user.id) return;
+  const syncPayload = useMemo(() => {
+    if (!isLoaded || !isSignedIn || !user) {
+      return null;
+    }
+
+    if (isConvexAuthLoading || !isAuthenticated) {
+      return null;
+    }
 
     const primaryEmailId = user.primaryEmailAddressId;
     const emailAddresses = user.emailAddresses;
@@ -196,31 +228,93 @@ function SyncClerkUserToConvex() {
           )?.emailAddress
         : undefined;
 
-    if (!email) return;
+    if (!email) {
+      return null;
+    }
 
-    syncUser({
-      clerkUserId: user.id,
-      email,
-      firstName: user.firstName ?? undefined,
-      lastName: user.lastName ?? undefined,
-      imageUrl: user.imageUrl ?? undefined,
-    }).catch((error) => {
-      captureException("mobile_sync_user_to_convex_failed", error, {
+    return {
+      syncIdentity: `${user.id}:${sessionId ?? "no-session"}`,
+      payload: {
         clerkUserId: user.id,
-      });
-    });
-
-    lastSyncedUserId.current = user.id;
+        email,
+        firstName: user.firstName ?? undefined,
+        lastName: user.lastName ?? undefined,
+        imageUrl: user.imageUrl ?? undefined,
+      },
+    };
   }, [
-    isLoaded,
-    isSignedIn,
-    user,
-    syncUser,
     isAuthenticated,
     isConvexAuthLoading,
+    isLoaded,
+    isSignedIn,
+    sessionId,
+    user,
   ]);
 
+  useEffect(() => {
+    if (!syncPayload) {
+      return;
+    }
+
+    if (lastSyncedIdentity.current === syncPayload.syncIdentity) {
+      return;
+    }
+
+    lastSyncedIdentity.current = syncPayload.syncIdentity;
+
+    syncUser(syncPayload.payload).catch((error) => {
+      captureException("mobile_sync_user_to_convex_failed", error, {
+        clerkUserId: syncPayload.payload.clerkUserId,
+      });
+    });
+  }, [syncPayload, syncUser]);
+
   return null;
+}
+
+function AuthBootstrapProblemScreen({
+  title,
+  message,
+  buttonLabel,
+  onButtonPress,
+}: {
+  title: string;
+  message: string;
+  buttonLabel: string;
+  onButtonPress: () => void | Promise<void>;
+}) {
+  const { colors } = useAppTheme();
+
+  return (
+    <View
+      style={[
+        styles.bootstrapProblemContainer,
+        { backgroundColor: colors.background },
+      ]}
+    >
+      <Text style={[styles.bootstrapProblemTitle, { color: colors.text }]}>
+        {title}
+      </Text>
+      <Text
+        style={[styles.bootstrapProblemBody, { color: colors.textSecondary }]}
+      >
+        {message}
+      </Text>
+      <Pressable
+        accessibilityRole="button"
+        onPress={onButtonPress}
+        style={({ pressed }) => [
+          styles.bootstrapProblemButton,
+          {
+            backgroundColor: colors.tint,
+            opacity: pressed ? 0.85 : 1,
+          },
+        ]}
+      >
+        <Text style={styles.bootstrapProblemButtonText}>{buttonLabel}</Text>
+      </Pressable>
+    </View>
+  );
 }
 
 function ConvexAuthProvider({
@@ -287,7 +381,13 @@ function AppThemedShell({ children }: { children: React.ReactNode }) {
   const [overlayColor, setOverlayColor] = useState(colors.background);
 
   useEffect(() => {
-    setOverlayColor(previousBackground.current);
+    const nextOverlayColor = previousBackground.current;
+
+    setOverlayColor((currentOverlayColor) =>
+      currentOverlayColor === nextOverlayColor
+        ? currentOverlayColor
+        : nextOverlayColor,
+    );
     previousBackground.current = colors.background;
     overlayOpacity.setValue(1);
     Animated.timing(overlayOpacity, {
@@ -298,18 +398,28 @@ function AppThemedShell({ children }: { children: React.ReactNode }) {
     }).start();
   }, [colors.background, overlayOpacity]);
 
-  const navigationTheme: NavigationTheme = {
-    ...(isDark ? DarkTheme : DefaultTheme),
-    colors: {
-      ...(isDark ? DarkTheme.colors : DefaultTheme.colors),
-      background: colors.background,
-      card: colors.surface,
-      text: colors.text,
-      border: colors.border,
-      primary: colors.tint,
-      notification: colors.tint,
-    },
-  };
+  const navigationTheme = useMemo<NavigationTheme>(
+    () => ({
+      ...(isDark ? DarkTheme : DefaultTheme),
+      colors: {
+        ...(isDark ? DarkTheme.colors : DefaultTheme.colors),
+        background: colors.background,
+        card: colors.surface,
+        text: colors.text,
+        border: colors.border,
+        primary: colors.tint,
+        notification: colors.tint,
+      },
+    }),
+    [
+      colors.background,
+      colors.border,
+      colors.surface,
+      colors.text,
+      colors.tint,
+      isDark,
+    ],
+  );
 
   return (
     <ThemeProvider value={navigationTheme}>
@@ -334,44 +444,162 @@ function AppThemedShell({ children }: { children: React.ReactNode }) {
 }
 
 function RootAuthBoundary({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
   const segments = useSegments();
-  const { isLoaded, isSignedIn } = useAuth();
-  const [isRouteReady, setIsRouteReady] = useState(false);
+  const { isLoaded, isSignedIn, signOut, userId } = useAuth();
+  const { isAuthenticated, isLoading: isConvexAuthLoading } = useConvexAuth();
+  const canQueryAccountDeletion =
+    isLoaded && isSignedIn && isAuthenticated && !isConvexAuthLoading;
+  const accountDeletionQueryArgs = canQueryAccountDeletion
+    ? ACCOUNT_DELETION_STATUS_QUERY_ARGS
+    : "skip";
+  const accountDeletionStatus = useQuery(
+    api.users.getMyAccountDeletionStatus,
+    accountDeletionQueryArgs,
+  );
+  const accountDeletionAccountStatus = accountDeletionStatus?.accountStatus;
+  const ensureUserExists = useMutation(api.users.ensureUserExists);
+  const [bootstrapState, setBootstrapState] = useState<
+    "loading" | "ready" | "blocked" | "error"
+  >("loading");
+  const ensuredUserKey = useRef<string | null>(null);
 
   const isAuthRoute = segments[0] === "(auth)";
+  const updateBootstrapState = useCallback(
+    (nextState: "loading" | "ready" | "blocked" | "error") => {
+      setBootstrapState((currentState) =>
+        currentState === nextState ? currentState : nextState,
+      );
+    },
+    [],
+  );
 
   useEffect(() => {
-    if (!isLoaded) {
-      setIsRouteReady(false);
+    if (!isLoaded || !isSignedIn) {
       return;
     }
 
-    if (!isSignedIn) {
-      if (!isAuthRoute) {
-        setIsRouteReady(false);
-        router.replace("/sign-in");
-        return;
-      }
-
-      setIsRouteReady(true);
+    if (isConvexAuthLoading || !isAuthenticated) {
+      updateBootstrapState("loading");
       return;
     }
 
-    if (isAuthRoute) {
-      setIsRouteReady(false);
-      router.replace("/(tabs)");
+    if (accountDeletionAccountStatus === undefined) {
+      updateBootstrapState("loading");
       return;
     }
 
-    setIsRouteReady(true);
-  }, [isLoaded, isSignedIn, isAuthRoute, router]);
+    const shouldHardBlockDeletionUi =
+      accountDeletionStatus?.inProgress === true ||
+      accountDeletionStatus?.retryable === true ||
+      (accountDeletionAccountStatus === "deletion_requested" &&
+        accountDeletionStatus?.canDeleteClerkAccount !== true);
 
-  if (!isLoaded || !isRouteReady) {
+    if (shouldHardBlockDeletionUi) {
+      updateBootstrapState("blocked");
+      return;
+    }
+
+    const bootstrapKey = userId ?? "signed-in";
+    if (ensuredUserKey.current === bootstrapKey) {
+      updateBootstrapState("ready");
+      return;
+    }
+
+    let isCancelled = false;
+    ensuredUserKey.current = bootstrapKey;
+    updateBootstrapState("loading");
+
+    void ensureUserExists()
+      .then((result) => {
+        if (isCancelled) {
+          return;
+        }
+
+        if (result.blocked) {
+          updateBootstrapState("blocked");
+          return;
+        }
+
+        updateBootstrapState("ready");
+      })
+      .catch((error) => {
+        if (isCancelled) {
+          return;
+        }
+
+        captureException("mobile_ensure_user_exists_failed", error, {
+          clerkUserId: userId ?? undefined,
+        });
+        updateBootstrapState("error");
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    ensureUserExists,
+    isAuthenticated,
+    isConvexAuthLoading,
+    isLoaded,
+    isSignedIn,
+    accountDeletionAccountStatus,
+    accountDeletionStatus?.canDeleteClerkAccount,
+    accountDeletionStatus?.inProgress,
+    accountDeletionStatus?.retryable,
+    userId,
+    updateBootstrapState,
+  ]);
+
+  if (!isLoaded) {
+    return null;
+  }
+
+  if (!isSignedIn && !isAuthRoute) {
+    return <Redirect href="/(auth)/sign-in" />;
+  }
+
+  if (isSignedIn && isAuthRoute) {
+    // Send onboarding through quick-setup; that screen redirects home when prefs exist.
+    // Avoid imperative /quick-setup from auth screens (races with this redirect and can
+    // dispatch a nested REPLACE to "(tabs)" before the tab navigator is mounted).
+    return <Redirect href="/(tabs)/quick-setup" />;
+  }
+
+  if (!isSignedIn) {
+    return <>{children}</>;
+  }
+
+  if (bootstrapState === "loading") {
     return (
       <View style={styles.authLoadingContainer}>
         <ActivityIndicator size="large" />
       </View>
+    );
+  }
+
+  if (bootstrapState === "blocked") {
+    return (
+      <AuthBootstrapProblemScreen
+        title="Account deletion in progress"
+        message="This account is being removed. Sign out to continue with another account."
+        buttonLabel="Sign out"
+        onButtonPress={async () => {
+          await signOut();
+        }}
+      />
+    );
+  }
+
+  if (bootstrapState === "error") {
+    return (
+      <AuthBootstrapProblemScreen
+        title="Unable to finish account bootstrap"
+        message="DayLog could not prepare your user record yet. Try signing out and back in."
+        buttonLabel="Sign out"
+        onButtonPress={async () => {
+          await signOut();
+        }}
+      />
     );
   }
 
@@ -380,59 +608,86 @@ function RootAuthBoundary({ children }: { children: React.ReactNode }) {
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+  const [fontsLoaded] = useFonts({
+    PlusJakartaSans_400Regular,
+    PlusJakartaSans_500Medium,
+    PlusJakartaSans_600SemiBold,
+    PlusJakartaSans_700Bold,
+  });
   const startupError =
     convexBootstrap.startupError ?? clerkBootstrap.startupError;
   const convexClient = convexBootstrap.client;
   const clerkPublishableKey = clerkBootstrap.publishableKey;
 
+  useEffect(() => {
+    if (fontsLoaded) {
+      void SplashScreen.hideAsync();
+    }
+  }, [fontsLoaded]);
+
+  if (!fontsLoaded) {
+    return null;
+  }
+
   if (startupError || !convexClient || !clerkPublishableKey) {
     const isDark = colorScheme === "dark";
 
     return (
-      <ThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
-        <StartupConfigErrorScreen
-          isDark={isDark}
-          message={
-            startupError?.message ??
-            "Convex client could not be initialized at startup."
-          }
-        />
-        <StatusBar style={isDark ? "light" : "dark"} />
-      </ThemeProvider>
+      <GestureHandlerRootView style={styles.rootHost}>
+        <SafeAreaProvider>
+          <ThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
+            <StartupConfigErrorScreen
+              isDark={isDark}
+              message={
+                startupError?.message ??
+                "Convex client could not be initialized at startup."
+              }
+            />
+            <StatusBar style={isDark ? "light" : "dark"} />
+          </ThemeProvider>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
     );
   }
 
   return (
-    <ClerkProvider publishableKey={clerkPublishableKey}>
-      <ConvexAuthProvider client={convexClient}>
-        <AppThemeProvider>
-          <AppThemedShell>
-            <SyncClerkUserToConvex />
-            <RootAuthBoundary>
-              <Stack>
-                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                <Stack.Screen
-                  name="oauth-complete"
-                  options={{ headerShown: false }}
-                />
-                <Stack.Screen
-                  name="(auth)/sign-in"
-                  options={{ headerShown: false }}
-                />
-                <Stack.Screen
-                  name="(auth)/sign-up"
-                  options={{ headerShown: false }}
-                />
-                <Stack.Screen
-                  name="(auth)/forgot-password"
-                  options={{ headerShown: false }}
-                />
-              </Stack>
-            </RootAuthBoundary>
-          </AppThemedShell>
-        </AppThemeProvider>
-      </ConvexAuthProvider>
-    </ClerkProvider>
+    <GestureHandlerRootView style={styles.rootHost}>
+      <SafeAreaProvider>
+        <ClerkProvider publishableKey={clerkPublishableKey}>
+          <ConvexAuthProvider client={convexClient}>
+            <AppThemeProvider>
+              <AppThemedShell>
+                <SyncClerkUserToConvex />
+                <RootAuthBoundary>
+                  <Stack>
+                    <Stack.Screen
+                      name="(tabs)"
+                      options={{ headerShown: false }}
+                    />
+                    <Stack.Screen
+                      name="oauth-complete"
+                      options={{ headerShown: false }}
+                    />
+                    <Stack.Screen
+                      name="(auth)/sign-in"
+                      options={{ headerShown: false }}
+                    />
+                    <Stack.Screen
+                      name="(auth)/sign-up"
+                      options={{ headerShown: false }}
+                    />
+                    <Stack.Screen
+                      name="(auth)/forgot-password"
+                      options={{ headerShown: false }}
+                    />
+                  </Stack>
+                </RootAuthBoundary>
+              </AppThemedShell>
+            </AppThemeProvider>
+          </ConvexAuthProvider>
+        </ClerkProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
@@ -449,26 +704,53 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   configErrorTitle: {
-    fontSize: 24,
-    fontWeight: "700",
+    ...Typography.h2,
   },
   configErrorBody: {
-    fontSize: 15,
-    lineHeight: 22,
+    ...Typography.bodySmall,
   },
   configErrorCode: {
-    fontSize: 14,
-    fontWeight: "700",
+    ...Typography.label,
     alignSelf: "flex-start",
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
   },
   configErrorHint: {
-    fontSize: 13,
-    lineHeight: 20,
+    ...Typography.caption,
+  },
+  bootstrapProblemContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    gap: 12,
+  },
+  bootstrapProblemTitle: {
+    ...Typography.h3,
+    textAlign: "center",
+  },
+  bootstrapProblemBody: {
+    ...Typography.bodySmall,
+    textAlign: "center",
+    maxWidth: 320,
+  },
+  bootstrapProblemButton: {
+    marginTop: 8,
+    minWidth: 140,
+    borderRadius: 999,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  bootstrapProblemButtonText: {
+    color: Colors.light.inverseText,
+    ...Typography.button,
   },
   themedShellContainer: {
+    flex: 1,
+  },
+  rootHost: {
     flex: 1,
   },
 });

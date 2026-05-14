@@ -1,14 +1,9 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
-const isPublicRoute = createRouteMatcher([
-  "/",
-  "/sign-in(.*)",
-  "/sign-up(.*)",
-  "/privacy",
-  "/terms",
-  "/integrations/oauth/complete",
-]);
+import { webProxyPublicRoutePatterns } from "@/lib/web-proxy-public-routes";
+
+const isPublicRoute = createRouteMatcher([...webProxyPublicRoutePatterns]);
 
 export default clerkMiddleware(async (auth, req) => {
   if (isPublicRoute(req)) {

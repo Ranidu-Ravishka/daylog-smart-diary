@@ -89,6 +89,34 @@ describe("users behavior", () => {
     expect(db.getTable("user")).toHaveLength(2);
   });
 
+  it("creates a missing user record during bootstrap", async () => {
+    const db = createInMemoryDb({
+      user: [baseSeed().user[0]],
+    });
+
+    const ensureUserExists = handler<
+      Record<string, never>,
+      { created: boolean; blocked: boolean; userId: Id<"user"> | null }
+    >(usersModule.ensureUserExists);
+
+    const result = await ensureUserExists(
+      createAuthCtx(db, "clerk_new_user_001"),
+      {},
+    );
+
+    expect(result.created).toBe(true);
+    expect(result.blocked).toBe(false);
+    expect(result.userId).toBeTruthy();
+
+    const createdUser = db
+      .getTable("user")
+      .find((user) => user.clerkUserId === "clerk_new_user_001");
+
+    expect(createdUser?.email).toBe("clerk_new_user_001@daylog.invalid");
+    expect(createdUser?.isAdmin).toBe(false);
+    expect(db.getTable("adminDashboardMetrics")[0]?.totalUsers).toBe(1);
+  });
+
   it("updates profile image via manual upload and provider fallback", async () => {
     const db = createInMemoryDb(baseSeed());
     const generateProfileImageUploadUrl = handler<
@@ -682,6 +710,67 @@ describe("users behavior", () => {
     expect(status.job?.status).toBe("requested");
   });
 
+  it("does not treat a completed deletion job as an active deletion request when the user row is gone", async () => {
+    const completedJobId = "deletion_job_idle_001" as Id<"userDeletionJobs">;
+    const db = createInMemoryDb({
+      ...baseSeed(),
+      user: baseSeed().user.filter((row) => row._id !== MEMBER_USER_ID),
+      userDeletionJobs: [
+        {
+          _id: completedJobId,
+          _creationTime: 900,
+          userId: MEMBER_USER_ID,
+          clerkUserId: "clerk_member_001",
+          status: "completed",
+          stage: "summaryGenerationQuotas",
+          processedBatches: 5,
+          checkpoints: 5,
+          progress: {
+            deletedMemories: 1,
+            deletedSummaries: 1,
+            deletedDays: 1,
+            deletedIntegrations: 0,
+            deletedPreferences: 0,
+            deletedAuditLogs: 0,
+            deletedPlatformAuditEvents: 0,
+            deletedMemoryMedia: 0,
+            deletedIntegrationDailyData: 0,
+            deletedIntegrationSecrets: 0,
+            deletedIntegrationSyncRuns: 0,
+            deletedIntegrationHealthEvents: 0,
+            deletedExportJobs: 0,
+            deletedRestoreJobs: 0,
+            deletedSummaryGenerationEvents: 0,
+            deletedSummaryQualityEvaluations: 0,
+            deletedSummaryGenerationQuotas: 0,
+          },
+          startedAt: 1,
+          updatedAt: 10,
+          completedAt: 10,
+          userDeletedAt: 10,
+        },
+      ],
+    });
+
+    const getMyAccountDeletionStatus = handler<
+      { pollToken?: number; jobId?: Id<"userDeletionJobs"> },
+      {
+        requested: boolean;
+        inProgress: boolean;
+        userExists: boolean;
+        accountStatus: string;
+      }
+    >(usersModule.getMyAccountDeletionStatus);
+
+    const ctx = createAuthCtx(db, "clerk_member_001");
+    const status = await getMyAccountDeletionStatus(ctx, { pollToken: 1 });
+
+    expect(status.requested).toBe(false);
+    expect(status.inProgress).toBe(false);
+    expect(status.userExists).toBe(false);
+    expect(status.accountStatus).toBe("active");
+  });
+
   it("retries failed account deletion jobs on request", async () => {
     const schedulerRunAfter = vi.fn(async () => undefined);
     const failedUserId = "user_retry_target_001" as Id<"user">;
@@ -819,7 +908,7 @@ describe("users behavior", () => {
         clerkUserId: "clerk_deleted_target_001",
         email: "deleted-target@example.com",
       }),
-    ).rejects.toThrow("Account deletion in progress");
+    ).resolves.toBeNull();
   });
 
   it("marks deletion jobs as failed when a step throws", async () => {

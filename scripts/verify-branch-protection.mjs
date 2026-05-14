@@ -97,6 +97,15 @@ function isBranchProtectionPlanLimitation(status, details) {
   );
 }
 
+/** Default Actions GITHUB_TOKEN cannot call GET branch protection (no Administration scope). */
+function isBranchProtectionBlockedForIntegrationToken(status, details) {
+  if (status !== 403) {
+    return false;
+  }
+
+  return /resource not accessible by integration/i.test(details);
+}
+
 function resolveOwnerRepo(repoArg) {
   const repoValue =
     repoArg ??
@@ -417,18 +426,30 @@ async function main() {
     const allowUnsupportedPlanBypass =
       allowUnsupportedPlan || allowUnsupportedPlanFromEnv;
 
-    if (
-      allowUnsupportedPlanBypass &&
-      isBranchProtectionPlanLimitation(response.status, details)
-    ) {
-      console.warn(
-        `WARN: Branch protection API is unavailable for ${owner}/${repo}@${branch} on the current GitHub plan.`,
-      );
+    const planBlocked = isBranchProtectionPlanLimitation(response.status, details);
+    const integrationBlocked = isBranchProtectionBlockedForIntegrationToken(
+      response.status,
+      details,
+    );
+
+    if (allowUnsupportedPlanBypass && (planBlocked || integrationBlocked)) {
+      if (integrationBlocked) {
+        console.warn(
+          `WARN: Branch protection API returned 403 for ${owner}/${repo}@${branch}: the current token cannot read this endpoint (typical for github.token in Actions).`,
+        );
+        console.warn(
+          "WARN: To enforce live verification in CI, set secrets.BRANCH_PROTECTION_TOKEN to a PAT with repo (classic) or Repository Administration: Read (fine-grained).",
+        );
+      } else {
+        console.warn(
+          `WARN: Branch protection API is unavailable for ${owner}/${repo}@${branch} on the current GitHub plan.`,
+        );
+        console.warn(
+          "WARN: Live branch protection rules could not be verified. Upgrade GitHub plan or make repository public to re-enable strict verification.",
+        );
+      }
       console.warn(
         "WARN: Continuing only because ALLOW_UNSUPPORTED_BRANCH_PROTECTION is enabled.",
-      );
-      console.warn(
-        "WARN: Live branch protection rules could not be verified. Upgrade GitHub plan or make repository public to re-enable strict verification.",
       );
       process.exit(0);
     }
@@ -440,6 +461,11 @@ async function main() {
     console.error(`HTTP ${response.status} ${response.statusText}`);
     if (details) {
       console.error(details);
+    }
+    if (response.status === 401) {
+      console.error(
+        "Hint: HTTP 401 means GitHub rejected the token. If CI sets GITHUB_TOKEN from secrets.BRANCH_PROTECTION_TOKEN, rotate or remove that secret (expired/revoked PATs cause this). A classic PAT needs the \"repo\" scope; a fine-grained PAT needs Repository permission Administration: Read. If the secret is unset, Actions falls back to github.token, which may return 403 on some plans instead.",
+      );
     }
     process.exit(1);
   }

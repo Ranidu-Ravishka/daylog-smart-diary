@@ -61,6 +61,7 @@ import type * as summaryFallback from "../summaryFallback.js";
 import type * as summaryGeneration from "../summaryGeneration.js";
 import type * as summaryQuality from "../summaryQuality.js";
 import type * as unsupportedProviders from "../unsupportedProviders.js";
+import type * as userDeletionJobQueries from "../userDeletionJobQueries.js";
 import type * as userPreferences from "../userPreferences.js";
 import type * as users from "../users.js";
 import type * as validators from "../validators.js";
@@ -126,6 +127,7 @@ declare const fullApi: ApiFromModules<{
   summaryGeneration: typeof summaryGeneration;
   summaryQuality: typeof summaryQuality;
   unsupportedProviders: typeof unsupportedProviders;
+  userDeletionJobQueries: typeof userDeletionJobQueries;
   userPreferences: typeof userPreferences;
   users: typeof users;
   validators: typeof validators;

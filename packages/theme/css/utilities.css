@@ -1,0 +1,15 @@
+@utility glass-panel {
+  border-radius: var(--radius-xl);
+  border: 1px solid hsl(var(--border) / 0.55);
+  background: hsl(var(--card) / 0.72);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(18px);
+}
+
+@utility shadow-soft {
+  box-shadow: var(--shadow-soft);
+}
+
+@utility shadow-card {
+  box-shadow: var(--shadow-card);
+}

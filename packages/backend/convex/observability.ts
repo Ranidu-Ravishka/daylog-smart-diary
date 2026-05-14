@@ -1,3 +1,8 @@
+import {
+  sanitizeSentryBreadcrumb,
+  sanitizeSentryEvent,
+} from "@repo/sentry-sanitize";
+
 type StructuredContext = Record<string, unknown>;
 type LogLevel = "info" | "warn" | "error";
 type SentryLevel = "info" | "warning" | "error";
@@ -243,6 +248,14 @@ async function ensureBackendSentryInitialized(): Promise<void> {
         environment: backendEnvironment,
         tracesSampleRate: backendSentryTracesSampleRate,
         enabled: true,
+        sendDefaultPii: false,
+        release:
+          process.env.SENTRY_RELEASE?.trim() ||
+          process.env.VERCEL_GIT_COMMIT_SHA?.trim() ||
+          undefined,
+        beforeSend: (event: unknown) => sanitizeSentryEvent(event),
+        beforeBreadcrumb: (breadcrumb: unknown) =>
+          sanitizeSentryBreadcrumb(breadcrumb),
       });
 
       backendSentry = module;

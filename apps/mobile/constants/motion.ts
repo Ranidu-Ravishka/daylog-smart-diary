@@ -1,12 +1,14 @@
-export const MotionTokens = {
-  duration: {
-    quick: 170,
-    standard: 220,
-    themeTransition: 260,
-  },
-  delay: {
-    none: 0,
-    staggerSm: 60,
-    staggerMd: 120,
-  },
-} as const;
+/** Re-export canonical motion tokens from the shared design system. */
+export {
+  MotionTokens,
+  daylogAmbientOrbs,
+  daylogAmbientOrbEase,
+  daylogDurationMs,
+  daylogDurationS,
+  daylogFadeTransition,
+  daylogFramerSpringSharedLayout,
+  daylogSpringGentle,
+  daylogSpringSoft,
+  daylogStaggerMs,
+  DAYLOG_EASE,
+} from "@repo/theme/motion";

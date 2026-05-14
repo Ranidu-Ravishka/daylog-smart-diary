@@ -21,16 +21,16 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
-import { useRouter } from "expo-router";
-import { useAuth, useUser } from "@clerk/clerk-expo";
+import { useRouter, Redirect } from "expo-router";
+import { useUser } from "@clerk/clerk-expo";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "@repo/backend/convex";
 import { normalizeUserSettings } from "@repo/user-settings/lib/user-settings";
-import { Colors, Radius, Spacing, Typography } from "@/constants/theme";
+import { Radius, Spacing, Typography } from "@/constants/theme";
+import { useAppTheme } from "@/components/theme-provider";
 import { FocusAreasStep } from "@/components/onboarding/focus-areas-step";
 import { ReminderStep } from "@/components/onboarding/reminder-step";
 import { FinishStep } from "@/components/onboarding/finish-step";
-import { useColorScheme } from "@/hooks/use-color-scheme";
 import {
   ensureReminderPermissions,
   syncReminderNotifications,
@@ -41,9 +41,7 @@ const TOTAL_STEPS = 3;
 
 export default function QuickSetupScreen() {
   const router = useRouter();
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? "light"];
-  const { isSignedIn } = useAuth();
+  const { colors } = useAppTheme();
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useConvexAuth();
   const { user } = useUser();
   const syncUserPreferences = useMutation(
@@ -80,19 +78,6 @@ export default function QuickSetupScreen() {
   }));
 
   useEffect(() => {
-    if (!isSignedIn) {
-      router.replace("/sign-in");
-    }
-  }, [isSignedIn, router]);
-
-  useEffect(() => {
-    if (isConvexAuthLoading || !isAuthenticated) return;
-    if ((savedPreferences?.focusAreas?.length ?? 0) > 0) {
-      router.replace("/(tabs)");
-    }
-  }, [savedPreferences, router, isAuthenticated, isConvexAuthLoading]);
-
-  useEffect(() => {
     if (didPrefill.current || !savedPreferences) return;
 
     setSelectedFocus(savedPreferences.focusAreas ?? []);
@@ -112,6 +97,15 @@ export default function QuickSetupScreen() {
     if (stepIndex === 1) return reminderType !== null;
     return true;
   }, [stepIndex, selectedFocus.length, reminderType]);
+
+  // Root-level auth redirect handles sending unauthenticated users to sign-in.
+  if (
+    !isConvexAuthLoading &&
+    isAuthenticated &&
+    (savedPreferences?.focusAreas?.length ?? 0) > 0
+  ) {
+    return <Redirect href="/(tabs)" />;
+  }
 
   const primaryLabel =
     stepIndex === TOTAL_STEPS - 1
@@ -560,8 +554,7 @@ const styles = StyleSheet.create({
     ...Typography.bodyMedium,
   },
   pickerAction: {
-    ...Typography.callout,
-    fontWeight: "600",
+    ...Typography.button,
   },
   picker: {
     height: 210,

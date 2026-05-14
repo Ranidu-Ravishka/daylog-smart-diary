@@ -1,7 +1,4 @@
-import {
-  MEMORY_MOOD_VALUES,
-  USER_SETTINGS_DEFAULTS,
-} from "@repo/user-settings/lib/user-settings";
+import { USER_SETTINGS_DEFAULTS } from "@repo/user-settings/lib/user-settings";
 import {
   INTEGRATION_COMING_SOON_BADGE_LABEL,
   INTEGRATION_COMING_SOON_HELPER_TEXT,
@@ -12,21 +9,11 @@ import {
   type IntegrationProvider,
   type IntegrationProviderStatus,
 } from "@repo/user-settings/lib/integration-provider-catalog";
+import { MOOD_EMOJI, MOOD_LABELS, MOOD_OPTIONS, MOODS } from "./mood-options";
 
-export const MOOD_EMOJI: Record<string, string> = {
-  happy: "😊",
-  sad: "😢",
-  excited: "🎉",
-  peaceful: "😌",
-  loved: "❤️",
-  angry: "😤",
-  anxious: "😰",
-  neutral: "😐",
-};
+export { MOOD_EMOJI, MOOD_LABELS, MOOD_OPTIONS, MOODS };
 
-export const MOODS = Object.keys(MOOD_EMOJI);
-
-export const MEMORY_MOOD_OPTIONS = MEMORY_MOOD_VALUES;
+export const MEMORY_MOOD_OPTIONS = MOODS;
 
 export const FOCUS_AREAS = [
   { id: 0, label: "Mental Health", icon: "fitness" },

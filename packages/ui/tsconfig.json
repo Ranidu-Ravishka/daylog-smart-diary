@@ -4,6 +4,6 @@
     "rootDir": ".",
     "outDir": "dist"
   },
-  "include": ["hooks", "lib"],
+  "include": ["hooks", "lib", "components"],
   "exclude": ["node_modules", "dist"]
 }

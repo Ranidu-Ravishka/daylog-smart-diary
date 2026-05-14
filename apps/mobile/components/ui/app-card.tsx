@@ -27,13 +27,7 @@ function createStyles(c: ThemeColors) {
       borderRadius: Radius.lg,
       borderWidth: 1,
       borderColor: c.border,
-      ...(c.inverseText === "#FFFFFF" ? Shadows.md : {}),
-      ...(c.inverseText === "#000000"
-        ? {
-            shadowColor: "transparent",
-            elevation: 0,
-          }
-        : {}),
+      ...Shadows.sm,
     },
     padded: {
       padding: Spacing.xl,

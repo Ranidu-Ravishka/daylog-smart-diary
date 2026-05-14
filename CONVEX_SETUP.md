@@ -1,7 +1,7 @@
 # DayLog Convex Setup Guide
 
 > Status: Active
-> Last Updated: 2026-04-14
+> Last Updated: 2026-05-15
 > Audience: Engineers onboarding backend and auth
 > Standard: [CONTRIBUTING.md](CONTRIBUTING.md)
 
@@ -11,12 +11,12 @@ This guide covers backend setup for the shared Convex deployment used by:
 - `apps/admin`
 - `apps/mobile`
 
-For full project onboarding, start with [README.md](README.md).
+For full project onboarding, start with [README.md](README.md). Deeper env reference: [docs/ENVIRONMENT_SETUP.md](docs/ENVIRONMENT_SETUP.md).
 
 ## 1) Prerequisites
 
 - Node.js `>=18`
-- pnpm `10.x`
+- pnpm **11.x** (see root `package.json` `packageManager`)
 - Convex account
 - Clerk app configured for DayLog
 

@@ -1,0 +1,16 @@
+/**
+ * Transition durations for Tailwind arbitrary values, e.g. `duration-[var(--daylog-d-ms-layout)]`.
+ * Numeric values mirror `daylogDurationMs` in `@repo/theme/motion`.
+ */
+:root {
+  --daylog-d-ms-instant: 0ms;
+  --daylog-d-ms-quick: 170ms;
+  --daylog-d-ms-standard: 220ms;
+  --daylog-d-ms-emphasized: 320ms;
+  --daylog-d-ms-theme: 260ms;
+  --daylog-d-ms-page: 400ms;
+  --daylog-d-ms-layout: 200ms;
+  --daylog-d-ms-link: 150ms;
+  --daylog-d-ms-sheet: 300ms;
+  --daylog-d-ms-dialog: 200ms;
+}

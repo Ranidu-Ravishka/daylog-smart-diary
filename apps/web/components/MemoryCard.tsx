@@ -4,10 +4,16 @@ import { useState } from "react";
 import Image from "next/image";
 import type { Id } from "@repo/backend";
 import { EllipsisVertical, Trash, Edit } from "lucide-react";
-import { MOOD_EMOJI } from "@repo/ui/lib/constants";
+import { MOOD_EMOJI, MOOD_LABELS } from "@repo/ui/lib/constants";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { DeleteMemoryDialog } from "./DeleteMemoryDialog";
 
 export interface MemoryData {
@@ -33,7 +39,6 @@ export function MemoryCard({
   onDeleteSuccess,
 }: MemoryCardProps) {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [showMenu, setShowMenu] = useState(false);
 
   const time = new Date(memory.happenedAt);
   const h = time.getHours();
@@ -43,26 +48,27 @@ export function MemoryCard({
 
   return (
     <>
-      <Card className="transition-colors hover:bg-muted/30">
-        <CardContent className="p-4">
+      <Card className="transition-[box-shadow,transform,border-color] duration-[var(--daylog-d-ms-layout)] hover:-translate-y-px hover:border-border hover:shadow-soft">
+        <CardContent className="p-4 sm:p-5">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1">
-              <div className="flex items-start justify-between gap-2 mb-2">
+              <div className="mb-2 flex items-start justify-between gap-2">
                 <p className="text-sm font-medium">{memory.title}</p>
-                <span className="shrink-0 text-xs text-muted-foreground whitespace-nowrap">
+                <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
                   {fmtH}:{m} {ampm}
                 </span>
               </div>
 
               {memory.description && (
-                <p className="text-sm text-muted-foreground leading-relaxed mb-2">
+                <p className="mb-2 text-sm leading-relaxed text-muted-foreground">
                   {memory.description}
                 </p>
               )}
 
               {memory.mood && (
                 <Badge variant="secondary" className="inline-block">
-                  {MOOD_EMOJI[memory.mood] ?? "😐"} {memory.mood}
+                  {MOOD_EMOJI[memory.mood] ?? "😐"}{" "}
+                  {MOOD_LABELS[memory.mood] ?? memory.mood}
                 </Badge>
               )}
 
@@ -80,49 +86,39 @@ export function MemoryCard({
               ) : null}
             </div>
 
-            {/* Action Menu */}
-            <div className="relative">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={() => setShowMenu(!showMenu)}
-                aria-label="Actions"
-              >
-                <EllipsisVertical className="h-4 w-4" />
-              </Button>
-
-              {showMenu && (
-                <div className="absolute right-0 top-full mt-1 bg-background border border-border rounded-md shadow-md z-10">
-                  {onEdit && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="w-full justify-start rounded-none px-3 py-2 h-auto text-sm font-normal hover:bg-muted"
-                      onClick={() => {
-                        onEdit(memory);
-                        setShowMenu(false);
-                      }}
-                    >
-                      <Edit className="h-3 w-3 mr-2" />
-                      Edit
-                    </Button>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="w-full justify-start rounded-none px-3 py-2 h-auto text-sm font-normal text-red-500 hover:bg-red-50 hover:text-red-600"
-                    onClick={() => {
-                      setIsDeleteDialogOpen(true);
-                      setShowMenu(false);
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  aria-label="Memory actions"
+                >
+                  <EllipsisVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-[9.5rem]">
+                {onEdit ? (
+                  <DropdownMenuItem
+                    className="gap-2"
+                    onSelect={() => {
+                      onEdit(memory);
                     }}
                   >
-                    <Trash className="h-3 w-3 mr-2" />
-                    Delete
-                  </Button>
-                </div>
-              )}
-            </div>
+                    <Edit className="h-3.5 w-3.5" />
+                    Edit
+                  </DropdownMenuItem>
+                ) : null}
+                <DropdownMenuItem
+                  className="gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive data-highlighted:bg-destructive/10 data-highlighted:text-destructive dark:focus:bg-destructive/20 dark:data-highlighted:bg-destructive/20"
+                  onSelect={() => setIsDeleteDialogOpen(true)}
+                >
+                  <Trash className="h-3.5 w-3.5" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </CardContent>
       </Card>

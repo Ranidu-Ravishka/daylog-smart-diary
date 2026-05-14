@@ -9,7 +9,10 @@ import { PageContainer } from "@/components/page-container";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
-type FeatureFlagKey = "aiSummaryEnabled" | "backgroundTrackingEnabled";
+type FeatureFlagKey =
+  | "aiSummaryEnabled"
+  | "aiSummaryAutopilotEnabled"
+  | "backgroundTrackingEnabled";
 
 type FeatureFlagRow = {
   key: string;
@@ -54,7 +57,11 @@ const upsertFeatureFlagRef = makeFunctionReference<"mutation">(
 );
 
 function isSupportedFeatureFlagKey(value: string): value is FeatureFlagKey {
-  return value === "aiSummaryEnabled" || value === "backgroundTrackingEnabled";
+  return (
+    value === "aiSummaryEnabled" ||
+    value === "aiSummaryAutopilotEnabled" ||
+    value === "backgroundTrackingEnabled"
+  );
 }
 
 function toDelimitedString(values: string[]): string {

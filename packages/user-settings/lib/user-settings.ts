@@ -16,6 +16,9 @@ export const MEMORY_MOOD_VALUES = [
   "excited",
   "loved",
   "sad",
+  "angry",
+  "anxious",
+  "neutral",
 ] as const;
 
 export type UserSettingsTheme = (typeof USER_SETTINGS_THEME_VALUES)[number];

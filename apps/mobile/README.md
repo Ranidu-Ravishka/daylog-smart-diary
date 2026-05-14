@@ -1,19 +1,20 @@
-# DayLog Mobile App (`apps/mobile`)
+# DayLog Mobile (`apps/mobile`)
 
-> Status: Active
-> Last Updated: 2026-04-14
-> Audience: Mobile engineers
+> Status: Active  
+> Last Updated: 2026-05-15  
+> Audience: Mobile engineers  
 > Standard: [../../CONTRIBUTING.md](../../CONTRIBUTING.md)
 
-Expo + React Native client for DayLog memory capture, integrations, and daily summaries.
+**Expo 54** + **React Native** client: memories, integrations, summaries, and optional life-context features (location, health, etc.).
 
-Canonical onboarding and monorepo setup:
+**Monorepo onboarding:** [../../README.md](../../README.md)  
+**Life context architecture:** [../../LIFE_CONTEXT_TRACKING_BLUEPRINT.md](../../LIFE_CONTEXT_TRACKING_BLUEPRINT.md)
 
-- [../../README.md](../../README.md)
+## Routing
 
-## Required Environment Variables
+- **Expo Router** — file-based routes under `app/` (tabs, stacks, modals).
 
-Create from example:
+## Environment
 
 ```bash
 cp apps/mobile/.env.example apps/mobile/.env.local
@@ -23,50 +24,67 @@ Required:
 
 - `EXPO_PUBLIC_CONVEX_URL`
 - `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY`
-- `EXPO_PUBLIC_WEB_APP_URL`
+- `EXPO_PUBLIC_WEB_APP_URL` — web origin used for OAuth **handoff** (must match running web app).
 
-Observability:
+Optional:
 
 - `EXPO_PUBLIC_SENTRY_DSN`
-- optional test-only flag: `EXPO_PUBLIC_SENTRY_FORCE_TEST_EXCEPTION=true`
+- `EXPO_PUBLIC_SENTRY_FORCE_TEST_EXCEPTION=true` (debug only)
 
-## Local Development
+## Local development
 
-From repository root:
+```bash
+pnpm dev:mobile
+```
+
+Equivalent:
 
 ```bash
 pnpm --filter mobile start
 ```
 
-Additional commands:
+Platform targets:
 
 ```bash
 pnpm --filter mobile android
 pnpm --filter mobile ios
 pnpm --filter mobile web
+```
+
+## Commands
+
+```bash
 pnpm --filter mobile lint
 pnpm --filter mobile check-types
 pnpm --filter mobile test
 pnpm --filter mobile build:ci
 ```
 
-## Capability Notes
+`build:ci` runs `expo export --platform web` with `CI=1` for bundle gates.
 
-- Integrations available through shared backend contracts (Google Calendar, Google Fit, Spotify, Apple Health uploads).
-- Foreground location tracking is optional and permission-gated.
-- Controlled background tracking is explicitly opt-in and policy-gated.
-- Android communication summary depends on native capability and permission path.
+## Auth and OAuth handoff
 
-## OAuth Handoff
+- **Clerk** via `@clerk/clerk-expo`.
+- Some integration connects use **web OAuth routes** then return to the app; `EXPO_PUBLIC_WEB_APP_URL` must point at the correct web deployment (local or production).
 
-Mobile integration connect flows use the web OAuth routes and return-path handoff.
-Ensure `EXPO_PUBLIC_WEB_APP_URL` points to the correct deployed/local web host.
+## Capabilities
+
+- Integrations: Google Calendar, Google Fit, Spotify, Apple Health uploads (subject to device build).
+- Foreground location: permission-gated; see blueprint for privacy model.
+- Native-heavy features may require a **development build** instead of Expo Go alone.
+
+## Testing
+
+```bash
+pnpm --filter mobile test
+```
+
+Tests live under `apps/mobile/lib/*.test.ts`. See [../../docs/TESTING.md](../../docs/TESTING.md).
+
+## Deployment
+
+Ship with **EAS** / Expo release channels; align env with the production web host used for OAuth. [../../docs/DEPLOYMENT.md](../../docs/DEPLOYMENT.md).
 
 ## Troubleshooting
 
-- Auth appears stuck:
-  - Verify Clerk key and network access to Clerk + Convex.
-- OAuth handoff fails:
-  - Verify web base URL and callback return path.
-- Build issues in Expo Go for native-only features:
-  - Use a development build when feature requires native modules.
+[../../docs/TROUBLESHOOTING.md](../../docs/TROUBLESHOOTING.md) — auth, handoff, and native build sections.

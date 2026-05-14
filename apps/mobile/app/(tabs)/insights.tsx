@@ -8,13 +8,19 @@ import {
   Dimensions,
   ActivityIndicator,
   TouchableOpacity,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useQuery, useConvexAuth, useAction } from "convex/react";
+import { useQuery, useConvexAuth, useAction, useMutation } from "convex/react";
 import { api } from "@repo/backend/convex";
+import type { GenericId } from "convex/values";
 import { captureException } from "@/lib/observability";
-import { MOOD_EMOJI } from "@repo/ui/lib/constants";
 import {
   Spacing,
   Typography,
@@ -24,9 +30,17 @@ import {
 } from "@/constants/theme";
 import { useAppTheme } from "@/components/theme-provider";
 import { AppCard } from "@/components/ui/app-card";
+import { AppButton } from "@/components/ui/app-button";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Skeleton, SkeletonCard } from "@/components/ui/skeleton-loader";
 import { EmptyState } from "@/components/ui/empty-state";
+import { TabBarSpacer } from "@/components/ui/tab-bar-spacer";
+import { MoodTrendChart } from "@/components/insights/mood-trend-chart";
+import { MoodDistributionBar } from "@/components/insights/mood-distribution-bar";
+import {
+  formatLastSyncTime,
+  formatRelativeElapsed,
+} from "@/lib/format-sync-status";
 const { width } = Dimensions.get("window");
 const CHART_WIDTH = width - Spacing.xl * 2 - Spacing.xl * 2; // card padding
 
@@ -48,14 +62,17 @@ type MemoryDoc = {
 };
 
 type SummaryDoc = {
-  _id: string;
+  _id: GenericId<"daySummaries">;
   dayKey: string;
   story: string;
   highlights: string[];
   metrics?: {
     steps?: number;
     sleepMinutes?: number;
+    screenTimeMinutes?: number;
+    spendingTotal?: number;
   };
+  sourcesUsed?: string[];
 };
 
 function isMemoryDoc(value: unknown): value is MemoryDoc {
@@ -77,32 +94,6 @@ function isSummaryDoc(value: unknown): value is SummaryDoc {
     typeof candidate.story === "string" &&
     Array.isArray(candidate.highlights)
   );
-}
-
-function formatRelativeElapsed(lastSyncAt: number, now: number): string {
-  const elapsedSeconds = Math.max(0, Math.floor((now - lastSyncAt) / 1000));
-  if (elapsedSeconds < 60) return `${elapsedSeconds}s ago`;
-
-  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
-  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
-
-  const elapsedHours = Math.floor(elapsedMinutes / 60);
-  if (elapsedHours < 24) return `${elapsedHours}h ago`;
-
-  const elapsedDays = Math.floor(elapsedHours / 24);
-  return `${elapsedDays}d ago`;
-}
-
-function formatLastSyncTime(lastSyncAt: number | null, now: number): string {
-  if (lastSyncAt === null) return "Last sync: pending";
-
-  const absolute = new Date(lastSyncAt).toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-
-  return `Last sync: ${absolute} • Updated ${formatRelativeElapsed(lastSyncAt, now)}`;
 }
 
 function InsightsSkeleton() {
@@ -158,6 +149,9 @@ const InsightsScreen = () => {
   const generateInsightNarrative = useAction(
     api.personalInsights.generateInsightNarrative,
   );
+  const upsertSummary = useMutation(api.summaries.upsertSummary);
+  const deleteSummary = useMutation(api.summaries.deleteSummary);
+
   const [aiNarrative, setAiNarrative] = useState<{
     narrative: string;
     highlights: string[];
@@ -167,6 +161,14 @@ const InsightsScreen = () => {
   } | null>(null);
   const [aiNarrativeLoading, setAiNarrativeLoading] = useState(false);
   const [aiNarrativeError, setAiNarrativeError] = useState<string | null>(null);
+
+  const [editingSummary, setEditingSummary] = useState<{
+    summary: SummaryDoc;
+    storyDraft: string;
+    highlightsDraft: string;
+  } | null>(null);
+  const [isSummarySaving, setIsSummarySaving] = useState(false);
+  const [isSummaryDeleting, setIsSummaryDeleting] = useState(false);
 
   const handleGenerateAiNarrative = useCallback(async () => {
     if (!isAuthenticated || aiNarrativeLoading) return;
@@ -194,6 +196,69 @@ const InsightsScreen = () => {
       setAiNarrativeLoading(false);
     }
   }, [generateInsightNarrative, isAuthenticated, aiNarrativeLoading]);
+
+  const handleSaveStory = useCallback(async () => {
+    if (!editingSummary) return;
+    const story = editingSummary.storyDraft.trim();
+    if (!story) {
+      Alert.alert("Story required", "Please write something for this day.");
+      return;
+    }
+    const highlights = editingSummary.highlightsDraft
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+
+    setIsSummarySaving(true);
+    try {
+      await upsertSummary({
+        dayKey: editingSummary.summary.dayKey,
+        story,
+        highlights,
+        metrics: editingSummary.summary.metrics,
+        sourcesUsed: editingSummary.summary.sourcesUsed ?? [],
+      });
+      setEditingSummary(null);
+    } catch (error) {
+      captureException("mobile_summary_update_failed", error, {
+        summaryId: editingSummary.summary._id,
+      });
+      Alert.alert("Error", "Could not update this story.");
+    } finally {
+      setIsSummarySaving(false);
+    }
+  }, [editingSummary, upsertSummary]);
+
+  const handleDeleteStory = useCallback(
+    (summary: SummaryDoc) => {
+      Alert.alert(
+        "Delete this story?",
+        `Remove the day story for ${summary.dayKey}? This cannot be undone.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: async () => {
+              setIsSummaryDeleting(true);
+              try {
+                await deleteSummary({ summaryId: summary._id });
+                setEditingSummary(null);
+              } catch (error) {
+                captureException("mobile_summary_delete_failed", error, {
+                  summaryId: summary._id,
+                });
+                Alert.alert("Error", "Could not delete this story.");
+              } finally {
+                setIsSummaryDeleting(false);
+              }
+            },
+          },
+        ],
+      );
+    },
+    [deleteSummary],
+  );
 
   const isRefreshDataReady =
     !isAuthenticated || (summaries !== undefined && memories !== undefined);
@@ -343,106 +408,6 @@ const InsightsScreen = () => {
     );
   }
 
-  const renderMoodChart = () => {
-    const maxValue = Math.max(...moodValues, 1);
-    const chartHeight = 120;
-
-    return (
-      <View
-        style={{
-          height: chartHeight,
-          marginBottom: Spacing.lg,
-          position: "relative",
-        }}
-      >
-        {/* Grid lines */}
-        {[0, 0.25, 0.5, 0.75, 1].map((pct) => (
-          <View
-            key={pct}
-            style={{
-              position: "absolute",
-              top: chartHeight * pct,
-              left: 0,
-              right: 0,
-              height: 1,
-              backgroundColor: c.divider,
-            }}
-          />
-        ))}
-        {/* Data points + lines */}
-        {moodTrendsData.map((item, index) => {
-          if (item.value === null) {
-            return (
-              <View
-                key={index}
-                style={{
-                  position: "absolute",
-                  left: (index * CHART_WIDTH) / 6 - 3,
-                  top: chartHeight - 3,
-                  width: 6,
-                  height: 6,
-                  borderRadius: 3,
-                  backgroundColor: c.textTertiary,
-                  opacity: 0.45,
-                }}
-              />
-            );
-          }
-
-          const nextItem = moodTrendsData[index + 1];
-          const xPos = (index * CHART_WIDTH) / 6;
-          const yPos = chartHeight - (item.value / maxValue) * chartHeight;
-
-          const canLinkToNext = nextItem?.value !== null;
-          const nextValue = nextItem?.value ?? item.value;
-
-          return (
-            <View
-              key={index}
-              style={{
-                position: "absolute",
-                left: xPos - 4,
-                top: yPos - 4,
-                width: 8,
-                height: 8,
-                borderRadius: 4,
-                backgroundColor: c.tint,
-              }}
-            >
-              {canLinkToNext && (
-                <View
-                  style={{
-                    position: "absolute",
-                    height: 2,
-                    backgroundColor: c.tint,
-                    opacity: 0.6,
-                    left: 4,
-                    top: 3,
-                    width: Math.sqrt(
-                      Math.pow(CHART_WIDTH / 6, 2) +
-                        Math.pow(
-                          ((item.value - nextValue) / maxValue) * chartHeight,
-                          2,
-                        ),
-                    ),
-                    transform: [
-                      {
-                        rotate: `${Math.atan2(
-                          ((item.value - nextValue) / maxValue) * chartHeight,
-                          CHART_WIDTH / 6,
-                        )}rad`,
-                      },
-                    ],
-                  }}
-                />
-              )}
-            </View>
-          );
-        })}
-      </View>
-    );
-  };
-
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView
@@ -465,7 +430,7 @@ const InsightsScreen = () => {
         {/* ── Overview Stats ──────────────────────────── */}
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
-            <Text style={{ fontSize: 20 }}>😊</Text>
+            <Ionicons name="happy-outline" size={20} color={c.tint} />
             <Text style={styles.statValue}>{avgMood}</Text>
             <Text style={styles.statLabel}>Avg Mood</Text>
           </View>
@@ -558,6 +523,12 @@ const InsightsScreen = () => {
               onPress={handleGenerateAiNarrative}
               disabled={aiNarrativeLoading}
               activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={
+                aiNarrative
+                  ? "Regenerate AI narrative"
+                  : "Generate AI narrative"
+              }
             >
               {aiNarrativeLoading ? (
                 <ActivityIndicator color={c.inverseText} />
@@ -580,14 +551,11 @@ const InsightsScreen = () => {
             action={`${moodDaysTracked}/7 days with mood data`}
           />
           <AppCard>
-            {renderMoodChart()}
-            <View style={styles.daysRow}>
-              {moodTrendsData.map((item, index) => (
-                <Text key={index} style={styles.dayLabel}>
-                  {item.day}
-                </Text>
-              ))}
-            </View>
+            <MoodTrendChart
+              data={moodTrendsData}
+              colors={c}
+              width={CHART_WIDTH}
+            />
           </AppCard>
         </View>
 
@@ -596,24 +564,15 @@ const InsightsScreen = () => {
           <View style={styles.section}>
             <SectionHeader title="Mood Distribution" />
             <AppCard>
-              {topMoods.map(([mood, count]) => (
-                <View key={mood} style={styles.distRow}>
-                  <Text style={styles.distEmoji}>
-                    {MOOD_EMOJI[mood] ?? "❓"}
-                  </Text>
-                  <Text style={styles.distLabel}>
-                    {mood.charAt(0).toUpperCase() + mood.slice(1)}
-                  </Text>
-                  <View style={styles.barOuter}>
-                    <View
-                      style={[
-                        styles.barInner,
-                        { width: `${(count / maxMoodCount) * 100}%` },
-                      ]}
-                    />
-                  </View>
-                  <Text style={styles.distCount}>{count}</Text>
-                </View>
+              {topMoods.map(([mood, count], idx) => (
+                <MoodDistributionBar
+                  key={mood}
+                  mood={mood}
+                  count={count}
+                  maxCount={maxMoodCount}
+                  index={idx}
+                  colors={c}
+                />
               ))}
             </AppCard>
           </View>
@@ -627,15 +586,32 @@ const InsightsScreen = () => {
               {resolvedSummaries
                 .slice(0, 5)
                 .map((s: SummaryDoc, idx: number) => (
-                  <View
+                  <Pressable
                     key={s._id}
-                    style={[
+                    style={({ pressed }) => [
                       styles.storyRow,
                       idx < Math.min(resolvedSummaries.length, 5) - 1 &&
                         styles.storyBorder,
+                      pressed && styles.storyRowPressed,
                     ]}
+                    onPress={() =>
+                      setEditingSummary({
+                        summary: s,
+                        storyDraft: s.story,
+                        highlightsDraft: (s.highlights ?? []).join(", "),
+                      })
+                    }
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open day story for ${s.dayKey}`}
                   >
-                    <Text style={styles.storyDate}>{s.dayKey}</Text>
+                    <View style={styles.storyHeader}>
+                      <Text style={styles.storyDate}>{s.dayKey}</Text>
+                      <Ionicons
+                        name="chevron-forward"
+                        size={16}
+                        color={c.textTertiary}
+                      />
+                    </View>
                     <Text style={styles.storyText} numberOfLines={2}>
                       {s.story}
                     </Text>
@@ -645,14 +621,105 @@ const InsightsScreen = () => {
                         {s.highlights.length > 1 ? "s" : ""}
                       </Text>
                     )}
-                  </View>
+                  </Pressable>
                 ))}
             </AppCard>
           </View>
         )}
 
-        <View style={{ height: 100 }} />
+        <TabBarSpacer />
       </ScrollView>
+
+      <Modal
+        visible={editingSummary !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setEditingSummary(null)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.editBackdrop}
+        >
+          <Pressable
+            style={StyleSheet.absoluteFillObject}
+            onPress={() => setEditingSummary(null)}
+          />
+          <View style={styles.editSheet}>
+            <View style={styles.editHandle} />
+            <View style={styles.editHeaderRow}>
+              <Text style={styles.editTitle}>
+                {editingSummary?.summary.dayKey ?? "Edit story"}
+              </Text>
+              <Pressable
+                onPress={() => setEditingSummary(null)}
+                accessibilityLabel="Close story editor"
+                accessibilityRole="button"
+                hitSlop={8}
+              >
+                <Ionicons name="close" size={22} color={c.textSecondary} />
+              </Pressable>
+            </View>
+            <ScrollView
+              style={styles.editScrollWrap}
+              contentContainerStyle={styles.editScrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              <Text style={styles.editLabel}>Story</Text>
+              <TextInput
+                style={[styles.editInput, styles.editTextArea]}
+                value={editingSummary?.storyDraft ?? ""}
+                onChangeText={(value) =>
+                  setEditingSummary((current) =>
+                    current ? { ...current, storyDraft: value } : current,
+                  )
+                }
+                multiline
+                placeholder="Write the story for this day…"
+                placeholderTextColor={c.textTertiary}
+                accessibilityLabel="Story text"
+              />
+
+              <Text style={[styles.editLabel, { marginTop: Spacing.md }]}>
+                Highlights (comma separated)
+              </Text>
+              <TextInput
+                style={styles.editInput}
+                value={editingSummary?.highlightsDraft ?? ""}
+                onChangeText={(value) =>
+                  setEditingSummary((current) =>
+                    current ? { ...current, highlightsDraft: value } : current,
+                  )
+                }
+                placeholder="e.g. Coffee with Sarah, finished sprint"
+                placeholderTextColor={c.textTertiary}
+                accessibilityLabel="Story highlights"
+              />
+            </ScrollView>
+            <View style={styles.editActions}>
+              <AppButton
+                title="Delete"
+                variant="secondary"
+                onPress={() =>
+                  editingSummary && handleDeleteStory(editingSummary.summary)
+                }
+                loading={isSummaryDeleting}
+                disabled={isSummaryDeleting}
+                size="md"
+                style={{ flex: 1 }}
+              />
+              <AppButton
+                title="Save"
+                onPress={handleSaveStory}
+                loading={isSummarySaving}
+                disabled={isSummarySaving || !editingSummary?.storyDraft.trim()}
+                size="md"
+                style={{ flex: 1 }}
+              />
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -699,6 +766,8 @@ function createStyles(c: ThemeColors) {
       borderRadius: Radius.lg,
       padding: Spacing.lg,
       alignItems: "center",
+      borderWidth: 1,
+      borderColor: c.border,
       ...Shadows.sm,
     },
     statValue: {
@@ -767,66 +836,27 @@ function createStyles(c: ThemeColors) {
       paddingHorizontal: Spacing.xl,
     },
 
-    // Days of week
-    daysRow: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-    },
-    dayLabel: {
-      ...Typography.caption1,
-      color: c.textSecondary,
-      flex: 1,
-      textAlign: "center",
-    },
-
-    // Mood distribution
-    distRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      marginBottom: Spacing.md,
-    },
-    distEmoji: {
-      fontSize: 16,
-      marginRight: Spacing.sm,
-    },
-    distLabel: {
-      ...Typography.callout,
-      color: c.text,
-      width: 72,
-    },
-    barOuter: {
-      flex: 1,
-      height: 8,
-      backgroundColor: c.surfaceSecondary,
-      borderRadius: Radius.full,
-      marginHorizontal: Spacing.md,
-      overflow: "hidden",
-    },
-    barInner: {
-      height: "100%",
-      backgroundColor: c.tint,
-      borderRadius: Radius.full,
-    },
-    distCount: {
-      ...Typography.caption1,
-      color: c.textSecondary,
-      width: 24,
-      textAlign: "right",
-    },
-
     // Stories
     storyRow: {
       paddingHorizontal: Spacing.xl,
       paddingVertical: Spacing.lg,
     },
+    storyRowPressed: {
+      backgroundColor: c.surfaceSecondary,
+    },
     storyBorder: {
       borderBottomWidth: 1,
       borderBottomColor: c.divider,
     },
+    storyHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: 4,
+    },
     storyDate: {
       ...Typography.caption1,
       color: c.textTertiary,
-      marginBottom: 4,
     },
     storyText: {
       ...Typography.body,
@@ -836,6 +866,81 @@ function createStyles(c: ThemeColors) {
       ...Typography.caption2,
       color: c.tint,
       marginTop: 4,
+    },
+
+    // Story edit modal
+    editBackdrop: {
+      flex: 1,
+      backgroundColor: c.overlay,
+      justifyContent: "flex-end",
+    },
+    editSheet: {
+      backgroundColor: c.surface,
+      borderTopLeftRadius: Radius.xl,
+      borderTopRightRadius: Radius.xl,
+      borderTopWidth: 1,
+      borderLeftWidth: 1,
+      borderRightWidth: 1,
+      borderColor: c.border,
+      paddingTop: Spacing.sm,
+      paddingBottom: Spacing.lg,
+      maxHeight: "92%",
+    },
+    editHandle: {
+      alignSelf: "center",
+      width: 40,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: c.border,
+      marginBottom: Spacing.md,
+    },
+    editHeaderRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      paddingHorizontal: Spacing.xl,
+      marginBottom: Spacing.md,
+    },
+    editTitle: {
+      ...Typography.title3,
+      color: c.text,
+    },
+    editScrollWrap: {
+      flexGrow: 0,
+    },
+    editScrollContent: {
+      paddingHorizontal: Spacing.xl,
+      paddingBottom: Spacing.lg,
+      gap: 4,
+    },
+    editLabel: {
+      ...Typography.label,
+      color: c.textSecondary,
+      marginBottom: Spacing.xs,
+    },
+    editInput: {
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: Radius.md,
+      paddingHorizontal: Spacing.lg,
+      paddingVertical: Spacing.md,
+      minHeight: 48,
+      ...Typography.body,
+      color: c.text,
+      backgroundColor: c.surface,
+    },
+    editTextArea: {
+      minHeight: 140,
+      textAlignVertical: "top",
+      paddingTop: Spacing.md,
+    },
+    editActions: {
+      flexDirection: "row",
+      gap: Spacing.sm,
+      paddingHorizontal: Spacing.xl,
+      paddingTop: Spacing.md,
+      borderTopWidth: 1,
+      borderTopColor: c.divider,
     },
   });
 }

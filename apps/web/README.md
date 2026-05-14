@@ -1,41 +1,45 @@
-# DayLog Web App (`apps/web`)
+# DayLog Web (`apps/web`)
 
-> Status: Active
-> Last Updated: 2026-04-14
-> Audience: Web engineers
+> Status: Active  
+> Last Updated: 2026-05-15  
+> Audience: Web engineers  
 > Standard: [../../CONTRIBUTING.md](../../CONTRIBUTING.md)
 
-User-facing Next.js application for memories, summaries, settings, and integrations.
+User-facing **Next.js 16** app: memories, summaries, account settings, and **OAuth callback routes** for integrations.
 
-Canonical onboarding and monorepo setup:
+**Monorepo onboarding:** [../../README.md](../../README.md)  
+**Architecture:** [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md)
 
-- [../../README.md](../../README.md)
+## Routing
 
-## Required Environment Variables
+- **App Router** — routes under `app/` (layouts, server components, route handlers).
+- **API routes** — Next.js route handlers under `app/api/` (including `/api/integrations/oauth/...` callbacks).
 
-Create from example:
+## Environment
+
+Create from example (run from repo root):
 
 ```bash
 cp apps/web/.env.example apps/web/.env.local
 ```
 
-Required for runtime/auth/integrations:
+Required for auth, Convex, and integrations:
 
 - `NEXT_PUBLIC_CONVEX_URL`
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
 - `CLERK_SECRET_KEY`
 - `NEXT_PUBLIC_APP_URL`
-- `GOOGLE_CLIENT_ID`
-- `GOOGLE_CLIENT_SECRET`
-- `SPOTIFY_CLIENT_ID`
-- `SPOTIFY_CLIENT_SECRET`
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+- `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`
 
-Recommended for observability:
+Recommended:
 
 - `NEXT_PUBLIC_SENTRY_DSN`
-- optional server-side override: `SENTRY_DSN`
+- `SENTRY_DSN` (optional server-side Sentry)
 
-## Local Development
+Details: [../../docs/ENVIRONMENT_SETUP.md](../../docs/ENVIRONMENT_SETUP.md).
+
+## Local development
 
 From repository root:
 
@@ -43,9 +47,9 @@ From repository root:
 pnpm dev:web
 ```
 
-## Commands
+Default URL: `http://localhost:3000` (see `apps/web/scripts/dev.mjs` if customized).
 
-From repository root:
+## Commands
 
 ```bash
 pnpm --filter web dev
@@ -54,30 +58,38 @@ pnpm --filter web check-types
 pnpm --filter web build
 pnpm --filter web start
 pnpm --filter web test
+pnpm --filter web test:e2e
 ```
 
-## OAuth Callback Routes
+## OAuth callback routes
 
-These paths must be registered in OAuth providers:
+Register these paths on each provider (prefix with `NEXT_PUBLIC_APP_URL`). Routes are implemented as `/api/integrations/oauth/[provider]/callback` in App Router.
 
-- Google Calendar:
-  - `/api/integrations/oauth/google_calendar/callback`
-- Google Fit:
-  - `/api/integrations/oauth/google_fit/callback`
-- Spotify:
-  - `/api/integrations/oauth/spotify/callback`
+| Provider | `provider` value |
+| -------- | ---------------- |
+| Google Calendar | `google_calendar` |
+| Google Fit | `google_fit` |
+| Spotify | `spotify` |
 
-Full URI format:
+Example: `${NEXT_PUBLIC_APP_URL}/api/integrations/oauth/spotify/callback`.
 
-- `${NEXT_PUBLIC_APP_URL}/api/integrations/oauth/<provider>/callback`
+## Auth flow (summary)
+
+1. Clerk handles sign-in in the browser.
+2. `ConvexReactClient` uses `NEXT_PUBLIC_CONVEX_URL` and Clerk session to call Convex queries/mutations (`import { api } from "@repo/backend/convex"`).
+3. OAuth starts on web; tokens and sync run with secrets present on **both** web env and **Convex** deployment env.
+
+## Testing
+
+- `pnpm --filter web test` — Vitest (OAuth abuse / callback coverage).
+- `pnpm --filter web test:e2e` — Playwright; first run may need `pnpm --filter web test:e2e:install`.
+
+See [../../docs/TESTING.md](../../docs/TESTING.md).
+
+## Deployment
+
+Static export is not the default target: deploy as a **Node** Next.js app (for example Vercel). See [../../docs/DEPLOYMENT.md](../../docs/DEPLOYMENT.md).
 
 ## Troubleshooting
 
-- OAuth callback mismatch:
-  - Check provider redirect URI exactly matches `NEXT_PUBLIC_APP_URL` + callback path.
-- OAuth callback rejected:
-  - Verify state cookie flow and that user is still signed in.
-- Missing integration credentials:
-  - Check `GOOGLE_*` and `SPOTIFY_*` env vars in both web env and Convex env.
-- Convex auth token missing in callback:
-  - Re-authenticate and retry connection.
+See [../../docs/TROUBLESHOOTING.md](../../docs/TROUBLESHOOTING.md) and OAuth notes in [../../README.md](../../README.md).

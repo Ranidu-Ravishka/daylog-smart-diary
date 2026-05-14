@@ -1,5 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
-import { sanitizeObservabilityContext } from "./sentry-sanitizer";
+import { sanitizeObservabilityContext } from "@repo/sentry-sanitize";
 
 type StructuredContext = Record<string, unknown>;
 type LogLevel = "info" | "warn" | "error";

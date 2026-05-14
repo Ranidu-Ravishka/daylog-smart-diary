@@ -2,7 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from "@clerk/clerk-expo";
 import * as Crypto from "expo-crypto";
 import * as LocalAuthentication from "expo-local-authentication";
-import { usePathname, useRouter } from "expo-router";
+import { usePathname, Redirect } from "expo-router";
 import React, {
   createContext,
   useCallback,
@@ -285,7 +285,7 @@ async function hashPasswordInput(
 export function AppLockProvider({ children }: { children: React.ReactNode }) {
   const { colors } = useAppTheme();
   const { isSignedIn, signOut } = useAuth();
-  const router = useRouter();
+  const [redirectToTabs, setRedirectToTabs] = useState(false);
   const pathname = usePathname();
 
   const [isReady, setIsReady] = useState(false);
@@ -737,7 +737,7 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
         });
 
         if (!granted && !cancelled) {
-          router.replace("/(tabs)");
+          setRedirectToTabs(true);
         }
       } finally {
         profileGuardInFlightRef.current = false;
@@ -747,14 +747,7 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [
-    hasAuthMethod,
-    isReady,
-    isSignedIn,
-    pathname,
-    requestSensitiveReauth,
-    router,
-  ]);
+  }, [hasAuthMethod, isReady, isSignedIn, pathname, requestSensitiveReauth]);
 
   const persistSettings = useCallback(async (nextSettings: AppLockSettings) => {
     setSettings(nextSettings);
@@ -948,6 +941,10 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
   );
 
   const timeoutLabel = getTimeoutOptionLabel(settings.sessionTimeoutMs);
+
+  if (redirectToTabs) {
+    return <Redirect href="/(tabs)" />;
+  }
 
   return (
     <AppLockContext.Provider value={contextValue}>
@@ -1254,8 +1251,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   primaryButtonLabel: {
-    ...Typography.callout,
-    fontWeight: "700",
+    ...Typography.button,
   },
   secondaryButton: {
     borderRadius: Radius.md,
@@ -1271,8 +1267,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   secondaryButtonLabel: {
-    ...Typography.callout,
-    fontWeight: "600",
+    ...Typography.button,
   },
   stepUpActionsRow: {
     flexDirection: "row",

@@ -13,6 +13,7 @@ export default defineConfig({
       "app/api/integrations/oauth/*.test.ts",
       "app/api/integrations/oauth/**/*.test.ts",
       "app/api/observability/**/*.test.ts",
+      "lib/**/*.test.ts",
     ],
     passWithNoTests: false,
     clearMocks: true,

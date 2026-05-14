@@ -1,19 +1,20 @@
-# DayLog Admin App (`apps/admin`)
+# DayLog Admin (`apps/admin`)
 
-> Status: Active
-> Last Updated: 2026-04-14
-> Audience: Admin and platform engineers
+> Status: Active  
+> Last Updated: 2026-05-15  
+> Audience: Admin and platform engineers  
 > Standard: [../../CONTRIBUTING.md](../../CONTRIBUTING.md)
 
-Internal Next.js admin application for operational and governance workflows.
+Internal **Next.js 16** application for operational and governance workflows (supporting tables, audits, and Convex-backed admin APIs).
 
-Canonical onboarding and monorepo setup:
+**Monorepo onboarding:** [../../README.md](../../README.md)  
+**Architecture:** [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md)
 
-- [../../README.md](../../README.md)
+## Routing
 
-## Required Environment Variables
+- **App Router** — `app/` directory with route groups and layouts for admin pages.
 
-Create from example:
+## Environment
 
 ```bash
 cp apps/admin/.env.example apps/admin/.env.local
@@ -21,48 +22,56 @@ cp apps/admin/.env.example apps/admin/.env.local
 
 Required:
 
-- `NEXT_PUBLIC_CONVEX_URL`
+- `NEXT_PUBLIC_CONVEX_URL` — must be a valid `https` URL in production-style validation.
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
-- `CLERK_SECRET_KEY`
-- `ADMIN_CACHE_SECRET` (minimum 32 characters)
+- `CLERK_SECRET_KEY` — must start with `sk_test_` or `sk_live_`.
+- `ADMIN_CACHE_SECRET` — minimum 32 characters (startup validates).
 
-Validation notes:
+See [../../docs/ENVIRONMENT_SETUP.md](../../docs/ENVIRONMENT_SETUP.md).
 
-- Startup fails fast for missing/placeholder values.
-- `CLERK_SECRET_KEY` must start with `sk_test_` or `sk_live_`.
-- `NEXT_PUBLIC_CONVEX_URL` must be valid `https` URL.
-
-## Local Development
-
-From repository root:
+## Local development
 
 ```bash
 pnpm dev:admin
 ```
 
-## Commands
+Dev server uses **port 3001** (`next dev --port 3001`).
 
-From repository root:
+## Commands
 
 ```bash
 pnpm --filter admin dev
 pnpm --filter admin lint
+pnpm --filter admin check-types
 pnpm --filter admin test
 pnpm --filter admin build
 pnpm --filter admin start
 ```
 
-## First Admin Bootstrap
+## Auth and admin access
 
-1. Set Convex env variable `ADMIN_BOOTSTRAP_CLERK_USER_IDS` (comma-separated Clerk user IDs).
-2. Sign in with one of those user IDs.
-3. Call mutation `users:bootstrapMakeMeAdmin`.
+- Sign-in uses **Clerk** like other surfaces.
+- **Admin privileges** are enforced in Convex; bootstrap is documented below.
+
+### First admin bootstrap
+
+1. Set Convex env `ADMIN_BOOTSTRAP_CLERK_USER_IDS` (comma-separated Clerk user IDs).
+2. Sign in as one of those users.
+3. Call Convex mutation `users:bootstrapMakeMeAdmin` (see backend / admin code for invocation path).
+
+## Testing
+
+```bash
+pnpm --filter admin test
+```
+
+Vitest config: `apps/admin/vitest.config.ts`. More: [../../docs/TESTING.md](../../docs/TESTING.md).
+
+## Deployment
+
+Deploy like web (Next.js host). Use a **separate** production project from the public web app when possible. [../../docs/DEPLOYMENT.md](../../docs/DEPLOYMENT.md).
 
 ## Troubleshooting
 
-- `Unauthorized` in admin pages:
-  - Verify target user is admin in backend.
-- Startup env validation failure:
-  - Fix invalid env values and restart app.
-- Data load failure:
-  - Ensure `NEXT_PUBLIC_CONVEX_URL` matches current backend deployment URL.
+- **`Unauthorized`** — User may lack admin role in Convex; verify bootstrap and admin tables.
+- **Env validation on startup** — Fix keys listed in the error banner; see [../../docs/TROUBLESHOOTING.md](../../docs/TROUBLESHOOTING.md).

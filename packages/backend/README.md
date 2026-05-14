@@ -1,22 +1,32 @@
-# DayLog Backend (`packages/backend`)
+# DayLog backend (`packages/backend`)
 
-> Status: Active
-> Last Updated: 2026-04-14
-> Audience: Backend engineers
+> Status: Active  
+> Last Updated: 2026-05-15  
+> Audience: Backend engineers  
 > Standard: [../../CONTRIBUTING.md](../../CONTRIBUTING.md)
 
-Shared Convex backend for web, admin, and mobile.
+Shared **Convex** backend for web, admin, and mobile (`@repo/backend`).
 
-Canonical onboarding:
+**Onboarding:** [../../README.md](../../README.md) · **Convex setup:** [../../CONVEX_SETUP.md](../../CONVEX_SETUP.md) · **API shape:** [../../docs/API_OVERVIEW.md](../../docs/API_OVERVIEW.md)
 
-- [../../README.md](../../README.md)
-- [../../CONVEX_SETUP.md](../../CONVEX_SETUP.md)
+## HTTP routes (`convex/http.ts`)
 
-## Local Commands
+Mounted on your Convex **HTTP site** URL (same host Clerk webhooks use):
+
+| Method | Path | Purpose |
+| ------ | ---- | ------- |
+| `POST` | `/clerk/webhook` | Clerk user sync (`webhooks.ts`) |
+| `POST` | `/integrations/oauth/connect` | OAuth connect helper (`oauthConnect.ts`) |
+| `OPTIONS` / `POST` | `/observability/info-event` | Client info-event ingest (`observabilityIngestion.ts`) |
+
+Provider OAuth **callbacks** for Google and Spotify are implemented on **Next.js** (`apps/web`), not here.
+
+## Local commands
 
 From repository root:
 
 ```bash
+pnpm dev:backend
 pnpm --filter @repo/backend dev
 pnpm --filter @repo/backend logs
 pnpm --filter @repo/backend lint
@@ -24,73 +34,49 @@ pnpm --filter @repo/backend test:run
 pnpm --filter @repo/backend test:coverage:backend
 ```
 
-## Required Convex Environment Variables
+## Convex environment variables
 
-Core required:
+### Core
 
-- `CLERK_JWT_ISSUER_DOMAIN`
-- `CLERK_WEBHOOK_SECRET`
-- `EXPORT_SIGNING_SECRET`
-- `OPENAI_API_KEY`
-- `SUMMARY_DAILY_GENERATION_LIMIT`
+- `CLERK_JWT_ISSUER_DOMAIN`, `CLERK_WEBHOOK_SECRET`, `EXPORT_SIGNING_SECRET`, `OPENAI_API_KEY`, `SUMMARY_DAILY_GENERATION_LIMIT`
 
-OAuth sync credentials (recommended and required for durable provider refresh flows):
+### OAuth (server-side refresh)
 
-- `GOOGLE_CLIENT_ID`
-- `GOOGLE_CLIENT_SECRET`
-- `SPOTIFY_CLIENT_ID`
-- `SPOTIFY_CLIENT_SECRET`
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`
 
-Observability:
+### Observability
 
-- `SENTRY_DSN`
-- optional `SENTRY_TRACES_SAMPLE_RATE`
-- optional `SENTRY_INFO_EVENT_SAMPLE_RATE`
+- `SENTRY_DSN`, optional `SENTRY_TRACES_SAMPLE_RATE`, `SENTRY_INFO_EVENT_SAMPLE_RATE`
 
-Integration token encryption (production critical):
+### Integration token encryption
 
-- `INTEGRATION_SECRETS_KEYRING_JSON`
-- `INTEGRATION_SECRETS_ACTIVE_KEY_ID`
+- **Preferred:** `INTEGRATION_SECRETS_KMS_KEY_ID` or `KMS_KEY_ID` (and optional key ring URI variables per deployment).
+- **Legacy:** `INTEGRATION_SECRETS_KEYRING_JSON` + `INTEGRATION_SECRETS_ACTIVE_KEY_ID`.
 
-Sensitive-data encryption at rest (production critical):
+### Sensitive-data encryption
 
-- `SENSITIVE_DATA_KEYRING_JSON`
-- `SENSITIVE_DATA_ACTIVE_KEY_ID`
+- `SENSITIVE_DATA_KEYRING_JSON`, `SENSITIVE_DATA_ACTIVE_KEY_ID`
 
-Optional operational env:
+### Optional ops
 
 - `ADMIN_BOOTSTRAP_CLERK_USER_IDS`
-- retention policy overrides (`RETENTION_*`)
+- All `RETENTION_*` knobs (see [../../DEPLOY_RUNBOOK.md](../../DEPLOY_RUNBOOK.md))
 
-## Validation Behavior
+Startup reads and validates many of these in `convex/env.ts` (fail-fast on invalid production config).
 
-Backend startup validates required env values and fails fast when invalid.
+## Cron and retention
 
-Examples:
+- **`crons.ts`** — scheduled jobs (retention, housekeeping).
+- **`retention.ts`** — env-driven day counts per table class.
 
-- non-https issuer domain rejected
-- invalid webhook secret format rejected
-- missing `EXPORT_SIGNING_SECRET` rejected in production
-- placeholder/example values rejected
+## Important Convex entry points (for grep / ops)
 
-## Important Operational Paths
+- Summaries: `summaryGeneration`, `summaries` modules.
+- Export jobs: `summaries:prepareMyDiaryExportArtifact`, `summaries:listMyExportJobsPaginated`, `summaries:getMyExportJobDownloadUrl`.
+- Integration crypto audit: `integrations:adminAuditIntegrationSecretsEncryptionStatus`.
+- Sensitive-data migration: `sensitiveDataMigration:adminMigrateAllSensitiveData`, `sensitiveDataMigration:adminAuditSensitiveDataTableStatus`.
 
-- Summary generation:
-  - `summaryGeneration:generateSummaryForDay`
-- Export artifacts and jobs:
-  - `summaries:prepareMyDiaryExportArtifact`
-  - `summaries:listMyExportJobsPaginated`
-  - `summaries:getMyExportJobDownloadUrl`
-- Integration secret encryption audit:
-  - `integrations:adminAuditIntegrationSecretsEncryptionStatus`
-- Sensitive-data migration:
-  - `sensitiveDataMigration:adminMigrateAllSensitiveData`
-- Sensitive-data audit:
-  - `sensitiveDataMigration:adminAuditSensitiveDataTableStatus`
-
-## Sensitive-Data Rollout Commands
-
-From repository root:
+## Operational scripts (repo root)
 
 ```bash
 pnpm ops:rotate-sensitive-data-keyring -- --target <target>
@@ -98,16 +84,14 @@ pnpm ops:run-sensitive-data-migration -- --target <target> --mode dry-run
 pnpm ops:run-sensitive-data-migration -- --target <target> --mode full
 ```
 
-Key policy:
-
-- Use unique key IDs and keep legacy key IDs in keyring during rotations.
-- Set `SENSITIVE_DATA_ACTIVE_KEY_ID` to the latest key ID for new writes.
-
 ## Troubleshooting
 
-- `[env:convex]` startup errors:
-  - Fix missing/invalid Convex env vars and restart backend dev.
-- OAuth callback/integration connect crypto errors:
-  - Verify integration encryption env vars are present.
-- Token refresh failures (`400`):
-  - Reconnect provider and verify provider OAuth app status/settings.
+- **`[env:convex]`** — Fix Convex dashboard env and restart `pnpm dev:backend`.
+- **Integration crypto errors** — Verify KMS or legacy keyring per [../../SECURITY.md](../../SECURITY.md).
+- **Token refresh `400`** — User reconnect + verify provider app status.
+
+See [../../docs/TROUBLESHOOTING.md](../../docs/TROUBLESHOOTING.md).
+
+## AI / agent hints
+
+`AGENTS.md` and `CLAUDE.md` point Convex contributors at `convex/_generated/ai/guidelines.md`.

@@ -1,7 +1,7 @@
 # DayLog Deploy and Operations Runbook
 
 > Status: Active
-> Last Updated: 2026-04-14
+> Last Updated: 2026-05-15
 > Audience: Engineers and release drivers
 > Standard: [CONTRIBUTING.md](CONTRIBUTING.md)
 
@@ -76,8 +76,7 @@ Convex deployment environment:
 - `SPOTIFY_CLIENT_ID`
 - `SPOTIFY_CLIENT_SECRET`
 - `SENTRY_DSN`
-- `INTEGRATION_SECRETS_KEYRING_JSON`
-- `INTEGRATION_SECRETS_ACTIVE_KEY_ID`
+- `INTEGRATION_SECRETS_KMS_KEY_ID` / `KMS_KEY_ID` / `KEY_RING_URI` **or** legacy `INTEGRATION_SECRETS_KEYRING_JSON` + `INTEGRATION_SECRETS_ACTIVE_KEY_ID`
 - `SENSITIVE_DATA_KEYRING_JSON`
 - `SENSITIVE_DATA_ACTIVE_KEY_ID`
 
@@ -174,22 +173,36 @@ Local quick check:
 node scripts/validate-prod-env.mjs --mode=local
 ```
 
-CI / pre-deploy gate (strict): the repository provides a reusable workflow at `.github/workflows/pre-deploy-validate.yml` which runs in `ci` mode and will fail the caller workflow if validation fails. Example usage from a deployment workflow:
+CI / pre-deploy gate (strict): this repo validates secrets in **`backend-validation`** (see `.github/workflows/backend-validation.yml`) and also runs **`validate-prod-env`** standalone on pushes to `main` (`.github/workflows/validate-prod-env.yml`). There is no separate `pre-deploy-validate.yml` workflow file.
+
+To reuse the same gate in an external deploy pipeline, run the script directly and pass the same secrets your Convex production deployment uses:
 
 ```yaml
 jobs:
   pre-deploy-check:
-    uses: ./.github/workflows/pre-deploy-validate.yml
-    with:
-      mode: ci
-    secrets:
-      CLERK_JWT_ISSUER_DOMAIN: ${{ secrets.CLERK_JWT_ISSUER_DOMAIN }}
-      CLERK_WEBHOOK_SECRET: ${{ secrets.CLERK_WEBHOOK_SECRET }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      EXPORT_SIGNING_SECRET: ${{ secrets.EXPORT_SIGNING_SECRET }}
-      INTEGRATION_SECRETS_KEYRING_JSON: ${{ secrets.INTEGRATION_SECRETS_KEYRING_JSON }}
-      INTEGRATION_SECRETS_ACTIVE_KEY_ID: ${{ secrets.INTEGRATION_SECRETS_ACTIVE_KEY_ID }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: corepack enable && pnpm install --frozen-lockfile
+      - name: Validate prod env (strict)
+        env:
+          NODE_ENV: production
+          CLERK_JWT_ISSUER_DOMAIN: ${{ secrets.CLERK_JWT_ISSUER_DOMAIN }}
+          CLERK_WEBHOOK_SECRET: ${{ secrets.CLERK_WEBHOOK_SECRET }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EXPORT_SIGNING_SECRET: ${{ secrets.EXPORT_SIGNING_SECRET }}
+          INTEGRATION_SECRETS_KMS_KEY_ID: ${{ secrets.INTEGRATION_SECRETS_KMS_KEY_ID }}
+          KMS_KEY_ID: ${{ secrets.KMS_KEY_ID }}
+          KEY_RING_URI: ${{ secrets.KEY_RING_URI }}
+          INTEGRATION_SECRETS_KEYRING_JSON: ${{ secrets.INTEGRATION_SECRETS_KEYRING_JSON }}
+          INTEGRATION_SECRETS_ACTIVE_KEY_ID: ${{ secrets.INTEGRATION_SECRETS_ACTIVE_KEY_ID }}
+        run: node scripts/validate-prod-env.mjs --mode=ci
 ```
+
+Strict mode requires **either** KMS-style references (`INTEGRATION_SECRETS_KMS_KEY_ID` / `KMS_KEY_ID` / `KEY_RING_URI`) **or** a valid legacy keyring pair; see `scripts/validate-prod-env.mjs`.
 
 Branch policy verification:
 

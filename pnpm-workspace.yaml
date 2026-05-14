@@ -1,3 +1,11 @@
 packages:
   - "apps/*"
   - "packages/*"
+allowBuilds:
+  '@clerk/shared': false
+  '@sentry/cli': false
+  browser-tabs-lock: false
+  core-js: false
+  esbuild: false
+  sharp: false
+  unrs-resolver: false

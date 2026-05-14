@@ -28,6 +28,45 @@ function seededDb() {
 }
 
 describe("auth boundary behavior", () => {
+  it("rejects Convex access while account deletion is in progress", async () => {
+    const db = createInMemoryDb({
+      user: [
+        {
+          _id: MEMBER_USER_ID,
+          _creationTime: 2,
+          clerkUserId: "clerk_member_001",
+          isAdmin: false,
+          accountStatus: "deletion_requested" as const,
+        },
+      ],
+    });
+    const ctx = createAuthCtx(db, "clerk_member_001");
+
+    await expect(requireUser(ctx as never)).rejects.toThrow(
+      "Unauthorized: account deletion in progress",
+    );
+  });
+
+  it("rejects Convex access when backend data was purged pending Clerk removal", async () => {
+    const db = createInMemoryDb({
+      user: [
+        {
+          _id: MEMBER_USER_ID,
+          _creationTime: 2,
+          clerkUserId: "clerk_member_001",
+          isAdmin: false,
+          accountStatus: "deletion_requested" as const,
+          accountBackendPurgedAt: 99,
+        },
+      ],
+    });
+    const ctx = createAuthCtx(db, "clerk_member_001");
+
+    await expect(requireUser(ctx as never)).rejects.toThrow(
+      "Unauthorized: account backend data was removed",
+    );
+  });
+
   it("returns 401 when token is missing", async () => {
     const ctx = createAuthCtx(seededDb(), null);
 

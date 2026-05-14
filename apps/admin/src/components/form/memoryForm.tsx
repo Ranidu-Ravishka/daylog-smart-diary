@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { MOOD_OPTIONS } from "@repo/ui/lib/constants";
 import { captureException, logInfo } from "@/lib/observability";
 
 export type MemoryFormValues = {
@@ -184,9 +185,17 @@ export default function MemoryForm({
                   setMood(e.target.value);
                   resetStatus();
                 }}
+                list="mood-options"
                 placeholder="e.g. happy, sad, neutral"
                 className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-sm shadow-sm bg-background text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
+              <datalist id="mood-options">
+                {MOOD_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.emoji} {option.label}
+                  </option>
+                ))}
+              </datalist>
             </div>
 
             <div>

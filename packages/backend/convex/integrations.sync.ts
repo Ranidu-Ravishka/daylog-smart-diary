@@ -60,6 +60,9 @@ export async function syncMyIntegrationForDayImpl(
   } | null;
 
   if (!integration) {
+    if (provider === "spotify") {
+      throw new Error("Spotify not connected");
+    }
     throw new Error(
       `Provider "${provider}" is not connected for this account.`,
     );
@@ -120,6 +123,9 @@ export async function syncMyIntegrationForDayImpl(
 
     if (plugin.requiresStoredToken) {
       if (!integration.tokenRef) {
+        if (provider === "spotify") {
+          throw new Error("Spotify not connected");
+        }
         throw new Error(
           `Provider "${provider}" is missing tokenRef. Reconnect integration before syncing.`,
         );
@@ -147,6 +153,9 @@ export async function syncMyIntegrationForDayImpl(
       } | null;
 
       if (!secret?.accessToken) {
+        if (provider === "spotify") {
+          throw new Error("Spotify not connected");
+        }
         throw new Error(
           `Provider "${provider}" secret not found. Reconnect integration before syncing.`,
         );
@@ -331,6 +340,56 @@ export async function syncMyIntegrationForDayImpl(
       dayKey: args.dayKey,
     };
   } catch (error) {
+    const requiresSpotifyReauth =
+      provider === "spotify" &&
+      error instanceof ProviderRequestError &&
+      error.status === 403;
+    if (requiresSpotifyReauth) {
+      const reauthMessage =
+        "Spotify authorization expired or was revoked. Reconnect Spotify.";
+
+      await ctx.runMutation(api.integrations.disconnectIntegration, {
+        integrationId: integration._id,
+        reason: reauthMessage,
+      });
+
+      await ctx.runMutation(
+        internal.integrations.completeIntegrationSyncRunInternal,
+        {
+          userId: integration.userId,
+          provider,
+          dayKey: args.dayKey,
+          status: "error",
+          lastError: reauthMessage,
+        },
+      );
+
+      await recordIntegrationHealthEvent(ctx, {
+        provider,
+        userId: integration.userId,
+        integrationId: integration._id,
+        dayKey: args.dayKey,
+        outcome: "error",
+        tokenValidityStatus: latestTokenValidityStatus,
+        error: reauthMessage,
+        latencyMs: Date.now() - syncStartedAt,
+      });
+
+      logInfo("integration_sync.reauth_required", {
+        status: "reauth_required",
+        provider,
+        dayKey: args.dayKey,
+        userId: integration.userId,
+      });
+
+      return {
+        success: false,
+        reason: "reauth_required" as const,
+        provider,
+        dayKey: args.dayKey,
+      };
+    }
+
     const message = sanitizeSyncError(error);
 
     await ctx.runMutation(api.integrations.markIntegrationError, {

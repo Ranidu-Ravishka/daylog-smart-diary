@@ -15,6 +15,8 @@ interface EmptyStateProps {
   subtitle?: string;
   actionLabel?: string;
   onAction?: () => void;
+  /** When set, replaces the default circular icon (e.g. custom illustration). */
+  illustration?: React.ReactNode;
 }
 
 export function EmptyState({
@@ -23,15 +25,18 @@ export function EmptyState({
   subtitle,
   actionLabel,
   onAction,
+  illustration,
 }: EmptyStateProps) {
   const { colors: c } = useAppTheme();
   const styles = React.useMemo(() => createStyles(c), [c]);
 
   return (
     <View style={styles.container}>
-      <View style={[styles.iconCircle, { backgroundColor: c.tintLight }]}>
-        <Ionicons name={icon} size={28} color={c.tint} />
-      </View>
+      {illustration ?? (
+        <View style={[styles.iconCircle, { backgroundColor: c.tintLight }]}>
+          <Ionicons name={icon} size={28} color={c.tint} />
+        </View>
+      )}
       <Text style={[styles.title, { color: c.text }]}>{title}</Text>
       {subtitle && (
         <Text style={[styles.subtitle, { color: c.textSecondary }]}>

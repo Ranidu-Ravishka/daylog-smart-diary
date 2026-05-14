@@ -1,3 +1,8 @@
+import {
+  sanitizeObservabilityContext,
+  sanitizeSentryBreadcrumb,
+  sanitizeSentryEvent,
+} from "@repo/sentry-sanitize";
 import * as Sentry from "@sentry/react-native";
 
 type StructuredContext = Record<string, unknown>;
@@ -168,11 +173,14 @@ function writeStructuredLog(
   context: StructuredContext = {},
   error?: unknown,
 ) {
+  const safeContext = sanitizeObservabilityContext(
+    context as Record<string, unknown>,
+  ) as StructuredContext;
   const serializedError =
     typeof error === "undefined" ? undefined : toSerializableError(error);
-  const userId = resolveUserId(context);
-  const status = resolveStatus(level, context);
-  const errorMessage = resolveErrorMessage(serializedError, context);
+  const userId = resolveUserId(safeContext);
+  const status = resolveStatus(level, safeContext);
+  const errorMessage = resolveErrorMessage(serializedError, safeContext);
 
   const payload: StructuredLogEnvelope = {
     schemaVersion: 1,
@@ -184,7 +192,7 @@ function writeStructuredLog(
     userId,
     status,
     errorMessage,
-    context,
+    context: safeContext,
     ...(serializedError ? { error: serializedError } : {}),
   };
 
@@ -220,7 +228,7 @@ function writeStructuredLog(
     message: event,
     level: toSentryLevel(level),
     data: {
-      ...context,
+      ...safeContext,
       userId,
       status,
       errorMessage,
@@ -236,7 +244,7 @@ function writeStructuredLog(
           status,
         },
         extra: {
-          ...context,
+          ...safeContext,
           userId,
           status,
           errorMessage,
@@ -252,7 +260,7 @@ function writeStructuredLog(
         status,
       },
       extra: {
-        ...context,
+        ...safeContext,
         userId,
         status,
         errorMessage,
@@ -269,7 +277,7 @@ function writeStructuredLog(
         status,
       },
       extra: {
-        ...context,
+        ...safeContext,
         userId,
         status,
         errorMessage,
@@ -290,10 +298,17 @@ export function initCrashReporting() {
     dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
     enabled: sentryEnabled,
     environment: mobileEnvironment,
+    release:
+      process.env.EXPO_PUBLIC_SENTRY_RELEASE?.trim() ||
+      process.env.EAS_BUILD_GIT_COMMIT_HASH?.trim() ||
+      undefined,
     tracesSampleRate: 0.2,
     enableNative: true,
     enableAutoSessionTracking: true,
     attachStacktrace: true,
+    sendDefaultPii: false,
+    beforeSend: (event) => sanitizeSentryEvent(event),
+    beforeBreadcrumb: (breadcrumb) => sanitizeSentryBreadcrumb(breadcrumb),
   });
 
   crashReportingInitialized = true;
