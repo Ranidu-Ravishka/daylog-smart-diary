@@ -69,9 +69,9 @@ jobs:
       # Dummy Convex URL so ConvexReactClient doesn't fail during Next.js build in CI
       NEXT_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
       EXPO_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
-      # Clerk-shaped CI placeholder (underscores break the repo secret-scan regex); not a real key.
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_not_a_real_clerk_instance"
-      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_not_a_real_clerk_instance"
+      # Syntactically valid Clerk test key (base64 decodes to `ci.build.local$`); not a real instance.
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
 
     steps:
       - name: Checkout repository
@@ -156,7 +156,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          SECRET_PATTERN='(sk_(test|live)_[A-Za-z0-9]{20,}|pk_(test|live)_[A-Za-z0-9]{20,}|whsec_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|xox[baprs]-[A-Za-z0-9-]{16,})'
+          # Omit Stripe/Clerk publishable keys (pk_*): they are public by design but match this shape.
+          SECRET_PATTERN='(sk_(test|live)_[A-Za-z0-9]{20,}|whsec_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|xox[baprs]-[A-Za-z0-9-]{16,})'
 
           if git grep -nE "$SECRET_PATTERN" -- . ':(exclude)SECURITY.md'; then
             echo "Potential secret detected. Remove it and rotate keys if needed."
@@ -242,9 +243,9 @@ jobs:
     env:
       NEXT_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
       EXPO_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
-      # Clerk-shaped CI placeholder (underscores break the repo secret-scan regex); not a real key.
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_not_a_real_clerk_instance"
-      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_not_a_real_clerk_instance"
+      # Syntactically valid Clerk test key (base64 decodes to `ci.build.local$`); not a real instance.
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
 
     steps:
       - name: Checkout repository
