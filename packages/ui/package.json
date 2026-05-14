@@ -4,7 +4,10 @@
   "private": true,
   "exports": {
     "./hooks/*": "./hooks/*.ts",
-    "./lib/*": "./lib/*.ts"
+    "./lib/*": "./lib/*.ts",
+    "./theme": "./lib/daylog-theme.ts",
+    "./components/daylog-content-max": "./components/daylog-content-max.tsx",
+    "./components/daylog-glass-card": "./components/daylog-glass-card.tsx"
   },
   "scripts": {
     "lint": "eslint . --max-warnings 0",
@@ -12,7 +15,10 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
-    "@repo/user-settings": "workspace:*"
+    "@repo/theme": "workspace:*",
+    "@repo/user-settings": "workspace:*",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
     "@repo/eslint-config": "workspace:*",

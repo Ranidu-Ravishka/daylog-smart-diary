@@ -13,6 +13,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { FadeIn } from "@/components/motion/fade-in";
 import { HeroAmbientOrbs } from "@/components/marketing/hero-ambient-orbs";
+import { DaylogContentMax } from "@repo/ui/components/daylog-content-max";
+import { DaylogGlassCard } from "@repo/ui/components/daylog-glass-card";
 
 const features = [
   {
@@ -49,7 +51,7 @@ export function HomeMarketingHeroAndProduct() {
   return (
     <>
       <section className="relative overflow-hidden px-5 pb-24 pt-16 sm:px-8 sm:pb-32 sm:pt-20 md:pt-28">
-        <div className="relative mx-auto max-w-6xl">
+        <DaylogContentMax className="relative">
           <div className="relative overflow-hidden rounded-[2rem] border border-border/50 bg-card/45 p-8 shadow-soft backdrop-blur-2xl dark:bg-card/35 sm:p-12 md:p-16">
             <HeroAmbientOrbs />
             <div className="relative z-10 mx-auto max-w-3xl text-center">
@@ -162,14 +164,14 @@ export function HomeMarketingHeroAndProduct() {
               </div>
             </FadeIn>
           </div>
-        </div>
+        </DaylogContentMax>
       </section>
 
       <section
         id="product"
         className="scroll-mt-28 border-t border-border/40 px-5 py-20 sm:px-8 sm:py-28"
       >
-        <div className="mx-auto max-w-6xl">
+        <DaylogContentMax>
           <FadeIn className="mx-auto max-w-2xl text-center">
             <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
               Journaling that breathes with you
@@ -182,7 +184,7 @@ export function HomeMarketingHeroAndProduct() {
           <div className="mt-14 grid gap-4 sm:grid-cols-2 lg:gap-5">
             {features.map((f, i) => (
               <FadeIn key={f.title} delay={i * 0.05} className={f.className}>
-                <div className="group h-full rounded-2xl border border-border/50 bg-card/50 p-6 shadow-sm backdrop-blur-md transition-[transform,box-shadow,border-color] duration-300 hover:-translate-y-0.5 hover:border-border hover:shadow-soft dark:bg-card/40 md:p-8">
+                <DaylogGlassCard variant="feature">
                   <div className="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-xl border border-border/60 bg-secondary/80 text-primary">
                     <f.icon className="h-5 w-5" aria-hidden />
                   </div>
@@ -192,11 +194,11 @@ export function HomeMarketingHeroAndProduct() {
                   <p className="mt-2 text-sm leading-relaxed text-muted-foreground md:text-[15px]">
                     {f.description}
                   </p>
-                </div>
+                </DaylogGlassCard>
               </FadeIn>
             ))}
           </div>
-        </div>
+        </DaylogContentMax>
       </section>
     </>
   );

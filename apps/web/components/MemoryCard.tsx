@@ -48,7 +48,7 @@ export function MemoryCard({
 
   return (
     <>
-      <Card className="transition-[box-shadow,transform,border-color] duration-200 hover:-translate-y-px hover:border-border hover:shadow-soft">
+      <Card className="transition-[box-shadow,transform,border-color] duration-[var(--daylog-d-ms-layout)] hover:-translate-y-px hover:border-border hover:shadow-soft">
         <CardContent className="p-4 sm:p-5">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1">

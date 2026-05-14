@@ -40,7 +40,7 @@ const SheetContent = React.forwardRef<
     <SheetPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed z-50 gap-4 bg-card p-6 text-card-foreground shadow-lg transition-transform duration-300 ease-out",
+        "fixed z-50 gap-4 bg-card p-6 text-card-foreground shadow-lg transition-transform duration-[var(--daylog-d-ms-sheet)] ease-out",
         side === "left" &&
           "inset-y-0 left-0 h-full w-3/4 border-r border-border data-[state=closed]:-translate-x-full data-[state=open]:translate-x-0 sm:max-w-sm",
         side === "right" &&

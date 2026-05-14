@@ -4,6 +4,7 @@ import {
   daylogSpacing,
   type DaylogSemanticColors,
 } from "@repo/theme/native";
+import { daylogTypeScale } from "@repo/theme/typography";
 import { Platform, TextStyle } from "react-native";
 
 export const Colors: {
@@ -19,116 +20,56 @@ export type ThemeColors = DaylogSemanticColors;
 export const Spacing = daylogSpacing;
 export const Radius = daylogRadius;
 
-/** Matches web `base-typography` scale (Inter on mobile; web uses Satoshi). */
+/**
+ * Plus Jakarta Sans — premium geometric sans aligned with web Satoshi pairing
+ * (loaded in `app/_layout.tsx` via `useFonts`).
+ */
+const sans = {
+  regular: "PlusJakartaSans_400Regular",
+  medium: "PlusJakartaSans_500Medium",
+  semibold: "PlusJakartaSans_600SemiBold",
+  bold: "PlusJakartaSans_700Bold",
+} as const;
+
+function textStyle(
+  role: keyof typeof daylogTypeScale,
+  face: keyof typeof sans,
+): TextStyle {
+  const s = daylogTypeScale[role];
+  return {
+    fontFamily: sans[face],
+    fontSize: s.fontSize,
+    lineHeight: s.lineHeight,
+    letterSpacing: s.letterSpacing,
+    fontWeight: s.fontWeight,
+  };
+}
+
+/** Matches `@repo/theme/typography` + web `base-typography.css` rhythm. */
 export const Typography: Record<string, TextStyle> = {
-  h1: {
-    fontFamily: "Inter_600SemiBold",
-    fontSize: 34,
-    lineHeight: 40,
-    fontWeight: "600",
-    letterSpacing: -0.56,
-  },
-  h2: {
-    fontFamily: "Inter_600SemiBold",
-    fontSize: 24,
-    lineHeight: 31,
-    fontWeight: "600",
-    letterSpacing: -0.42,
-  },
-  h3: {
-    fontFamily: "Inter_600SemiBold",
-    fontSize: 19,
-    lineHeight: 26,
-    fontWeight: "600",
-    letterSpacing: -0.24,
-  },
-  bodyLarge: {
-    fontFamily: "Inter_400Regular",
-    fontSize: 16,
-    lineHeight: 26,
-    fontWeight: "400",
-  },
-  bodySmall: {
-    fontFamily: "Inter_400Regular",
-    fontSize: 14,
-    lineHeight: 23,
-    fontWeight: "400",
-  },
-  button: {
-    fontFamily: "Inter_500Medium",
-    fontSize: 15,
-    lineHeight: 22,
-    fontWeight: "500",
-  },
-  label: {
-    fontFamily: "Inter_500Medium",
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: "500",
-  },
-  caption: {
-    fontFamily: "Inter_400Regular",
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: "400",
-  },
-  largeTitle: {
-    fontFamily: "Inter_600SemiBold",
-    fontSize: 34,
-    lineHeight: 40,
-    fontWeight: "600",
-    letterSpacing: -0.56,
-  },
-  title1: {
-    fontFamily: "Inter_600SemiBold",
-    fontSize: 24,
-    lineHeight: 31,
-    fontWeight: "600",
-    letterSpacing: -0.42,
-  },
-  title2: {
-    fontFamily: "Inter_600SemiBold",
-    fontSize: 19,
-    lineHeight: 26,
-    fontWeight: "600",
-    letterSpacing: -0.24,
-  },
-  title3: {
-    fontFamily: "Inter_600SemiBold",
-    fontSize: 19,
-    lineHeight: 26,
-    fontWeight: "600",
-  },
-  body: {
-    fontFamily: "Inter_400Regular",
-    fontSize: 16,
-    lineHeight: 26,
-    fontWeight: "400",
-  },
+  h1: textStyle("h1", "semibold"),
+  h2: textStyle("h2", "semibold"),
+  h3: textStyle("h3", "semibold"),
+  bodyLarge: textStyle("bodyLarge", "regular"),
+  bodySmall: textStyle("bodySmall", "regular"),
+  button: textStyle("button", "medium"),
+  label: textStyle("label", "medium"),
+  caption: textStyle("caption", "regular"),
+  largeTitle: textStyle("h1", "semibold"),
+  title1: textStyle("h2", "semibold"),
+  title2: textStyle("h3", "semibold"),
+  title3: textStyle("h3", "semibold"),
+  body: textStyle("bodyLarge", "regular"),
   bodyMedium: {
-    fontFamily: "Inter_500Medium",
-    fontSize: 16,
-    lineHeight: 26,
+    fontFamily: sans.medium,
+    fontSize: daylogTypeScale.bodyLarge.fontSize,
+    lineHeight: daylogTypeScale.bodyLarge.lineHeight,
+    letterSpacing: daylogTypeScale.bodyLarge.letterSpacing,
     fontWeight: "500",
   },
-  callout: {
-    fontFamily: "Inter_400Regular",
-    fontSize: 14,
-    lineHeight: 23,
-    fontWeight: "400",
-  },
-  caption1: {
-    fontFamily: "Inter_500Medium",
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: "500",
-  },
-  caption2: {
-    fontFamily: "Inter_400Regular",
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: "400",
-  },
+  callout: textStyle("bodySmall", "regular"),
+  caption1: textStyle("label", "medium"),
+  caption2: textStyle("caption", "regular"),
 };
 
 export const Shadows = {
@@ -157,13 +98,13 @@ export const Shadows = {
 
 export const Fonts = Platform.select({
   ios: {
-    sans: "Inter_400Regular",
+    sans: sans.regular,
     serif: "ui-serif",
     rounded: "ui-rounded",
     mono: "ui-monospace",
   },
   default: {
-    sans: "Inter_400Regular",
+    sans: sans.regular,
     serif: "serif",
     rounded: "normal",
     mono: "monospace",

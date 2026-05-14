@@ -62,7 +62,7 @@ export default function PricingPage() {
           {tiers.map((tier, i) => (
             <FadeIn key={tier.name} delay={i * 0.05}>
               <div
-                className={`flex h-full flex-col rounded-2xl border p-8 shadow-sm backdrop-blur-md transition-[transform,box-shadow] duration-300 hover:-translate-y-0.5 hover:shadow-soft ${
+                className={`flex h-full flex-col rounded-2xl border p-8 shadow-sm backdrop-blur-md transition-[transform,box-shadow] duration-[var(--daylog-d-ms-sheet)] hover:-translate-y-0.5 hover:shadow-soft ${
                   tier.highlighted
                     ? "border-primary/40 bg-gradient-to-b from-primary/10 via-card/60 to-card/50 dark:from-primary/15 dark:via-card/40"
                     : "border-border/50 bg-card/45 dark:bg-card/35"

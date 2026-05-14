@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "@repo/theme/css/palette.css";
+@import "@repo/theme/css/durations.css";
 @import "@repo/theme/css/tailwind-theme.css";
 @import "@repo/theme/css/utilities.css";
 @import "@repo/theme/css/base-typography.css";

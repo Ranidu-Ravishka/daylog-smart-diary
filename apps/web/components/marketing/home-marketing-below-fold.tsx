@@ -15,6 +15,12 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FadeIn } from "@/components/motion/fade-in";
+import { cn } from "@/lib/utils";
+import { DaylogContentMax } from "@repo/ui/components/daylog-content-max";
+import {
+  DaylogGlassCard,
+  daylogGlassSurfaces,
+} from "@repo/ui/components/daylog-glass-card";
 
 const steps = [
   {
@@ -70,7 +76,7 @@ export function HomeMarketingBelowFold() {
   return (
     <>
       <section className="border-t border-border/40 bg-muted/15 px-5 py-20 sm:px-8 sm:py-28">
-        <div className="mx-auto grid max-w-6xl gap-12 lg:grid-cols-2 lg:items-center lg:gap-16">
+        <DaylogContentMax className="grid gap-12 lg:grid-cols-2 lg:items-center lg:gap-16">
           <FadeIn>
             <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
               AI insights that feel like a conversation
@@ -104,7 +110,7 @@ export function HomeMarketingBelowFold() {
             </ul>
           </FadeIn>
           <FadeIn delay={0.06}>
-            <div className="rounded-2xl border border-border/50 bg-card/60 p-8 shadow-soft backdrop-blur-xl dark:bg-card/45">
+            <DaylogGlassCard variant="marketing">
               <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                 Sample insight block
               </p>
@@ -136,16 +142,16 @@ export function HomeMarketingBelowFold() {
                 Illustrative metrics only—your dashboard shows real data tied to
                 your account.
               </p>
-            </div>
+            </DaylogGlassCard>
           </FadeIn>
-        </div>
+        </DaylogContentMax>
       </section>
 
       <section
         id="how-it-works"
         className="scroll-mt-28 border-t border-border/40 px-5 py-20 sm:px-8 sm:py-28"
       >
-        <div className="mx-auto max-w-6xl">
+        <DaylogContentMax>
           <FadeIn className="mx-auto max-w-2xl text-center">
             <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
               How DayLog fits into real life
@@ -169,11 +175,11 @@ export function HomeMarketingBelowFold() {
               </FadeIn>
             ))}
           </ol>
-        </div>
+        </DaylogContentMax>
       </section>
 
       <section className="border-t border-border/40 px-5 py-20 sm:px-8 sm:py-28">
-        <div className="mx-auto max-w-6xl">
+        <DaylogContentMax>
           <div className="grid gap-10 lg:grid-cols-2 lg:items-center">
             <FadeIn>
               <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -211,11 +217,11 @@ export function HomeMarketingBelowFold() {
               </div>
             </FadeIn>
           </div>
-        </div>
+        </DaylogContentMax>
       </section>
 
       <section className="border-t border-border/40 bg-muted/15 px-5 py-20 sm:px-8 sm:py-28">
-        <div className="mx-auto max-w-6xl">
+        <DaylogContentMax>
           <FadeIn className="mx-auto max-w-2xl text-center">
             <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
               Voices from calmer corners
@@ -227,7 +233,7 @@ export function HomeMarketingBelowFold() {
           <div className="mt-12 grid gap-5 md:grid-cols-3">
             {testimonials.map((t, i) => (
               <FadeIn key={t.name} delay={i * 0.05}>
-                <blockquote className="h-full rounded-2xl border border-border/50 bg-card/50 p-6 shadow-sm backdrop-blur-md dark:bg-card/40">
+                <blockquote className={cn(daylogGlassSurfaces.quote)}>
                   <p className="text-sm leading-relaxed text-muted-foreground">
                     &ldquo;{t.quote}&rdquo;
                   </p>
@@ -241,14 +247,14 @@ export function HomeMarketingBelowFold() {
               </FadeIn>
             ))}
           </div>
-        </div>
+        </DaylogContentMax>
       </section>
 
       <section
         id="security"
         className="scroll-mt-28 border-t border-border/40 px-5 py-20 sm:px-8 sm:py-28"
       >
-        <div className="mx-auto max-w-6xl">
+        <DaylogContentMax>
           <div className="grid gap-10 lg:grid-cols-2 lg:items-start">
             <FadeIn>
               <div className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-border/60 bg-secondary/80 text-primary">
@@ -293,11 +299,11 @@ export function HomeMarketingBelowFold() {
               </ul>
             </FadeIn>
           </div>
-        </div>
+        </DaylogContentMax>
       </section>
 
       <section className="border-t border-border/40 px-5 py-20 sm:px-8 sm:py-28">
-        <div className="mx-auto max-w-6xl">
+        <DaylogContentMax>
           <FadeIn className="mx-auto max-w-2xl text-center">
             <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
               Questions, answered quietly
@@ -322,7 +328,7 @@ export function HomeMarketingBelowFold() {
               <Link href="/faq">View all FAQs</Link>
             </Button>
           </FadeIn>
-        </div>
+        </DaylogContentMax>
       </section>
 
       <section className="border-t border-border/40 bg-muted/15 px-5 py-20 sm:px-8 sm:py-28">

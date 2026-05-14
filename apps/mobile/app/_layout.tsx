@@ -42,11 +42,11 @@ import { ConvexProviderWithClerk } from "convex/react-clerk";
 
 import { ClerkProvider, useAuth, useUser } from "@clerk/clerk-expo";
 import {
-  Inter_400Regular,
-  Inter_500Medium,
-  Inter_600SemiBold,
-  Inter_700Bold,
-} from "@expo-google-fonts/inter";
+  PlusJakartaSans_400Regular,
+  PlusJakartaSans_500Medium,
+  PlusJakartaSans_600SemiBold,
+  PlusJakartaSans_700Bold,
+} from "@expo-google-fonts/plus-jakarta-sans";
 import { api } from "@repo/backend/convex";
 import { MotionTokens } from "@/constants/motion";
 import { Colors, Typography } from "@/constants/theme";
@@ -609,10 +609,10 @@ function RootAuthBoundary({ children }: { children: React.ReactNode }) {
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   const [fontsLoaded] = useFonts({
-    Inter_400Regular,
-    Inter_500Medium,
-    Inter_600SemiBold,
-    Inter_700Bold,
+    PlusJakartaSans_400Regular,
+    PlusJakartaSans_500Medium,
+    PlusJakartaSans_600SemiBold,
+    PlusJakartaSans_700Bold,
   });
   const startupError =
     convexBootstrap.startupError ?? clerkBootstrap.startupError;

@@ -3,6 +3,7 @@
 import { adminNavSections } from "@/config/admin-nav";
 import { useAdminUiStore } from "@/stores/admin-ui-store";
 import { cn } from "@/lib/utils";
+import { daylogFramerSpringSharedLayout } from "@repo/theme/motion";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -33,14 +34,14 @@ export function AdminSidebar({
   return (
     <aside
       className={cn(
-        "flex h-full min-h-0 shrink-0 flex-col border-r border-border bg-card transition-[width] duration-200 ease-out",
+        "flex h-full min-h-0 shrink-0 flex-col border-r border-border bg-card transition-[width] duration-[var(--daylog-d-ms-layout)] ease-out",
         collapsed ? "w-[68px]" : "w-[248px]",
         className,
       )}
     >
       <div
         className={cn(
-          "flex h-14 shrink-0 items-center border-b border-border px-2 transition-all duration-200",
+          "flex h-14 shrink-0 items-center border-b border-border px-2 transition-all duration-[var(--daylog-d-ms-layout)]",
           collapsed ? "justify-center" : "justify-between gap-2",
         )}
       >
@@ -109,7 +110,7 @@ export function AdminSidebar({
                     <Link
                       href={item.href}
                       className={cn(
-                        "group relative flex items-center gap-3 rounded-lg px-2 py-2 text-sm font-medium transition-colors duration-150",
+                        "group relative flex items-center gap-3 rounded-lg px-2 py-2 text-sm font-medium transition-colors duration-[var(--daylog-d-ms-link)]",
                         active
                           ? "text-foreground"
                           : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -120,11 +121,7 @@ export function AdminSidebar({
                         <motion.span
                           layoutId="sidebar-active"
                           className="absolute inset-0 rounded-lg bg-muted ring-1 ring-border"
-                          transition={{
-                            type: "spring",
-                            stiffness: 420,
-                            damping: 32,
-                          }}
+                          transition={daylogFramerSpringSharedLayout}
                         />
                       ) : null}
                       <span

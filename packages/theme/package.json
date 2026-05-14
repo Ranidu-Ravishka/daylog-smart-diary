@@ -3,12 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "exports": {
+    "./css/durations.css": "./css/durations.css",
     "./css/palette.css": "./css/palette.css",
     "./css/tailwind-theme.css": "./css/tailwind-theme.css",
     "./css/utilities.css": "./css/utilities.css",
     "./css/base-typography.css": "./css/base-typography.css",
     "./motion": "./src/motion.ts",
-    "./native": "./src/native.ts"
+    "./native": "./src/native.ts",
+    "./typography": "./src/typography.ts"
   },
   "scripts": {
     "lint": "tsc --noEmit",
