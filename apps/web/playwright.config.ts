@@ -36,5 +36,10 @@ export default defineConfig({
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,
         cwd: webRoot,
+        // `clerkMiddleware` requires CLERK_SECRET_KEY for `next start`; CI uses a non-sensitive placeholder.
+        env: {
+          CLERK_SECRET_KEY:
+            process.env.CLERK_SECRET_KEY ?? "sk_test_placeholder",
+        },
       },
 });

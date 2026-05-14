@@ -225,6 +225,8 @@ jobs:
         env:
           PLAYWRIGHT_WEB_PORT: "3010"
           CI: "true"
+          # clerkMiddleware requires CLERK_SECRET_KEY for `next start`; not a real key (suffix <20 alnum for secret scan).
+          CLERK_SECRET_KEY: "sk_test_placeholder"
 
   app-test-matrix:
     name: app-tests-${{ matrix.app }}
