@@ -51,7 +51,8 @@ jobs:
         # For private GitHub Free repos, GitHub may block the branch-protection API.
         # In that specific case, we allow an explicit bypass with a warning.
         # Optional secrets.BRANCH_PROTECTION_TOKEN: PAT with repo (classic) or Administration:read
-        # (fine-grained). If unset or empty, github.token is used (may still 403 on some plans).
+        # (fine-grained). If unset or empty, github.token is used; it often cannot read branch
+        # protection (403 integration), which the verifier can bypass when the env flag below is set.
         env:
           GITHUB_TOKEN: ${{ secrets.BRANCH_PROTECTION_TOKEN || github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
