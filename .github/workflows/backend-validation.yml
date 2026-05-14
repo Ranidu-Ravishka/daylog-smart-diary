@@ -50,8 +50,10 @@ jobs:
         # Any verification error must fail this workflow.
         # For private GitHub Free repos, GitHub may block the branch-protection API.
         # In that specific case, we allow an explicit bypass with a warning.
+        # Optional secrets.BRANCH_PROTECTION_TOKEN: PAT with repo (classic) or Administration:read
+        # (fine-grained). If unset or empty, github.token is used (may still 403 on some plans).
         env:
-          GITHUB_TOKEN: ${{ secrets.BRANCH_PROTECTION_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.BRANCH_PROTECTION_TOKEN || github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           ALLOW_UNSUPPORTED_BRANCH_PROTECTION: "true"
         run: pnpm verify:branch-protection -- --branch main

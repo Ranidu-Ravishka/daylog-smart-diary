@@ -441,6 +441,11 @@ async function main() {
     if (details) {
       console.error(details);
     }
+    if (response.status === 401) {
+      console.error(
+        "Hint: HTTP 401 means GitHub rejected the token. If CI sets GITHUB_TOKEN from secrets.BRANCH_PROTECTION_TOKEN, rotate or remove that secret (expired/revoked PATs cause this). A classic PAT needs the \"repo\" scope; a fine-grained PAT needs Repository permission Administration: Read. If the secret is unset, Actions falls back to github.token, which may return 403 on some plans instead.",
+      );
+    }
     process.exit(1);
   }
 
