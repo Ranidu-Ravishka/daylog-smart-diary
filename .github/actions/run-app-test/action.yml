@@ -1,0 +1,53 @@
+name: Run app tests
+description: Install the repository dependencies and run one app's tests
+
+inputs:
+  app:
+    description: Application test target to run
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+        cache: "pnpm"
+        cache-dependency-path: "pnpm-lock.yaml"
+
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+      shell: bash
+
+    - name: Run app tests
+      shell: bash
+      env:
+        APP: ${{ inputs.app }}
+      run: |
+        set -euo pipefail
+
+        case "$APP" in
+          web)
+            pnpm --filter web test
+            ;;
+          backend)
+            pnpm test:coverage:backend
+            ;;
+          admin)
+            pnpm --filter admin test
+            ;;
+          mobile)
+            pnpm --filter mobile test
+            ;;
+          *)
+            echo "Unsupported app target: $APP"
+            exit 1
+            ;;
+        esac

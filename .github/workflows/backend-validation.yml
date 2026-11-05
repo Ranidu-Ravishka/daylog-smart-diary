@@ -228,64 +228,63 @@ jobs:
           # clerkMiddleware requires CLERK_SECRET_KEY for `next start`; not a real key (suffix <20 alnum for secret scan).
           CLERK_SECRET_KEY: "sk_test_placeholder"
 
-  app-test-matrix:
-    name: app-tests-${{ matrix.app }}
-    # Block test matrix until branch protection verification passes.
-    needs:
-      - branch-protection-verification
+  app-tests-web:
+    name: app-tests-web
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        app:
-          - web
-          - backend
-          - admin
-          - mobile
     env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       NEXT_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
       EXPO_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
       # Syntactically valid Clerk test key (base64 decodes to `ci.build.local$`); not a real instance.
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
       EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Run app tests
+        uses: ./.github/actions/run-app-test
         with:
-          node-version: "22"
-          cache: "pnpm"
-          cache-dependency-path: "pnpm-lock.yaml"
+          app: web
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+  app-tests-backend:
+    name: app-tests-backend
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      NEXT_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
+      EXPO_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
+    steps:
+      - name: Run app tests
+        uses: ./.github/actions/run-app-test
+        with:
+          app: backend
 
-      - name: Run matrix test target
-        shell: bash
-        run: |
-          set -euo pipefail
+  app-tests-admin:
+    name: app-tests-admin
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      NEXT_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
+      EXPO_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
+    steps:
+      - name: Run app tests
+        uses: ./.github/actions/run-app-test
+        with:
+          app: admin
 
-          case "${{ matrix.app }}" in
-            web)
-              pnpm --filter web test
-              ;;
-            backend)
-              pnpm test:coverage:backend
-              ;;
-            admin)
-              pnpm --filter admin test
-              ;;
-            mobile)
-              pnpm --filter mobile test
-              ;;
-            *)
-              echo "Unsupported app target: ${{ matrix.app }}"
-              exit 1
-              ;;
-          esac
+  app-tests-mobile:
+    name: app-tests-mobile
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      NEXT_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
+      EXPO_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
+    steps:
+      - name: Run app tests
+        uses: ./.github/actions/run-app-test
+        with:
+          app: mobile
