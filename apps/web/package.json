@@ -44,15 +44,15 @@
     "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.1",
     "@repo/eslint-config": "workspace:*",
     "@repo/typescript-config": "workspace:*",
     "@tailwindcss/postcss": "^4.1.17",
     "@types/node": "^22.15.3",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
-    "baseline-browser-mapping": "^2.10.29",
+    "baseline-browser-mapping": "^2.11.35",
     "eslint": "^9.39.1",
-    "@playwright/test": "^1.56.1",
     "tailwindcss": "^4.1.17",
     "typescript": "5.9.2",
     "vitest": "^4.1.2"

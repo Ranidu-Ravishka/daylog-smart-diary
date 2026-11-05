@@ -1,11 +1,18 @@
 packages:
   - "apps/*"
   - "packages/*"
+overrides:
+  "@fastify/otel>@opentelemetry/instrumentation": "0.214.0"
+  "@prisma/instrumentation>@opentelemetry/instrumentation": "0.214.0"
+  import-in-the-middle: "^3.0.0"
 allowBuilds:
   '@clerk/shared': false
+  '@tailwindcss/oxide': true
   '@sentry/cli': false
   browser-tabs-lock: false
   core-js: false
   esbuild: false
+  'pnpm@12.16.1': true
+  playwright: true
   sharp: false
   unrs-resolver: false
