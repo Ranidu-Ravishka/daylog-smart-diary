@@ -239,6 +239,9 @@ jobs:
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
       EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Run app tests
         uses: ./.github/actions/run-app-test
         with:
@@ -254,6 +257,9 @@ jobs:
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
       EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Run app tests
         uses: ./.github/actions/run-app-test
         with:
@@ -269,6 +275,9 @@ jobs:
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
       EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Run app tests
         uses: ./.github/actions/run-app-test
         with:
@@ -284,6 +293,9 @@ jobs:
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
       EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2kuYnVpbGQubG9jYWwk"
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Run app tests
         uses: ./.github/actions/run-app-test
         with:
