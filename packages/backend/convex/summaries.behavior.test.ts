@@ -1095,6 +1095,32 @@ describe("summaries behavior", () => {
     expect(result.errorSamples[0]).toContain("row insert failed");
   });
 
+  it("rejects restore writes after account deletion has been requested", async () => {
+    const db = seededDb();
+    await db.patch(USER_ID, { accountStatus: "deletion_requested" });
+    const restoreDiaryDatasetBatchInternal = handler<
+      {
+        userId: Id<"user">;
+        dataset: "summaries" | "memories" | "days" | "integrationDailyData";
+        rows: unknown[];
+        conflictMode: "skip" | "overwrite";
+        allowPartial: boolean;
+      },
+      unknown
+    >(summariesModule.restoreDiaryDatasetBatchInternal);
+
+    await expect(
+      restoreDiaryDatasetBatchInternal(createAuthCtx(db, null), {
+        userId: USER_ID,
+        dataset: "summaries",
+        rows: [],
+        conflictMode: "skip",
+        allowPartial: true,
+      }),
+    ).rejects.toThrow("Cannot restore data while account deletion is active.");
+    expect(db.getTable("daySummaries")).toHaveLength(0);
+  });
+
   it("runs restore action lifecycle and returns success", async () => {
     const restoreMyDiaryData = handler<
       {
@@ -2404,7 +2430,12 @@ describe("summaries behavior", () => {
 
     const runScheduledExportJobRetentionCleanupInternal = handler<
       { maxDeletes?: number },
-      { deletedJobs: number; deletedArtifacts: number; retentionDays: number }
+      {
+        deletedJobs: number;
+        deletedArtifacts: number;
+        failedArtifacts: number;
+        retentionDays: number;
+      }
     >(summariesModule.runScheduledExportJobRetentionCleanupInternal);
 
     const cleanupCtx = {
@@ -2455,15 +2486,22 @@ describe("summaries behavior", () => {
 
     const runScheduledExportJobRetentionCleanupInternal = handler<
       { maxDeletes?: number },
-      { deletedJobs: number; deletedArtifacts: number; retentionDays: number }
+      {
+        deletedJobs: number;
+        deletedArtifacts: number;
+        failedArtifacts: number;
+        retentionDays: number;
+      }
     >(summariesModule.runScheduledExportJobRetentionCleanupInternal);
 
+    const storageDelete = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("storage temporarily unavailable"))
+      .mockResolvedValue(undefined);
     const cleanupCtx = {
       ...createAuthCtx(db, null),
       storage: {
-        delete: vi.fn(async () => {
-          throw new Error("already deleted");
-        }),
+        delete: storageDelete,
       },
     };
 
@@ -2473,11 +2511,35 @@ describe("summaries behavior", () => {
     );
 
     expect(cleanup.retentionDays).toBe(14);
-    expect(cleanup.deletedJobs).toBe(1);
+    expect(cleanup.deletedJobs).toBe(0);
     expect(cleanup.deletedArtifacts).toBe(0);
-    expect(cleanupCtx.storage.delete).toHaveBeenCalledWith(
+    expect(cleanup.failedArtifacts).toBe(1);
+    expect(storageDelete).toHaveBeenCalledWith(
       "storage_old_export_delete_fails",
     );
+    expect(db.getTable("exportJobs")).toHaveLength(1);
+    expect(db.getTable("exportJobs")[0]).toMatchObject({
+      artifactStorageId: "storage_old_export_delete_fails",
+      artifactCleanupAttempts: 1,
+      artifactCleanupErrorCode: "storage_delete_failed",
+    });
+
+    const tooEarly = await runScheduledExportJobRetentionCleanupInternal(
+      cleanupCtx,
+      {},
+    );
+    expect(tooEarly.deletedJobs).toBe(0);
+    expect(storageDelete).toHaveBeenCalledTimes(1);
+
+    vi.spyOn(Date, "now").mockReturnValue(now + 6 * 60 * 60 * 1000);
+    const retried = await runScheduledExportJobRetentionCleanupInternal(
+      cleanupCtx,
+      {},
+    );
+    expect(retried.deletedJobs).toBe(1);
+    expect(retried.deletedArtifacts).toBe(1);
+    expect(retried.failedArtifacts).toBe(0);
+    expect(storageDelete).toHaveBeenCalledTimes(2);
     expect(db.getTable("exportJobs")).toHaveLength(0);
   });
 
@@ -2640,7 +2702,7 @@ describe("summaries behavior", () => {
 
     expect(result.jobId).toBe("job_001");
     expect(result.status).toBe("ready");
-    expect(runMutation).toHaveBeenCalledTimes(3);
+    expect(runMutation).toHaveBeenCalledTimes(4);
 
     const failingRunMutation = vi
       .fn()

@@ -9,12 +9,18 @@ const RETENTION_DAY_SUMMARIES_DAYS_ENV = "RETENTION_DAY_SUMMARIES_DAYS";
 const RETENTION_INTEGRATION_DATA_DAYS_ENV = "RETENTION_INTEGRATION_DATA_DAYS";
 const RETENTION_LOCATION_SIGNALS_DAYS_ENV = "RETENTION_LOCATION_SIGNALS_DAYS";
 const RETENTION_SUMMARY_EVENTS_DAYS_ENV = "RETENTION_SUMMARY_EVENTS_DAYS";
+const RETENTION_AI_SUMMARY_ATTEMPTS_DAYS_ENV =
+  "RETENTION_AI_SUMMARY_ATTEMPTS_DAYS";
 const RETENTION_INFO_EVENTS_DAYS_ENV = "RETENTION_INFO_EVENTS_DAYS";
 const RETENTION_EXPORT_JOBS_DAYS_ENV = "RETENTION_EXPORT_JOBS_DAYS";
 const RETENTION_RESTORE_JOBS_DAYS_ENV = "RETENTION_RESTORE_JOBS_DAYS";
 const RETENTION_SYNC_RUNS_DAYS_ENV = "RETENTION_SYNC_RUNS_DAYS";
 const RETENTION_SUMMARY_QUOTAS_DAYS_ENV = "RETENTION_SUMMARY_QUOTAS_DAYS";
 const RETENTION_SUMMARY_QUALITY_DAYS_ENV = "RETENTION_SUMMARY_QUALITY_DAYS";
+const RETENTION_DAILY_FEATURE_VECTORS_DAYS_ENV =
+  "RETENTION_DAILY_FEATURE_VECTORS_DAYS";
+const RETENTION_NEXT_BEST_DAY_RECOMMENDATIONS_DAYS_ENV =
+  "RETENTION_NEXT_BEST_DAY_RECOMMENDATIONS_DAYS";
 const RETENTION_HEALTH_EVENTS_DAYS_ENV = "RETENTION_HEALTH_EVENTS_DAYS";
 const RETENTION_AUDIT_LOGS_DAYS_ENV = "RETENTION_AUDIT_LOGS_DAYS";
 const RETENTION_PLATFORM_AUDIT_DAYS_ENV = "RETENTION_PLATFORM_AUDIT_DAYS";
@@ -135,7 +141,10 @@ export type RetentionPolicyKey =
   | "integrationSyncRuns"
   | "locationSignals"
   | "summaryGenerationEvents"
+  | "aiSummaryAttempts"
   | "summaryQualityEvaluations"
+  | "dailyFeatureVectors"
+  | "nextBestDayRecommendations"
   | "summaryGenerationQuotas"
   | "infoEvents"
   | "integrationHealthEvents"
@@ -224,6 +233,16 @@ export function getRetentionPolicyDefaults(): Record<
       sensitive: false,
       enabled: true,
     },
+    aiSummaryAttempts: {
+      retentionDays: parseBoundedInt({
+        envName: RETENTION_AI_SUMMARY_ATTEMPTS_DAYS_ENV,
+        fallback: 60,
+        min: 1,
+        max: 3650,
+      }),
+      sensitive: true,
+      enabled: true,
+    },
     summaryQualityEvaluations: {
       retentionDays: parseBoundedInt({
         envName: RETENTION_SUMMARY_QUALITY_DAYS_ENV,
@@ -232,6 +251,26 @@ export function getRetentionPolicyDefaults(): Record<
         max: 3650,
       }),
       sensitive: false,
+      enabled: true,
+    },
+    dailyFeatureVectors: {
+      retentionDays: parseBoundedInt({
+        envName: RETENTION_DAILY_FEATURE_VECTORS_DAYS_ENV,
+        fallback: 90,
+        min: 1,
+        max: 3650,
+      }),
+      sensitive: true,
+      enabled: true,
+    },
+    nextBestDayRecommendations: {
+      retentionDays: parseBoundedInt({
+        envName: RETENTION_NEXT_BEST_DAY_RECOMMENDATIONS_DAYS_ENV,
+        fallback: 90,
+        min: 1,
+        max: 3650,
+      }),
+      sensitive: true,
       enabled: true,
     },
     summaryGenerationQuotas: {

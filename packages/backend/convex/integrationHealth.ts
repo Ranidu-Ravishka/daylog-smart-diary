@@ -1,7 +1,7 @@
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { assertIntegrationProvider } from "./integrationProviders";
-import { requireAdmin, requireUser } from "./authz";
+import { getActiveUserById, requireAdmin, requireUser } from "./authz";
 import { internalMutation, query, type MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { validateDayKey } from "./validators";
@@ -256,6 +256,13 @@ export const recordIntegrationHealthEventInternal = internalMutation({
     latencyMs: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    if (
+      args.userId &&
+      !(await getActiveUserById(ctx, args.userId))
+    ) {
+      throw new Error("Cannot record integration health for an inactive user");
+    }
+
     return await recordIntegrationHealthEventInDb(ctx.db, args);
   },
 });

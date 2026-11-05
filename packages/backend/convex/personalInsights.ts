@@ -8,7 +8,7 @@ import {
 } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { requireUser } from "./authz";
+import { getActiveUserById, requireUser } from "./authz";
 import { validateDayKey } from "./validators";
 import { logInfo, logWarn } from "./observability";
 import { callOpenAiChatJson } from "./providerAdapters";
@@ -335,6 +335,10 @@ export const upsertDailyFeatureVectorInternal = internalMutation({
     sourceDays: v.number(),
   },
   handler: async (ctx, args): Promise<Id<"dailyFeatureVectors">> => {
+    if (!(await getActiveUserById(ctx, args.userId))) {
+      throw new Error("Cannot store insights for an inactive user");
+    }
+
     validateDayKey(args.dayKey);
     const now = Date.now();
     const existing = await ctx.db
@@ -420,6 +424,10 @@ export const upsertNextBestDayRecommendationInternal = internalMutation({
     }),
   },
   handler: async (ctx, args): Promise<Id<"nextBestDayRecommendations">> => {
+    if (!(await getActiveUserById(ctx, args.userId))) {
+      throw new Error("Cannot store recommendations for an inactive user");
+    }
+
     validateDayKey(args.targetDayKey);
     const now = Date.now();
     const existing = await ctx.db

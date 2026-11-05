@@ -1,5 +1,6 @@
 "use client";
 
+import { useMounted } from "@/lib/use-mounted";
 import { useTheme } from "next-themes";
 import {
   Bar,
@@ -15,7 +16,8 @@ export type VolumeDatum = { name: string; value: number };
 
 export function DashboardVolumeChart({ data }: { data: VolumeDatum[] }) {
   const { resolvedTheme } = useTheme();
-  const isDark = resolvedTheme === "dark";
+  const hasMounted = useMounted();
+  const isDark = hasMounted && resolvedTheme === "dark";
 
   const fill = isDark ? "#91B49A" : "#2F3E46";
   const gridStroke = isDark ? "#2F2F2F" : "#E5E5E5";

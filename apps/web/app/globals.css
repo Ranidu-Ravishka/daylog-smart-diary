@@ -5,6 +5,73 @@
 @import "@repo/theme/css/utilities.css";
 @import "@repo/theme/css/base-typography.css";
 
+:root {
+  --mobile-safe-bottom: max(env(safe-area-inset-bottom), 0.75rem);
+  --mobile-safe-top: max(env(safe-area-inset-top), 0rem);
+  --touch-target-size: 44px;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+body {
+  min-height: 100vh;
+  text-rendering: optimizeLegibility;
+  font-size: 0.96rem;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+[role="button"],
+a[href],
+input,
+select,
+textarea {
+  min-height: var(--touch-target-size);
+}
+
+button,
+input,
+select,
+textarea,
+[contenteditable="true"] {
+  touch-action: manipulation;
+}
+
+@media (max-width: 640px) {
+  h1,
+  .text-h1 {
+    font-size: clamp(2rem, 8vw, 2.6rem);
+  }
+
+  h2,
+  .text-h2 {
+    font-size: clamp(1.5rem, 6vw, 2rem);
+  }
+}
+
+:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+::selection {
+  background: hsl(var(--primary) / 0.18);
+}
+
 /* react-day-picker — calm, accessible focus */
 .rdp-root {
   --rdp-accent-color: hsl(var(--primary));
@@ -33,4 +100,18 @@
 .rdp-day_button:focus-visible {
   outline: 2px solid hsl(var(--ring));
   outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .rdp .rdp-months {
+    display: block;
+  }
+
+  .rdp-month {
+    width: 100%;
+  }
+
+  .rdp-table {
+    width: 100%;
+  }
 }

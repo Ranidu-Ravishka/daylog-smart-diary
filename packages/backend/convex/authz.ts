@@ -8,6 +8,33 @@ import { findLatestUserDeletionJobByUserId } from "./userDeletionJobQueries";
 // ────────────────────────────────────────────────────────────
 type AuthCtx = QueryCtx | MutationCtx;
 
+export async function getActiveUserById(
+  ctx: AuthCtx,
+  userId: Id<"user">,
+): Promise<Doc<"user"> | null> {
+  const user = await ctx.db.get(userId);
+  if (
+    !user ||
+    typeof user.accountBackendPurgedAt === "number" ||
+    user.accountStatus === "deletion_requested"
+  ) {
+    return null;
+  }
+
+  const latestDeletionJob = await findLatestUserDeletionJobByUserId(
+    ctx,
+    user._id,
+  );
+  if (
+    latestDeletionJob?.status === "requested" ||
+    latestDeletionJob?.status === "processing"
+  ) {
+    return null;
+  }
+
+  return user;
+}
+
 // ────────────────────────────────────────────────────────────
 // 1. getCurrentUser — returns user row or null (never throws)
 // ────────────────────────────────────────────────────────────

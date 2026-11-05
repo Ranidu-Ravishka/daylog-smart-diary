@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { makeFunctionReference, paginationOptsValidator } from "convex/server";
 import { action, internalMutation, mutation, query } from "./_generated/server";
-import { requireUser, requireOwnership } from "./authz";
+import { getActiveUserById, requireUser, requireOwnership } from "./authz";
 import { validateDayKey, clampLimit } from "./validators";
 import {
   getExportJobRetentionDays,
@@ -253,6 +253,10 @@ export const releaseSummaryGenerationSlotInternal = internalMutation({
     idempotencyKey: v.string(),
   },
   handler: async (ctx, args) => {
+    if (!(await getActiveUserById(ctx, args.userId))) {
+      throw new Error("Cannot release a summary quota for an inactive user");
+    }
+
     const now = Date.now();
     return await releaseSummaryGenerationSlotForUser(
       ctx.db,
@@ -1736,6 +1740,10 @@ const createExportJobInternalRef = makeFunctionReference<"mutation">(
 const markExportJobRunningInternalRef = makeFunctionReference<"mutation">(
   "summaries:markExportJobRunningInternal",
 );
+const markExportJobArtifactUploadedInternalRef =
+  makeFunctionReference<"mutation">(
+    "summaries:markExportJobArtifactUploadedInternal",
+  );
 const markExportJobReadyInternalRef = makeFunctionReference<"mutation">(
   "summaries:markExportJobReadyInternal",
 );
@@ -2107,6 +2115,10 @@ export const createExportJobInternal = internalMutation({
     expiresAt: v.number(),
   },
   handler: async (ctx, args) => {
+    if (!(await getActiveUserById(ctx, args.userId))) {
+      throw new Error("Cannot create an export while account deletion is active.");
+    }
+
     const jobId = await ctx.db.insert("exportJobs", {
       userId: args.userId,
       status: "queued" satisfies ExportJobStatus,
@@ -2136,6 +2148,9 @@ export const markExportJobRunningInternal = internalMutation({
     if (!job) {
       throw new Error("Export job not found");
     }
+    if (!(await getActiveUserById(ctx, job.userId))) {
+      throw new Error("Cannot update an export while account deletion is active.");
+    }
 
     await ctx.db.patch(job._id, {
       status: "running",
@@ -2148,6 +2163,29 @@ export const markExportJobRunningInternal = internalMutation({
       status: "running" as ExportJobStatus,
       startedAt: args.startedAt,
     };
+  },
+});
+
+export const markExportJobArtifactUploadedInternal = internalMutation({
+  args: {
+    jobId: v.id("exportJobs"),
+    storageId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.status !== "running") {
+      throw new Error("Running export job not found");
+    }
+    if (!(await getActiveUserById(ctx, job.userId))) {
+      throw new Error("Cannot attach an export artifact during account deletion.");
+    }
+
+    await ctx.db.patch(job._id, {
+      artifactStorageId: args.storageId,
+      updatedAt: Date.now(),
+    });
+
+    return { success: true };
   },
 });
 
@@ -2171,6 +2209,9 @@ export const markExportJobReadyInternal = internalMutation({
     if (!job) {
       throw new Error("Export job not found");
     }
+    if (!(await getActiveUserById(ctx, job.userId))) {
+      throw new Error("Cannot update an export while account deletion is active.");
+    }
 
     await ctx.db.patch(job._id, {
       status: "ready",
@@ -2180,6 +2221,10 @@ export const markExportJobReadyInternal = internalMutation({
       artifactFileName: args.fileName,
       artifactMimeType: args.artifactMimeType,
       artifactSizeBytes: args.artifactSizeBytes,
+      artifactCleanupAttempts: undefined,
+      artifactCleanupLastAttemptAt: undefined,
+      artifactCleanupNextAttemptAt: undefined,
+      artifactCleanupErrorCode: undefined,
       counts: args.counts,
     });
 
@@ -2196,6 +2241,7 @@ export const markExportJobFailedInternal = internalMutation({
     jobId: v.id("exportJobs"),
     failedAt: v.number(),
     error: v.string(),
+    artifactStorageId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
@@ -2208,6 +2254,19 @@ export const markExportJobFailedInternal = internalMutation({
       failedAt: args.failedAt,
       updatedAt: args.failedAt,
       error: args.error,
+      artifactStorageId: args.artifactStorageId,
+      artifactCleanupAttempts: args.artifactStorageId
+        ? (job.artifactCleanupAttempts ?? 0) + 1
+        : job.artifactCleanupAttempts,
+      artifactCleanupLastAttemptAt: args.artifactStorageId
+        ? args.failedAt
+        : job.artifactCleanupLastAttemptAt,
+      artifactCleanupNextAttemptAt: args.artifactStorageId
+        ? args.failedAt + 6 * 60 * 60 * 1000
+        : job.artifactCleanupNextAttemptAt,
+      artifactCleanupErrorCode: args.artifactStorageId
+        ? "storage_delete_failed"
+        : undefined,
     });
 
     return {
@@ -2322,6 +2381,10 @@ export const createRestoreJobInternal = internalMutation({
     selectedDatasets: v.array(exportDatasetValidator),
   },
   handler: async (ctx, args) => {
+    if (!(await getActiveUserById(ctx, args.userId))) {
+      throw new Error("Cannot create a restore job while account deletion is active.");
+    }
+
     const jobId = await ctx.db.insert("restoreJobs", {
       userId: args.userId,
       status: "running" satisfies RestoreJobStatus,
@@ -2457,14 +2520,22 @@ export const runScheduledExportJobRetentionCleanupInternal = internalMutation({
     const retentionDays = getExportJobRetentionDays();
     const cutoff = now - retentionDays * MS_PER_DAY;
 
-    const staleJobs = await ctx.db
+    const candidates = await ctx.db
       .query("exportJobs")
       .withIndex("by_requestedAt", (q) => q.lt("requestedAt", cutoff))
       .order("asc")
       .take(maxDeletes);
+    const staleJobs = candidates.filter(
+      (job) =>
+        typeof job.artifactStorageId !== "string" ||
+        !job.artifactStorageId ||
+        job.artifactCleanupNextAttemptAt === undefined ||
+        job.artifactCleanupNextAttemptAt <= now,
+    );
 
     let deletedArtifacts = 0;
     let deletedJobs = 0;
+    let failedArtifacts = 0;
 
     for (const job of staleJobs) {
       if (typeof job.artifactStorageId === "string" && job.artifactStorageId) {
@@ -2472,7 +2543,16 @@ export const runScheduledExportJobRetentionCleanupInternal = internalMutation({
           await ctx.storage.delete(job.artifactStorageId);
           deletedArtifacts += 1;
         } catch {
-          // Ignore missing or already-deleted artifacts during cleanup.
+          await ctx.db.patch(job._id, {
+            artifactCleanupAttempts: (job.artifactCleanupAttempts ?? 0) + 1,
+            artifactCleanupLastAttemptAt: now,
+            artifactCleanupNextAttemptAt: now + 6 * 60 * 60 * 1000,
+            artifactCleanupErrorCode: "storage_delete_failed",
+            error: "artifact_cleanup_failed",
+            updatedAt: now,
+          });
+          failedArtifacts += 1;
+          continue;
         }
       }
 
@@ -2485,6 +2565,7 @@ export const runScheduledExportJobRetentionCleanupInternal = internalMutation({
       cutoff,
       deletedJobs,
       deletedArtifacts,
+      failedArtifacts,
     };
   },
 });
@@ -2543,6 +2624,8 @@ export const prepareMyDiaryExportArtifact = action({
     const includeLocationSignals = args.includeLocationSignals ?? false;
     const requestedAt = Date.now();
     const expiresAt = requestedAt + getExportJobRetentionDays() * MS_PER_DAY;
+    let artifactStorageId: Id<"_storage"> | undefined;
+    let artifactCleanupFailed = false;
 
     const createdJob = (await ctx.runMutation(createExportJobInternalRef, {
       userId: identity.userId,
@@ -2567,6 +2650,11 @@ export const prepareMyDiaryExportArtifact = action({
         format,
         includeLocationSignals,
       });
+      artifactStorageId = preparedExport.storageId;
+      await ctx.runMutation(markExportJobArtifactUploadedInternalRef, {
+        jobId: createdJob.jobId,
+        storageId: String(preparedExport.storageId),
+      });
       const completedAt = Date.now();
 
       await ctx.runMutation(markExportJobReadyInternalRef, {
@@ -2588,11 +2676,27 @@ export const prepareMyDiaryExportArtifact = action({
         completedAt,
       };
     } catch (error) {
+      if (artifactStorageId) {
+        try {
+          await ctx.storage.delete(artifactStorageId);
+        } catch (cleanupError) {
+          artifactCleanupFailed = true;
+          captureException("export.artifact_cleanup_failed", cleanupError, {
+            area: "export",
+            userId: identity.userId,
+            jobId: createdJob.jobId,
+          });
+        }
+      }
+
       try {
         await ctx.runMutation(markExportJobFailedInternalRef, {
           jobId: createdJob.jobId,
           failedAt: Date.now(),
           error: sanitizeExportErrorMessage(error),
+          artifactStorageId: artifactCleanupFailed
+            ? String(artifactStorageId)
+            : undefined,
         });
       } catch {
         // Preserve original export failure when state update fails.
@@ -2612,6 +2716,10 @@ export const restoreDiaryDatasetBatchInternal = internalMutation({
     allowPartial: v.boolean(),
   },
   handler: async (ctx, args: RestoreBatchDatasetArgs) => {
+    if (!(await getActiveUserById(ctx, args.userId))) {
+      throw new Error("Cannot restore data while account deletion is active.");
+    }
+
     const result = createEmptyRestoreBatchResult();
 
     for (const rawRow of args.rows) {

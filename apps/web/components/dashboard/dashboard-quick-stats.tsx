@@ -15,10 +15,10 @@ export function DashboardQuickStats({
   dayRating,
 }: DashboardQuickStatsProps) {
   return (
-    <div className="mb-10 grid grid-cols-1 gap-3 sm:grid-cols-3">
+    <div className="mb-6 grid grid-cols-1 gap-3 sm:mb-8 sm:grid-cols-3">
       <Card className="overflow-hidden border-border/60 bg-gradient-to-b from-secondary/50 to-card/80">
         <CardContent className="p-4 text-center sm:p-5">
-          <p className="text-xl sm:text-2xl">{latestMemoryMood}</p>
+          <p className="text-xl font-semibold sm:text-2xl">{latestMemoryMood}</p>
           <p className="mt-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
             Latest mood
           </p>

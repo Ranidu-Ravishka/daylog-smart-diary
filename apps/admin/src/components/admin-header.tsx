@@ -2,6 +2,7 @@
 
 import { useAdminUiStore } from "@/stores/admin-ui-store";
 import { cn } from "@/lib/utils";
+import { useMounted } from "@/lib/use-mounted";
 import { SignedIn, SignedOut, useClerk, useUser } from "@clerk/nextjs";
 import Link from "next/link";
 import { useTheme } from "next-themes";
@@ -82,8 +83,9 @@ function ClerkUserMenu() {
 
 export function AdminHeader({ className }: { className?: string }) {
   const { setTheme, resolvedTheme } = useTheme();
+  const hasMounted = useMounted();
   const setMobileNavOpen = useAdminUiStore((s) => s.setMobileNavOpen);
-  const isDark = resolvedTheme === "dark";
+  const isDark = hasMounted && resolvedTheme === "dark";
 
   return (
     <header
@@ -126,13 +128,19 @@ export function AdminHeader({ className }: { className?: string }) {
           type="button"
           variant="ghost"
           size="icon"
-          onClick={() => setTheme(isDark ? "light" : "dark")}
+          onClick={() =>
+            setTheme(resolvedTheme === "dark" ? "light" : "dark")
+          }
           aria-label="Toggle theme"
         >
-          {isDark ? (
-            <Sun className="size-[18px]" strokeWidth={1.75} />
+          {hasMounted ? (
+            isDark ? (
+              <Sun className="size-[18px]" strokeWidth={1.75} />
+            ) : (
+              <Moon className="size-[18px]" strokeWidth={1.75} />
+            )
           ) : (
-            <Moon className="size-[18px]" strokeWidth={1.75} />
+            <span aria-hidden="true" className="size-[18px]" />
           )}
         </Button>
 

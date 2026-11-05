@@ -19,7 +19,10 @@ const POLICY_KEYS: RetentionPolicyKey[] = [
   "integrationSyncRuns",
   "locationSignals",
   "summaryGenerationEvents",
+  "aiSummaryAttempts",
   "summaryQualityEvaluations",
+  "dailyFeatureVectors",
+  "nextBestDayRecommendations",
   "summaryGenerationQuotas",
   "infoEvents",
   "integrationHealthEvents",
@@ -50,13 +53,17 @@ type RetentionDeleteCounts = {
   integrationSyncRuns: number;
   locationSignals: number;
   summaryGenerationEvents: number;
+  aiSummaryAttempts: number;
   summaryQualityEvaluations: number;
+  dailyFeatureVectors: number;
+  nextBestDayRecommendations: number;
   summaryGenerationQuotas: number;
   infoEvents: number;
   integrationHealthEvents: number;
   auditLogs: number;
   platformAuditEvents: number;
   exportJobs: number;
+  exportArtifactFailures: number;
   restoreJobs: number;
   userDeletionJobs: number;
 };
@@ -344,6 +351,69 @@ async function purgeSummaryQualityEvaluations(
   return staleEvaluations.length;
 }
 
+async function purgeAiSummaryAttempts(
+  ctx: Pick<MutationCtx, "db">,
+  cutoff: number,
+  maxDeletes: number,
+  dryRun: boolean,
+): Promise<number> {
+  const staleAttempts = await ctx.db
+    .query("aiSummaryAttempts")
+    .withIndex("by_createdAt", (q) => q.lt("createdAt", cutoff))
+    .order("asc")
+    .take(maxDeletes);
+
+  if (dryRun) return staleAttempts.length;
+
+  for (const attempt of staleAttempts) {
+    await ctx.db.delete(attempt._id);
+  }
+
+  return staleAttempts.length;
+}
+
+async function purgeDailyFeatureVectors(
+  ctx: Pick<MutationCtx, "db">,
+  cutoff: number,
+  maxDeletes: number,
+  dryRun: boolean,
+): Promise<number> {
+  const staleVectors = await ctx.db
+    .query("dailyFeatureVectors")
+    .withIndex("by_generatedAt", (q) => q.lt("generatedAt", cutoff))
+    .order("asc")
+    .take(maxDeletes);
+
+  if (dryRun) return staleVectors.length;
+
+  for (const vector of staleVectors) {
+    await ctx.db.delete(vector._id);
+  }
+
+  return staleVectors.length;
+}
+
+async function purgeNextBestDayRecommendations(
+  ctx: Pick<MutationCtx, "db">,
+  cutoff: number,
+  maxDeletes: number,
+  dryRun: boolean,
+): Promise<number> {
+  const staleRecommendations = await ctx.db
+    .query("nextBestDayRecommendations")
+    .withIndex("by_generatedAt", (q) => q.lt("generatedAt", cutoff))
+    .order("asc")
+    .take(maxDeletes);
+
+  if (dryRun) return staleRecommendations.length;
+
+  for (const recommendation of staleRecommendations) {
+    await ctx.db.delete(recommendation._id);
+  }
+
+  return staleRecommendations.length;
+}
+
 async function purgeSummaryGenerationQuotas(
   ctx: Pick<MutationCtx, "db">,
   cutoffDayKey: string,
@@ -454,28 +524,53 @@ async function purgeExportJobs(
   cutoff: number,
   maxDeletes: number,
   dryRun: boolean,
-): Promise<number> {
-  const staleJobs = await ctx.db
+): Promise<{ deleted: number; failedArtifacts: number }> {
+  const now = Date.now();
+  const candidates = await ctx.db
     .query("exportJobs")
     .withIndex("by_requestedAt", (q) => q.lt("requestedAt", cutoff))
     .order("asc")
     .take(maxDeletes);
+  const staleJobs = candidates.filter(
+    (job) =>
+      typeof job.artifactStorageId !== "string" ||
+      !job.artifactStorageId ||
+      job.artifactCleanupNextAttemptAt === undefined ||
+      job.artifactCleanupNextAttemptAt <= now,
+  );
 
-  if (dryRun) return staleJobs.length;
+  if (dryRun) {
+    return {
+      deleted: staleJobs.length,
+      failedArtifacts: staleJobs.filter(
+        (job) => typeof job.artifactStorageId === "string",
+      ).length,
+    };
+  }
 
+  let deleted = 0;
+  let failedArtifacts = 0;
   for (const job of staleJobs) {
     if (typeof job.artifactStorageId === "string" && job.artifactStorageId) {
       try {
         await ctx.storage.delete(job.artifactStorageId);
       } catch {
-        // Ignore missing or already-deleted artifacts.
+        await ctx.db.patch(job._id, {
+          artifactCleanupAttempts: (job.artifactCleanupAttempts ?? 0) + 1,
+          artifactCleanupLastAttemptAt: now,
+          artifactCleanupErrorCode: "storage_delete_failed",
+          artifactCleanupNextAttemptAt: now + 6 * 60 * 60 * 1000,
+        });
+        failedArtifacts += 1;
+        continue;
       }
     }
 
     await ctx.db.delete(job._id);
+    deleted += 1;
   }
 
-  return staleJobs.length;
+  return { deleted, failedArtifacts };
 }
 
 async function purgeRestoreJobs(
@@ -560,13 +655,17 @@ async function runRetentionCleanupInternal(
     integrationSyncRuns: 0,
     locationSignals: 0,
     summaryGenerationEvents: 0,
+    aiSummaryAttempts: 0,
     summaryQualityEvaluations: 0,
+    dailyFeatureVectors: 0,
+    nextBestDayRecommendations: 0,
     summaryGenerationQuotas: 0,
     infoEvents: 0,
     integrationHealthEvents: 0,
     auditLogs: 0,
     platformAuditEvents: 0,
     exportJobs: 0,
+    exportArtifactFailures: 0,
     restoreJobs: 0,
     userDeletionJobs: 0,
   };
@@ -651,6 +750,43 @@ async function runRetentionCleanupInternal(
         );
     }
 
+    if (effectivePolicies.aiSummaryAttempts.enabled) {
+      deletedCounts.aiSummaryAttempts = await purgeAiSummaryAttempts(
+        ctx,
+        retentionCutoff(
+          startedAt,
+          effectivePolicies.aiSummaryAttempts.retentionDays,
+        ),
+        args.maxDeletesPerPolicy,
+        args.dryRun,
+      );
+    }
+
+    if (effectivePolicies.dailyFeatureVectors.enabled) {
+      deletedCounts.dailyFeatureVectors = await purgeDailyFeatureVectors(
+        ctx,
+        retentionCutoff(
+          startedAt,
+          effectivePolicies.dailyFeatureVectors.retentionDays,
+        ),
+        args.maxDeletesPerPolicy,
+        args.dryRun,
+      );
+    }
+
+    if (effectivePolicies.nextBestDayRecommendations.enabled) {
+      deletedCounts.nextBestDayRecommendations =
+        await purgeNextBestDayRecommendations(
+          ctx,
+          retentionCutoff(
+            startedAt,
+            effectivePolicies.nextBestDayRecommendations.retentionDays,
+          ),
+          args.maxDeletesPerPolicy,
+          args.dryRun,
+        );
+    }
+
     if (effectivePolicies.summaryGenerationEvents.enabled) {
       deletedCounts.summaryGenerationEvents =
         await purgeSummaryGenerationEvents(
@@ -721,12 +857,14 @@ async function runRetentionCleanupInternal(
     }
 
     if (effectivePolicies.exportJobs.enabled) {
-      deletedCounts.exportJobs = await purgeExportJobs(
+      const exportCleanup = await purgeExportJobs(
         ctx,
         retentionCutoff(startedAt, effectivePolicies.exportJobs.retentionDays),
         args.maxDeletesPerPolicy,
         args.dryRun,
       );
+      deletedCounts.exportJobs = exportCleanup.deleted;
+      deletedCounts.exportArtifactFailures = exportCleanup.failedArtifacts;
     }
 
     if (effectivePolicies.restoreJobs.enabled) {

@@ -474,15 +474,6 @@ function buildAttemptChainId(
   return `${userId}:${dayKey}:${now}:${random}`;
 }
 
-function hashInput(text: string): string {
-  let hash = 2166136261;
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return `fnv1a:${(hash >>> 0).toString(16)}`;
-}
-
 export function shouldRetrySummary(evaluation: {
   lowQuality?: boolean;
   overallScore?: number;
@@ -559,7 +550,7 @@ function toUserFacingSummaryGenerationErrorMessage(error: unknown): string {
     return "Summary generation is temporarily unavailable. Please try again shortly.";
   }
 
-  return message;
+  return fallback;
 }
 
 function resolveSummaryApiKeyCandidates(): {
@@ -724,8 +715,8 @@ export const generateSummaryForDay = action({
         logWarn("summary_generation.cache_lookup_failed", {
           status: "degraded",
           dayKey: args.dayKey,
-          errorMessage:
-            cacheError instanceof Error ? cacheError.message : "unknown",
+          errorType:
+            cacheError instanceof Error ? cacheError.name : "unknown",
         });
       }
     }
@@ -917,7 +908,6 @@ export const generateSummaryForDay = action({
             generationEventId: qualityResult.generationEventId,
             attemptNumber,
             strategy,
-            inputHash: hashInput(attemptModelInput),
             qualityScore: qualityResult.overallScore ?? 0,
             evaluationFlags: qualityResult.flags ?? [],
           },
@@ -975,15 +965,20 @@ export const generateSummaryForDay = action({
         await wait(AUTOPILOT_BASE_BACKOFF_MS * 2 ** (attemptNumber - 1));
       } catch (error) {
         latestError = error;
-        captureException("summary_generation.failed", error, {
+        captureException(
+          "summary_generation.failed",
+          new Error("AI summary generation failed"),
+          {
           status: "failed",
           dayKey: args.dayKey,
           userId: generationIdentity.userId,
           attemptChainId,
           attemptNumber,
           strategy,
+          errorType: error instanceof Error ? error.name : "unknown",
           durationMs: Date.now() - startedAt,
-        });
+          },
+        );
 
         const failureReason =
           error instanceof Error ? error.message : "Summary generation failed";
@@ -1011,7 +1006,6 @@ export const generateSummaryForDay = action({
               generationEventId: qualityFailure.generationEventId,
               attemptNumber,
               strategy,
-              inputHash: hashInput(attemptModelInput),
               evaluationFlags: ["generation_failed"],
               failureReason,
             },
@@ -1035,9 +1029,9 @@ export const generateSummaryForDay = action({
             dayKey: args.dayKey,
             userId: generationIdentity.userId,
             reason: "failure_logging",
-            error:
+            errorType:
               qualityLoggingError instanceof Error
-                ? qualityLoggingError.message
+                ? qualityLoggingError.name
                 : "unknown",
           });
         }
@@ -1090,9 +1084,7 @@ export const generateSummaryForDay = action({
         circuitOpen,
         reason: circuitOpen
           ? "circuit_open"
-          : latestError instanceof Error
-            ? latestError.message.slice(0, 200)
-            : "all_attempts_failed",
+          : "all_attempts_failed",
       });
 
       try {
@@ -1118,10 +1110,8 @@ export const generateSummaryForDay = action({
             dayKey: args.dayKey,
             userId: generationIdentity.userId,
             attemptChainId,
-            errorMessage:
-              refundError instanceof Error
-                ? refundError.message
-                : String(refundError),
+            errorType:
+              refundError instanceof Error ? refundError.name : "unknown",
           });
         }
 
@@ -1135,12 +1125,14 @@ export const generateSummaryForDay = action({
       } catch (persistError) {
         captureException(
           "summary_generation.rule_based_fallback_persist_failed",
-          persistError,
+          new Error("AI summary fallback persistence failed"),
           {
             status: "failed",
             dayKey: args.dayKey,
             userId: generationIdentity.userId,
             attemptChainId,
+            errorType:
+              persistError instanceof Error ? persistError.name : "unknown",
           },
         );
         return {
@@ -1218,9 +1210,7 @@ export const generateSummaryForDay = action({
           userId: generationIdentity.userId,
           attemptChainId,
           errorMessage:
-            persistError instanceof Error
-              ? persistError.message
-              : String(persistError),
+            persistError instanceof Error ? persistError.name : "unknown",
         });
       } catch (refundError) {
         logWarn("summary_generation.quota_refund_failed", {
@@ -1229,9 +1219,7 @@ export const generateSummaryForDay = action({
           userId: generationIdentity.userId,
           attemptChainId,
           errorMessage:
-            refundError instanceof Error
-              ? refundError.message
-              : String(refundError),
+            refundError instanceof Error ? refundError.name : "unknown",
         });
       }
       throw persistError;

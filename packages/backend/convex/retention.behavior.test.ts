@@ -305,6 +305,112 @@ describe("retention behavior", () => {
           status: "success",
         },
       ],
+      aiSummaryAttempts: [
+        {
+          _id: "ai_attempt_stale_001",
+          _creationTime: 30,
+          userId: MEMBER_ID,
+          dayKey: "2025-11-01",
+          attemptChainId: "attempt_chain_stale_001",
+          generationEventId: staleEventId,
+          attemptNumber: 1,
+          strategy: "default",
+          evaluationFlags: [],
+          createdAt: stale,
+        },
+        {
+          _id: "ai_attempt_fresh_001",
+          _creationTime: 31,
+          userId: MEMBER_ID,
+          dayKey: "2026-04-01",
+          attemptChainId: "attempt_chain_fresh_001",
+          generationEventId: staleEventId,
+          attemptNumber: 1,
+          strategy: "default",
+          evaluationFlags: [],
+          createdAt: fresh,
+        },
+      ],
+      dailyFeatureVectors: [
+        {
+          _id: "feature_vector_stale_001",
+          _creationTime: 32,
+          userId: MEMBER_ID,
+          dayKey: "2025-11-01",
+          vectorVersion: 1,
+          features: {
+            memoryCount: 1,
+            noteCount: 0,
+            peopleTagCount: 0,
+            highlightCount: 0,
+            integrationProviderCount: 0,
+          },
+          sourceDays: 1,
+          generatedAt: stale,
+          updatedAt: stale,
+        },
+        {
+          _id: "feature_vector_fresh_001",
+          _creationTime: 33,
+          userId: MEMBER_ID,
+          dayKey: "2026-04-01",
+          vectorVersion: 1,
+          features: {
+            memoryCount: 1,
+            noteCount: 0,
+            peopleTagCount: 0,
+            highlightCount: 0,
+            integrationProviderCount: 0,
+          },
+          sourceDays: 1,
+          generatedAt: fresh,
+          updatedAt: fresh,
+        },
+      ],
+      nextBestDayRecommendations: [
+        {
+          _id: "recommendation_stale_001",
+          _creationTime: 34,
+          userId: MEMBER_ID,
+          targetDayKey: "2025-11-02",
+          generatedAt: stale,
+          basedOnDays: 1,
+          confidence: 0.5,
+          recommendationType: "stabilize",
+          recommendations: [],
+          rationale: [],
+          trend: {
+            ratingTrend: "flat",
+            memoryTrend: "flat",
+            stepsTrend: "flat",
+            sleepTrend: "flat",
+            screenTimeTrend: "flat",
+            spendingTrend: "flat",
+            socialTrend: "flat",
+          },
+        },
+        {
+          _id: "recommendation_fresh_001",
+          _creationTime: 35,
+          userId: MEMBER_ID,
+          targetDayKey: "2026-04-02",
+          generatedAt: fresh,
+          basedOnDays: 1,
+          confidence: 0.5,
+          recommendationType: "stabilize",
+          recommendations: [],
+          rationale: [],
+          trend: {
+            ratingTrend: "flat",
+            memoryTrend: "flat",
+            stepsTrend: "flat",
+            sleepTrend: "flat",
+            screenTimeTrend: "flat",
+            spendingTrend: "flat",
+            socialTrend: "flat",
+          },
+        },
+      ],
       summaryQualityEvaluations: [
         {
           _id: "quality_stale_001",
@@ -491,7 +597,10 @@ describe("retention behavior", () => {
           integrationSyncRuns: number;
           locationSignals: number;
           summaryGenerationEvents: number;
+          aiSummaryAttempts: number;
           summaryQualityEvaluations: number;
+          dailyFeatureVectors: number;
+          nextBestDayRecommendations: number;
           summaryGenerationQuotas: number;
           infoEvents: number;
           integrationHealthEvents: number;
@@ -520,13 +629,17 @@ describe("retention behavior", () => {
       integrationSyncRuns: 1,
       locationSignals: 1,
       summaryGenerationEvents: 1,
+      aiSummaryAttempts: 1,
       summaryQualityEvaluations: 1,
+      dailyFeatureVectors: 1,
+      nextBestDayRecommendations: 1,
       summaryGenerationQuotas: 1,
       infoEvents: 1,
       integrationHealthEvents: 1,
       auditLogs: 1,
       platformAuditEvents: 1,
       exportJobs: 1,
+      exportArtifactFailures: 0,
       restoreJobs: 1,
       userDeletionJobs: 1,
     });
@@ -546,6 +659,15 @@ describe("retention behavior", () => {
     expect(
       db.getTable("summaryGenerationEvents").map((row) => row._id),
     ).toEqual(["summary_event_fresh_001"]);
+    expect(db.getTable("aiSummaryAttempts").map((row) => row._id)).toEqual([
+      "ai_attempt_fresh_001",
+    ]);
+    expect(db.getTable("dailyFeatureVectors").map((row) => row._id)).toEqual([
+      "feature_vector_fresh_001",
+    ]);
+    expect(
+      db.getTable("nextBestDayRecommendations").map((row) => row._id),
+    ).toEqual(["recommendation_fresh_001"]);
     expect(
       db.getTable("observabilityInfoEvents").map((row) => row._id),
     ).toEqual(["info_event_fresh_001"]);
@@ -575,6 +697,66 @@ describe("retention behavior", () => {
 
     expect(db.getTable("dataRetentionRuns")).toHaveLength(1);
     expect(db.getTable("platformAuditEvents")).toHaveLength(2);
+  });
+
+  it("retains failed export cleanup references and retries after the backoff", async () => {
+    process.env.RETENTION_EXPORT_JOBS_DAYS = "14";
+    const now = Date.parse("2026-04-10T12:00:00.000Z");
+    vi.spyOn(Date, "now").mockReturnValue(now);
+
+    const db = seededDb();
+    await db.insert("exportJobs", {
+      userId: MEMBER_ID,
+      status: "ready",
+      format: "json",
+      includeLocationSignals: false,
+      requestedAt: now - 30 * 24 * 60 * 60 * 1000,
+      updatedAt: now - 30 * 24 * 60 * 60 * 1000,
+      artifactStorageId: "storage_export_retry_001",
+    });
+
+    const storageDelete = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("storage unavailable"))
+      .mockResolvedValue(undefined);
+    const ctx = {
+      ...retentionCtx(db, "clerk_admin_001"),
+      storage: { delete: storageDelete },
+    };
+    const runRetentionCleanupNow = handler<
+      { dryRun?: boolean; maxDeletesPerPolicy?: number },
+      { deletedCounts: Record<string, number> }
+    >(retentionModule.runRetentionCleanupNow);
+
+    const first = await runRetentionCleanupNow(ctx, {
+      dryRun: false,
+      maxDeletesPerPolicy: 100,
+    });
+    expect(first.deletedCounts.exportArtifactFailures).toBe(1);
+    expect(first.deletedCounts.exportJobs).toBe(0);
+    expect(db.getTable("exportJobs")).toHaveLength(1);
+    expect(db.getTable("exportJobs")[0]).toMatchObject({
+      artifactStorageId: "storage_export_retry_001",
+      artifactCleanupAttempts: 1,
+      artifactCleanupErrorCode: "storage_delete_failed",
+    });
+
+    const tooEarly = await runRetentionCleanupNow(ctx, {
+      dryRun: false,
+      maxDeletesPerPolicy: 100,
+    });
+    expect(tooEarly.deletedCounts.exportJobs).toBe(0);
+    expect(storageDelete).toHaveBeenCalledTimes(1);
+
+    vi.spyOn(Date, "now").mockReturnValue(now + 6 * 60 * 60 * 1000);
+    const retried = await runRetentionCleanupNow(ctx, {
+      dryRun: false,
+      maxDeletesPerPolicy: 100,
+    });
+    expect(retried.deletedCounts.exportJobs).toBe(1);
+    expect(retried.deletedCounts.exportArtifactFailures).toBe(0);
+    expect(storageDelete).toHaveBeenCalledTimes(2);
+    expect(db.getTable("exportJobs")).toHaveLength(0);
   });
 
   it("supports dry-run scheduled cleanup without deleting rows", async () => {

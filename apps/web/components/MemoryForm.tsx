@@ -416,12 +416,13 @@ export function MemoryForm({
 
   return (
     <Card className="mb-8 border-border/60 shadow-soft">
-      <CardHeader>
-        <CardTitle>{memoryId ? "Edit Memory" : "Create Memory"}</CardTitle>
+      <CardHeader className="p-4 sm:p-6">
+        <CardTitle className="text-xl sm:text-2xl">
+          {memoryId ? "Edit Memory" : "Create Memory"}
+        </CardTitle>
       </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Title */}
+      <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
+        <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
           <div className="space-y-2">
             <Label htmlFor="title">Title *</Label>
             <Input
@@ -442,7 +443,6 @@ export function MemoryForm({
             )}
           </div>
 
-          {/* Description */}
           <div className="space-y-2">
             <Label htmlFor="description">Description (optional)</Label>
             <textarea
@@ -451,11 +451,10 @@ export function MemoryForm({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               disabled={isLoading}
-              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 min-h-24"
+              className="flex min-h-28 w-full rounded-md border border-input bg-background px-3 py-2 text-base leading-relaxed ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
             />
           </div>
 
-          {/* Media */}
           <div className="space-y-2">
             <Label htmlFor="media">Photos (optional)</Label>
             <div className="flex items-center gap-2">
@@ -467,6 +466,7 @@ export function MemoryForm({
                 multiple
                 onChange={handleFileSelect}
                 disabled={isLoading}
+                className="min-h-[48px] px-3 py-2 text-sm"
               />
             </div>
             <p className="text-xs text-muted-foreground">
@@ -474,7 +474,7 @@ export function MemoryForm({
               {formatFileSize(maxMediaBytesPerFile)} per file.
             </p>
             {selectedFileCount > 0 && (
-              <div className="grid grid-cols-3 gap-2 pt-1">
+              <div className="grid grid-cols-2 gap-2 pt-1 sm:grid-cols-3">
                 {selectedFiles.map((selectedFile) => (
                   <div
                     key={selectedFile.id}
@@ -492,13 +492,13 @@ export function MemoryForm({
                       <button
                         type="button"
                         aria-label="Remove selected file"
-                        className="absolute right-1 top-1 rounded bg-black/60 px-1 text-xs text-white"
+                        className="absolute right-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-xs text-white"
                         onClick={() => removeSelectedFile(selectedFile.id)}
                       >
                         ×
                       </button>
                     )}
-                    <div className="mt-1 text-[10px] text-muted-foreground truncate">
+                    <div className="mt-1 truncate text-[10px] text-muted-foreground">
                       {selectedFile.file.name}
                     </div>
                     {selectedFile.uploading && (
@@ -517,12 +517,11 @@ export function MemoryForm({
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            {/* Mood */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="mood">Mood</Label>
               <Select value={mood} onValueChange={setMood} disabled={isLoading}>
-                <SelectTrigger id="mood">
+                <SelectTrigger id="mood" className="h-11">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -535,7 +534,6 @@ export function MemoryForm({
               </Select>
             </div>
 
-            {/* Time */}
             <div className="space-y-2">
               <Label htmlFor="time">Time</Label>
               <Input
@@ -544,25 +542,26 @@ export function MemoryForm({
                 value={time}
                 onChange={(e) => setTime(e.target.value)}
                 disabled={isLoading}
+                className="h-11"
               />
             </div>
           </div>
 
-          {/* Buttons */}
-          <div className="flex gap-2 pt-4">
-            <Button type="submit" disabled={isLoading}>
-              {isLoading ? "Saving..." : memoryId ? "Update" : "Create"}
-            </Button>
+          <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:justify-end">
             {onCancel && (
               <Button
                 type="button"
                 variant="outline"
                 onClick={onCancel}
                 disabled={isLoading}
+                className="w-full sm:w-auto"
               >
                 Cancel
               </Button>
             )}
+            <Button type="submit" disabled={isLoading} className="w-full sm:w-auto">
+              {isLoading ? "Saving..." : memoryId ? "Update" : "Create"}
+            </Button>
           </div>
         </form>
       </CardContent>

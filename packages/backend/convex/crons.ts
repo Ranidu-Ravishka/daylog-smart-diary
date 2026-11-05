@@ -1,7 +1,11 @@
-import { cronJobs } from "convex/server";
+import { cronJobs, makeFunctionReference } from "convex/server";
 import { internal } from "./_generated/api";
 
 const crons = cronJobs();
+const scheduleDueIntegrationRevocationsInternal =
+  makeFunctionReference<"mutation">(
+    "integrations:scheduleDueIntegrationRevocationsInternal",
+  );
 
 crons.interval(
   "retention-cleanup-every-6h",
@@ -13,6 +17,24 @@ crons.interval(
 );
 
 crons.interval(
+  "redact-legacy-summary-generation-content-daily",
+  { hours: 24 },
+  internal.summaryQuality.redactLegacySummaryGenerationEventContentInternal,
+  {
+    batchSize: 100,
+  },
+);
+
+crons.interval(
+  "remove-legacy-ai-summary-attempt-input-hashes-daily",
+  { hours: 24 },
+  internal.summaryQuality.removeLegacyAiSummaryAttemptInputHashesInternal,
+  {
+    batchSize: 100,
+  },
+);
+
+crons.interval(
   "cleanup-legacy-unsupported-integrations-daily",
   { hours: 24 },
   internal.integrations.cleanupLegacyUnsupportedIntegrationsInternal,
@@ -20,6 +42,15 @@ crons.interval(
     batchSizePerProvider: 25,
     maxPasses: 2,
     force: false,
+  },
+);
+
+crons.interval(
+  "retry-pending-integration-revocations-every-15m",
+  { minutes: 15 },
+  scheduleDueIntegrationRevocationsInternal,
+  {
+    limit: 100,
   },
 );
 

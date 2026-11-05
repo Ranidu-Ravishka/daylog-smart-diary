@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import {
   action,
+  internalAction,
   internalMutation,
   internalQuery,
   type MutationCtx,
@@ -8,7 +9,13 @@ import {
   mutation,
   query,
 } from "./_generated/server";
-import { requireAdmin, requireUser, requireOwnership } from "./authz";
+import { makeFunctionReference } from "convex/server";
+import {
+  getActiveUserById,
+  requireAdmin,
+  requireUser,
+  requireOwnership,
+} from "./authz";
 import { clampLimit, validateDayKey } from "./validators";
 import { api } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
@@ -88,6 +95,27 @@ const LEGACY_TOKEN_REF_AUDIT_DEFAULT_MAX_ROWS = 500;
 const LEGACY_TOKEN_REF_AUDIT_MAX_ROWS = 5_000;
 const LEGACY_OPAQUE_TOKEN_REF_SCAN_LIMIT = 100;
 const LEGACY_UNSUPPORTED_CLEANUP_DEFAULT_BATCH_SIZE_PER_PROVIDER = 25;
+const INTEGRATION_REVOCATION_MAX_ATTEMPTS = 5;
+const INTEGRATION_REVOCATION_STALE_ATTEMPT_MS = 2 * 60 * 1000;
+const INTEGRATION_REVOCATION_JOB_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const INTEGRATION_REVOCATION_ACTION_REF = makeFunctionReference<"action">(
+  "integrations:processIntegrationRevocationInternal",
+);
+const INTEGRATION_REVOCATION_JOB_QUERY_REF = makeFunctionReference<"query">(
+  "integrations:getIntegrationRevocationJobInternal",
+);
+const INTEGRATION_REVOCATION_SECRET_QUERY_REF = makeFunctionReference<"query">(
+  "integrations:getIntegrationAccessTokenByRefInternal",
+);
+const INTEGRATION_REVOCATION_BEGIN_REF = makeFunctionReference<"mutation">(
+  "integrations:beginIntegrationRevocationAttemptInternal",
+);
+const INTEGRATION_REVOCATION_FINISH_REF = makeFunctionReference<"mutation">(
+  "integrations:finishIntegrationRevocationInternal",
+);
+const INTEGRATION_REVOCATION_RETRY_REF = makeFunctionReference<"mutation">(
+  "integrations:retryIntegrationRevocationInternal",
+);
 const LEGACY_UNSUPPORTED_CLEANUP_MAX_BATCH_SIZE_PER_PROVIDER = 250;
 const LEGACY_UNSUPPORTED_CLEANUP_DEFAULT_MAX_PASSES = 2;
 const LEGACY_UNSUPPORTED_CLEANUP_MAX_PASSES = 20;
@@ -190,6 +218,10 @@ type IntegrationRecord = {
   lastError?: string;
   scopes?: string[];
   tokenRef?: string;
+  remoteRevocationStatus?: "pending" | "revoked" | "unsupported" | "failed";
+  remoteRevocationAttempts?: number;
+  remoteRevocationNextAttemptAt?: number;
+  remoteRevocationErrorCode?: string;
   legacyUnsupported?: boolean;
   legacyUnsupportedAt?: number;
   legacyUnsupportedReason?: string;
@@ -1262,6 +1294,10 @@ async function connectIntegrationForUser(
   userId: Id<"user">,
   args: ConnectIntegrationArgs,
 ) {
+  if (!(await getActiveUserById(ctx, userId))) {
+    throw new Error("Cannot connect an integration while account deletion is active.");
+  }
+
   const provider = assertIntegrationProvider(args.provider);
   const plugin = getRequiredIntegrationPlugin(provider);
 
@@ -1286,6 +1322,15 @@ async function connectIntegrationForUser(
       q.eq("userId", userId).eq("provider", provider),
     )
     .unique();
+
+  if (
+    existing?.remoteRevocationStatus === "pending" &&
+    args.accessToken
+  ) {
+    throw new Error(
+      "Wait for provider disconnection to finish before reconnecting.",
+    );
+  }
 
   // Reuse the existing opaque token reference on reconnect so we mutate the
   // already-linked `integrationSecrets` row in place instead of orphaning it.
@@ -1312,6 +1357,10 @@ async function connectIntegrationForUser(
       scopes: args.scopes,
       tokenRef: nextTokenRef ?? existing.tokenRef,
       lastSyncAt: Date.now(),
+      remoteRevocationStatus: undefined,
+      remoteRevocationAttempts: undefined,
+      remoteRevocationNextAttemptAt: undefined,
+      remoteRevocationErrorCode: undefined,
     });
 
     logInfo("integration_connect.succeeded", {
@@ -1477,6 +1526,16 @@ export const consumeOAuthMobileHandoffInternal = internalMutation({
       return null;
     }
 
+    if (!(await getActiveUserById(ctx, row.userId))) {
+      logWarn("oauth_mobile_handoff.consume_account_deleting", {
+        area: "oauth_mobile_handoff",
+        userId: row.userId,
+        provider: row.provider,
+        codePrefix: normalized.slice(0, 8),
+      });
+      return null;
+    }
+
     await ctx.db.patch(row._id, { consumedAt: now });
 
     logInfo("oauth_mobile_handoff.consumed", {
@@ -1508,6 +1567,148 @@ export const purgeExpiredOAuthMobileHandoffsInternal = internalMutation({
   },
 });
 
+async function scheduleIntegrationRevocation(
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
+  integration: IntegrationRecord,
+): Promise<void> {
+  const provider = assertIntegrationProvider(integration.provider);
+  const plugin = getRequiredIntegrationPlugin(provider);
+  const now = Date.now();
+
+  if (plugin.connectionMode !== "oauth") {
+    if (integration.tokenRef) {
+      await deleteIntegrationSecretByRef(ctx.db as never, integration.tokenRef);
+    }
+    await ctx.db.patch(integration._id, {
+      status: "disconnected",
+      tokenRef: undefined,
+      remoteRevocationStatus: undefined,
+      remoteRevocationAttempts: undefined,
+      remoteRevocationNextAttemptAt: undefined,
+      remoteRevocationErrorCode: undefined,
+      lastError: undefined,
+    });
+    return;
+  }
+
+  const recentJobs = await ctx.db
+    .query("integrationRevocationJobs")
+    .withIndex("by_integration_createdAt", (q) =>
+      q.eq("integrationId", integration._id),
+    )
+    .order("desc")
+    .take(10);
+  const activeJob = recentJobs.find(
+    (job) => job.status === "pending" || job.status === "processing",
+  );
+  if (activeJob) {
+    await ctx.db.patch(integration._id, {
+      status: "disconnected",
+      tokenRef: undefined,
+      remoteRevocationStatus: "pending",
+      remoteRevocationAttempts: activeJob.attempts,
+      remoteRevocationNextAttemptAt:
+        activeJob.nextAttemptAt ?? activeJob.updatedAt,
+      remoteRevocationErrorCode: activeJob.lastErrorCode,
+    });
+    return;
+  }
+
+  const tokenRef = integration.tokenRef;
+  if (provider === "spotify") {
+    if (tokenRef) {
+      await deleteIntegrationSecretByRef(ctx.db as never, tokenRef);
+    }
+    await ctx.db.insert("integrationRevocationJobs", {
+      userId: integration.userId,
+      integrationId: integration._id,
+      provider,
+      status: "unsupported",
+      attempts: 0,
+      lastErrorCode: "provider_revocation_not_available",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await ctx.db.patch(integration._id, {
+      status: "disconnected",
+      tokenRef: undefined,
+      remoteRevocationStatus: "unsupported",
+      remoteRevocationAttempts: 0,
+      remoteRevocationNextAttemptAt: undefined,
+      remoteRevocationErrorCode: "provider_revocation_not_available",
+      lastError: undefined,
+    });
+    return;
+  }
+
+  if (!tokenRef) {
+    await ctx.db.patch(integration._id, {
+      status: "disconnected",
+      remoteRevocationStatus: "failed",
+      remoteRevocationAttempts: 0,
+      remoteRevocationNextAttemptAt: undefined,
+      remoteRevocationErrorCode: "credential_missing",
+      lastError: undefined,
+    });
+    return;
+  }
+
+  const jobId = await ctx.db.insert("integrationRevocationJobs", {
+    userId: integration.userId,
+    integrationId: integration._id,
+    provider,
+    tokenRef,
+    status: "pending",
+    attempts: 0,
+    nextAttemptAt: now,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await ctx.db.patch(integration._id, {
+    status: "disconnected",
+    tokenRef: undefined,
+    remoteRevocationStatus: "pending",
+    remoteRevocationAttempts: 0,
+    remoteRevocationNextAttemptAt: now,
+    remoteRevocationErrorCode: undefined,
+    lastError: undefined,
+  });
+
+  try {
+    await ctx.scheduler.runAfter(0, INTEGRATION_REVOCATION_ACTION_REF, {
+      jobId,
+    });
+  } catch (error) {
+    logWarn("integration_revocation.schedule_failed", {
+      status: "degraded",
+      integrationId: integration._id,
+      provider,
+      errorType: error instanceof Error ? error.name : "unknown",
+    });
+  }
+}
+
+export async function enqueueUserIntegrationRevocations(
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
+  userId: Id<"user">,
+): Promise<void> {
+  const integrations = await ctx.db
+    .query("integrations")
+    .withIndex("by_user_provider", (q) => q.eq("userId", userId))
+    .collect();
+
+  for (const integration of integrations) {
+    if (
+      integration.status === "connected" &&
+      !integration.legacyUnsupported &&
+      !isUnsupportedProvider(integration.provider)
+    ) {
+      await scheduleIntegrationRevocation(ctx, integration);
+    }
+  }
+}
+
 // ── Disconnect an integration ───────────────────────────────
 export const disconnectIntegration = mutation({
   args: {
@@ -1523,14 +1724,7 @@ export const disconnectIntegration = mutation({
     }
 
     requireOwnership(user, integration.userId);
-
-    await ctx.db.patch(args.integrationId, {
-      status: "disconnected" as const,
-      lastError: args.reason,
-      tokenRef: undefined,
-    });
-
-    await deleteIntegrationSecretByRef(ctx.db as never, integration.tokenRef);
+    await scheduleIntegrationRevocation(ctx, integration);
 
     return await ctx.db.get(args.integrationId);
   },
@@ -1620,6 +1814,327 @@ export const getIntegrationAccessTokenByRefInternal = internalQuery({
   },
 });
 
+export const getIntegrationRevocationJobInternal = internalQuery({
+  args: { jobId: v.id("integrationRevocationJobs") },
+  handler: async (ctx, args) => await ctx.db.get(args.jobId),
+});
+
+export const beginIntegrationRevocationAttemptInternal = internalMutation({
+  args: { jobId: v.id("integrationRevocationJobs") },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (
+      !job ||
+      job.status !== "pending" ||
+      (job.nextAttemptAt !== undefined && job.nextAttemptAt > Date.now()) ||
+      !job.tokenRef
+    ) {
+      return null;
+    }
+
+    const attempts = job.attempts + 1;
+    await ctx.db.patch(job._id, {
+      status: "processing",
+      attempts,
+      updatedAt: Date.now(),
+    });
+
+    return {
+      userId: job.userId,
+      provider: job.provider,
+      tokenRef: job.tokenRef,
+      attempts,
+    };
+  },
+});
+
+async function finalizeIntegrationRevocation(
+  ctx: MutationCtx,
+  jobId: Id<"integrationRevocationJobs">,
+  status: "revoked" | "failed",
+  errorCode?: string,
+): Promise<void> {
+  const job = await ctx.db.get(jobId);
+  if (!job) return;
+
+  if (job.tokenRef) {
+    await deleteIntegrationSecretByRef(ctx.db as never, job.tokenRef);
+  }
+
+  const now = Date.now();
+  await ctx.db.patch(job._id, {
+    status,
+    tokenRef: undefined,
+    nextAttemptAt: undefined,
+    lastErrorCode: errorCode,
+    updatedAt: now,
+  });
+
+  if (job.integrationId) {
+    const integration = await ctx.db.get(job.integrationId);
+    if (integration?.status === "disconnected" && !integration.tokenRef) {
+      await ctx.db.patch(integration._id, {
+        remoteRevocationStatus: status,
+        remoteRevocationAttempts: job.attempts,
+        remoteRevocationNextAttemptAt: undefined,
+        remoteRevocationErrorCode: errorCode,
+      });
+    }
+  }
+}
+
+export const finishIntegrationRevocationInternal = internalMutation({
+  args: {
+    jobId: v.id("integrationRevocationJobs"),
+    status: v.union(v.literal("revoked"), v.literal("failed")),
+    errorCode: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await finalizeIntegrationRevocation(
+      ctx,
+      args.jobId,
+      args.status,
+      args.errorCode,
+    );
+    return { success: true };
+  },
+});
+
+export const retryIntegrationRevocationInternal = internalMutation({
+  args: {
+    jobId: v.id("integrationRevocationJobs"),
+    errorCode: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.status !== "processing") {
+      return { scheduled: false, terminal: true };
+    }
+
+    if (job.attempts >= INTEGRATION_REVOCATION_MAX_ATTEMPTS) {
+      await finalizeIntegrationRevocation(
+        ctx,
+        job._id,
+        "failed",
+        "provider_unavailable_after_retries",
+      );
+      return { scheduled: false, terminal: true };
+    }
+
+    const delayMs = Math.min(
+      12 * 60 * 60 * 1000,
+      60_000 * 2 ** Math.max(job.attempts - 1, 0),
+    );
+    const nextAttemptAt = Date.now() + delayMs;
+    await ctx.db.patch(job._id, {
+      status: "pending",
+      nextAttemptAt,
+      lastErrorCode: args.errorCode,
+      updatedAt: Date.now(),
+    });
+
+    try {
+      await ctx.scheduler.runAfter(
+        delayMs,
+        INTEGRATION_REVOCATION_ACTION_REF,
+        { jobId: job._id },
+      );
+    } catch (error) {
+      logWarn("integration_revocation.retry_schedule_failed", {
+        status: "degraded",
+        jobId: job._id,
+        provider: job.provider,
+        errorType: error instanceof Error ? error.name : "unknown",
+      });
+    }
+
+    return { scheduled: true, terminal: false, nextAttemptAt };
+  },
+});
+
+export const processIntegrationRevocationInternal = internalAction({
+  args: { jobId: v.id("integrationRevocationJobs") },
+  handler: async (ctx, args) => {
+    const job = (await ctx.runQuery(INTEGRATION_REVOCATION_JOB_QUERY_REF, {
+      jobId: args.jobId,
+    })) as {
+      _id: Id<"integrationRevocationJobs">;
+      status: string;
+      provider: string;
+      attempts: number;
+    } | null;
+    if (!job || job.status !== "pending") {
+      return { processed: false };
+    }
+
+    const attempt = (await ctx.runMutation(
+      INTEGRATION_REVOCATION_BEGIN_REF,
+      { jobId: args.jobId },
+    )) as {
+      userId: Id<"user">;
+      provider: string;
+      tokenRef: string;
+      attempts: number;
+    } | null;
+    if (!attempt) return { processed: false };
+
+    let tokens: {
+      accessToken: string;
+      refreshToken?: string;
+    } | null;
+    try {
+      tokens = (await ctx.runQuery(INTEGRATION_REVOCATION_SECRET_QUERY_REF, {
+        tokenRef: attempt.tokenRef,
+        userId: attempt.userId,
+        provider: attempt.provider,
+      })) as { accessToken: string; refreshToken?: string } | null;
+    } catch {
+      await ctx.runMutation(INTEGRATION_REVOCATION_FINISH_REF, {
+        jobId: args.jobId,
+        status: "failed",
+        errorCode: "credential_unavailable",
+      });
+      return { processed: true, status: "failed" };
+    }
+
+    if (!tokens) {
+      await ctx.runMutation(INTEGRATION_REVOCATION_FINISH_REF, {
+        jobId: args.jobId,
+        status: "failed",
+        errorCode: "credential_missing",
+      });
+      return { processed: true, status: "failed" };
+    }
+
+    if (attempt.provider !== "google_calendar" &&
+        attempt.provider !== "google_fit" &&
+        attempt.provider !== "gmail_summary") {
+      await ctx.runMutation(INTEGRATION_REVOCATION_FINISH_REF, {
+        jobId: args.jobId,
+        status: "failed",
+        errorCode: "provider_revocation_not_available",
+      });
+      return { processed: true, status: "failed" };
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8_000);
+    try {
+      const response = await fetch("https://oauth2.googleapis.com/revoke", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          token: tokens.refreshToken ?? tokens.accessToken,
+        }),
+        signal: controller.signal,
+      });
+
+      if (response.ok) {
+        await ctx.runMutation(INTEGRATION_REVOCATION_FINISH_REF, {
+          jobId: args.jobId,
+          status: "revoked",
+        });
+        return { processed: true, status: "revoked" };
+      }
+
+      if (response.status === 429 || response.status >= 500) {
+        const retry = await ctx.runMutation(INTEGRATION_REVOCATION_RETRY_REF, {
+          jobId: args.jobId,
+          errorCode: `provider_http_${response.status}`,
+        });
+        return {
+          processed: true,
+          status: retry.terminal ? "failed" : "pending",
+        };
+      }
+
+      await ctx.runMutation(INTEGRATION_REVOCATION_FINISH_REF, {
+        jobId: args.jobId,
+        status: "failed",
+        errorCode: "provider_rejected_revocation",
+      });
+      return { processed: true, status: "failed" };
+    } catch {
+      const retry = await ctx.runMutation(INTEGRATION_REVOCATION_RETRY_REF, {
+        jobId: args.jobId,
+        errorCode: "provider_network_error",
+      });
+      return {
+        processed: true,
+        status: retry.terminal ? "failed" : "pending",
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
+  },
+});
+
+export const scheduleDueIntegrationRevocationsInternal = internalMutation({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const limit = Math.max(1, Math.min(500, args.limit ?? 100));
+    const dueJobs = await ctx.db
+      .query("integrationRevocationJobs")
+      .withIndex("by_status_nextAttemptAt", (q) =>
+        q.eq("status", "pending").lte("nextAttemptAt", now),
+      )
+      .take(limit);
+    const staleJobs = await ctx.db
+      .query("integrationRevocationJobs")
+      .withIndex("by_status_updatedAt", (q) =>
+        q
+          .eq("status", "processing")
+          .lt("updatedAt", now - INTEGRATION_REVOCATION_STALE_ATTEMPT_MS),
+      )
+      .take(limit);
+
+    for (const job of staleJobs) {
+      await ctx.db.patch(job._id, {
+        status: "pending",
+        nextAttemptAt: now,
+        updatedAt: now,
+        lastErrorCode: "attempt_interrupted",
+      });
+    }
+
+    const jobsToSchedule = [...dueJobs, ...staleJobs];
+    for (const job of jobsToSchedule) {
+      try {
+        await ctx.scheduler.runAfter(0, INTEGRATION_REVOCATION_ACTION_REF, {
+          jobId: job._id,
+        });
+      } catch (error) {
+        logWarn("integration_revocation.schedule_failed", {
+          status: "degraded",
+          jobId: job._id,
+          provider: job.provider,
+          errorType: error instanceof Error ? error.name : "unknown",
+        });
+      }
+    }
+
+    let cleanedJobs = 0;
+    const terminalCutoff = now - INTEGRATION_REVOCATION_JOB_RETENTION_MS;
+    for (const status of ["revoked", "unsupported", "failed"] as const) {
+      const terminalJobs = await ctx.db
+        .query("integrationRevocationJobs")
+        .withIndex("by_status_updatedAt", (q) =>
+          q.eq("status", status).lt("updatedAt", terminalCutoff),
+        )
+        .take(limit);
+      for (const job of terminalJobs) {
+        await ctx.db.delete(job._id);
+        cleanedJobs += 1;
+      }
+    }
+
+    return { scheduled: jobsToSchedule.length, cleanedJobs };
+  },
+});
+
 export const storeIntegrationSecretInternal = internalMutation({
   args: {
     userId: v.id("user"),
@@ -1631,6 +2146,10 @@ export const storeIntegrationSecretInternal = internalMutation({
     existingTokenRef: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    if (!(await getActiveUserById(ctx, args.userId))) {
+      throw new Error("Cannot store integration secrets for an inactive user");
+    }
+
     const provider = assertIntegrationProvider(args.provider);
 
     return await upsertIntegrationSecret(ctx.db as never, {
@@ -1656,7 +2175,15 @@ export const updateIntegrationTokenRefInternal = internalMutation({
       "updateIntegrationTokenRefInternal.tokenRef",
     );
 
-    await ctx.db.patch(args.integrationId, { tokenRef });
+    const integration = await ctx.db.get(args.integrationId);
+    if (
+      !integration ||
+      !(await getActiveUserById(ctx, integration.userId))
+    ) {
+      throw new Error("Cannot update token reference for an inactive user");
+    }
+
+    await ctx.db.patch(integration._id, { tokenRef });
     return { success: true };
   },
 });
@@ -1668,6 +2195,10 @@ export const beginIntegrationSyncRunInternal = internalMutation({
     dayKey: v.string(),
   },
   handler: async (ctx, args) => {
+    if (!(await getActiveUserById(ctx, args.userId))) {
+      throw new Error("Cannot start an integration sync for an inactive user");
+    }
+
     const provider = assertIntegrationProvider(args.provider);
     const now = Date.now();
 
@@ -1734,6 +2265,12 @@ export const completeIntegrationSyncRunInternal = internalMutation({
     lastError: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    if (!(await getActiveUserById(ctx, args.userId))) {
+      throw new Error(
+        "Cannot complete an integration sync for an inactive user",
+      );
+    }
+
     const provider = assertIntegrationProvider(args.provider);
 
     const existingRun = await ctx.db
@@ -2358,6 +2895,12 @@ export const upsertIntegrationDailyDataInternal = internalMutation({
     context: v.optional(integrationDailyContextValidator),
   },
   handler: async (ctx, args) => {
+    if (!(await getActiveUserById(ctx, args.userId))) {
+      throw new Error(
+        "Cannot store integration data for an inactive user",
+      );
+    }
+
     validateDayKey(args.dayKey);
     const provider = assertDailyDataProvider(args.provider);
 

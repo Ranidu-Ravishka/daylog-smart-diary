@@ -25,8 +25,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       </div>
 
       <header className="sticky top-0 z-50 border-b border-border/50 bg-background/70 backdrop-blur-xl">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
+        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-3 px-3 sm:px-4 md:px-6 lg:px-8">
+          <div className="flex items-center gap-2 sm:gap-3">
             <Link
               href="/"
               className="hidden rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:inline-flex"
@@ -36,11 +36,12 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             </Link>
             <Link
               href="/dashboard"
-              className="text-[15px] font-semibold tracking-[-0.03em] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md"
+              className="rounded-md px-1 py-1 text-[15px] font-semibold tracking-[-0.03em] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               DayLog
             </Link>
           </div>
+
           <UserButton
             afterSignOutUrl="/"
             appearance={{
@@ -52,8 +53,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <div className="mx-auto flex min-h-[calc(100vh-3.5rem)] max-w-6xl flex-col lg:flex-row lg:gap-6 lg:px-6 lg:pb-10 lg:pt-6">
-        <aside className="hidden shrink-0 lg:block lg:w-56 xl:w-60">
+      <div className="mx-auto flex min-h-[calc(100vh-3.5rem)] max-w-7xl flex-col px-0 md:flex-row md:gap-5 md:px-4 md:pb-8 md:pt-6 lg:gap-6 lg:px-6">
+        <aside className="hidden shrink-0 md:block md:w-52 lg:w-56 xl:w-60">
           <nav
             className="sticky top-24 space-y-1 rounded-2xl border border-border/50 bg-card/50 p-2 shadow-sm backdrop-blur-md dark:bg-card/40"
             aria-label="Dashboard"
@@ -68,7 +69,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                   variant="ghost"
                   size="sm"
                   className={cn(
-                    "h-10 w-full justify-start gap-2.5 rounded-xl px-3 font-medium text-muted-foreground",
+                    "h-11 w-full justify-start gap-2.5 rounded-xl px-3 font-medium text-muted-foreground",
                     isActive &&
                       "bg-primary/10 text-foreground shadow-none dark:bg-primary/15",
                   )}
@@ -84,9 +85,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </nav>
         </aside>
 
-        <div className="fixed bottom-0 inset-x-0 z-50 border-t border-border/60 bg-background/90 px-1 py-1.5 backdrop-blur-xl lg:hidden">
+        <div className="fixed inset-x-0 bottom-0 z-50 border-t border-border/60 bg-background/90 px-1 py-1.5 pb-[calc(0.5rem+env(safe-area-inset-bottom))] backdrop-blur-xl md:hidden">
           <nav
-            className="mx-auto flex max-w-md justify-around"
+            className="mx-auto flex max-w-md justify-around gap-1"
             aria-label="Dashboard mobile"
           >
             {navItems.map((item) => {
@@ -106,7 +107,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                 >
                   <span
                     className={cn(
-                      "flex h-9 w-9 items-center justify-center rounded-xl border transition-colors",
+                      "flex h-10 w-10 items-center justify-center rounded-xl border transition-colors",
                       isActive
                         ? "border-primary/35 bg-primary/10 text-primary"
                         : "border-transparent bg-muted/40",
@@ -121,7 +122,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </nav>
         </div>
 
-        <main className="relative flex-1 px-4 pb-28 pt-6 sm:px-6 sm:pb-8 md:px-8 lg:rounded-3xl lg:border lg:border-border/50 lg:bg-card/35 lg:px-10 lg:py-10 lg:shadow-soft lg:backdrop-blur-md dark:lg:bg-card/25">
+        <main className="relative flex-1 px-3 pb-28 pt-4 sm:px-5 sm:pb-8 md:px-2 lg:rounded-[1.75rem] lg:border lg:border-border/50 lg:bg-card/35 lg:px-8 lg:py-8 lg:shadow-soft lg:backdrop-blur-md dark:lg:bg-card/25">
           {children}
         </main>
       </div>

@@ -501,6 +501,62 @@ describe("users behavior", () => {
           flags: [],
         },
       ],
+      aiSummaryAttempts: [
+        {
+          _id: "attempt_target_001",
+          _creationTime: 36,
+          userId: targetUserId,
+          dayKey: "2026-04-01",
+          attemptChainId: "attempt_chain_target_001",
+          generationEventId: targetSummaryEventId,
+          attemptNumber: 1,
+          strategy: "default",
+          evaluationFlags: [],
+          createdAt: 1,
+        },
+      ],
+      dailyFeatureVectors: [
+        {
+          _id: "feature_target_001",
+          _creationTime: 37,
+          userId: targetUserId,
+          dayKey: "2026-04-01",
+          vectorVersion: 1,
+          features: {
+            memoryCount: 1,
+            noteCount: 0,
+            peopleTagCount: 0,
+            highlightCount: 0,
+            integrationProviderCount: 0,
+          },
+          sourceDays: 1,
+          generatedAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      nextBestDayRecommendations: [
+        {
+          _id: "recommendation_target_001",
+          _creationTime: 38,
+          userId: targetUserId,
+          targetDayKey: "2026-04-02",
+          generatedAt: 1,
+          basedOnDays: 1,
+          confidence: 0.5,
+          recommendationType: "stabilize",
+          recommendations: [],
+          rationale: [],
+          trend: {
+            ratingTrend: "flat",
+            memoryTrend: "flat",
+            stepsTrend: "flat",
+            sleepTrend: "flat",
+            screenTimeTrend: "flat",
+            spendingTrend: "flat",
+            socialTrend: "flat",
+          },
+        },
+      ],
       integrationHealthEvents: [
         {
           _id: "health_target_001",
@@ -619,6 +675,9 @@ describe("users behavior", () => {
     expect(db.getTable("restoreJobs")).toHaveLength(0);
     expect(db.getTable("summaryGenerationEvents")).toHaveLength(0);
     expect(db.getTable("summaryQualityEvaluations")).toHaveLength(0);
+    expect(db.getTable("aiSummaryAttempts")).toHaveLength(0);
+    expect(db.getTable("dailyFeatureVectors")).toHaveLength(0);
+    expect(db.getTable("nextBestDayRecommendations")).toHaveLength(0);
     expect(db.getTable("integrationHealthEvents")).toHaveLength(0);
     expect(db.getTable("userPreferences")).toHaveLength(0);
     expect(db.getTable("auditLogs")).toHaveLength(0);

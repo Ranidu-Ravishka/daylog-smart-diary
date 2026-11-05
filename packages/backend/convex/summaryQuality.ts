@@ -1,8 +1,13 @@
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { internalMutation, mutation, query } from "./_generated/server";
-import { requireAdmin } from "./authz";
+import {
+  internalMutation,
+  mutation,
+  query,
+} from "./_generated/server";
+import { getActiveUserById, requireAdmin } from "./authz";
+import { internal } from "./_generated/api";
 import { getSummaryLowQualityThreshold } from "./runtimeConfig";
 import { validateDayKey } from "./validators";
 
@@ -228,8 +233,7 @@ export function evaluateSummaryQuality(args: {
 
 function toFailureReason(value: string | undefined): string | undefined {
   if (!value) return undefined;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed.slice(0, 220) : undefined;
+  return "generation_failed";
 }
 
 export const recordSummaryGenerationEvaluationInternal = internalMutation({
@@ -249,6 +253,9 @@ export const recordSummaryGenerationEvaluationInternal = internalMutation({
   },
   handler: async (ctx, args) => {
     validateDayKey(args.dayKey);
+    if (!(await getActiveUserById(ctx, args.userId))) {
+      throw new Error("Cannot record a summary for an inactive user");
+    }
 
     const now = Date.now();
     const failureReason = toFailureReason(args.failureReason);
@@ -258,12 +265,9 @@ export const recordSummaryGenerationEvaluationInternal = internalMutation({
       dayKey: args.dayKey,
       modelProvider: args.modelProvider,
       modelName: args.modelName,
-      modelInput: args.modelInput.slice(0, 100_000),
-      generatedStory: args.generatedStory,
-      generatedHighlights: args.generatedHighlights,
-      sourcesUsed: args.sourcesUsed,
+      modelInputBytes: new TextEncoder().encode(args.modelInput).length,
       success: args.success,
-      failureReason,
+      failureReason: args.success ? undefined : "generation_failed",
       summaryId: args.summaryId,
       attemptChainId: args.attemptChainId,
       createdAt: now,
@@ -276,7 +280,7 @@ export const recordSummaryGenerationEvaluationInternal = internalMutation({
         actorType: "user",
         actorUserId: args.userId,
         target: args.dayKey,
-        details: failureReason,
+        details: "generation_failed",
         at: now,
       });
 
@@ -400,10 +404,11 @@ export const listSummaryAttemptsByChainForAdmin = query({
       .order("asc")
       .collect();
 
-    // Never expose raw model output in admin list surfaces.
+    // Keep legacy output and prompt-derived hashes out of admin list surfaces.
     return attempts.map((attempt) => ({
       ...attempt,
       outputSummary: undefined,
+      inputHash: undefined,
     }));
   },
 });
@@ -422,7 +427,6 @@ export const recordSummaryAttemptInternal = internalMutation({
       v.literal("source_grounded"),
       v.literal("structured_output"),
     ),
-    inputHash: v.string(),
     outputSummary: v.optional(v.string()),
     qualityScore: v.optional(v.number()),
     evaluationFlags: v.array(v.string()),
@@ -430,6 +434,10 @@ export const recordSummaryAttemptInternal = internalMutation({
   },
   handler: async (ctx, args) => {
     validateDayKey(args.dayKey);
+    if (!(await getActiveUserById(ctx, args.userId))) {
+      throw new Error("Cannot record a summary attempt for an inactive user");
+    }
+
     return await ctx.db.insert("aiSummaryAttempts", {
       userId: args.userId,
       dayKey: args.dayKey,
@@ -437,7 +445,6 @@ export const recordSummaryAttemptInternal = internalMutation({
       generationEventId: args.generationEventId,
       attemptNumber: Math.max(1, Math.floor(args.attemptNumber)),
       strategy: args.strategy,
-      inputHash: args.inputHash.slice(0, 128),
       // Do not persist raw generated text in attempt telemetry records.
       outputSummary: undefined,
       qualityScore: args.qualityScore,
@@ -457,6 +464,9 @@ export const markSummaryGenerationBestAttemptInternal = internalMutation({
     const event = await ctx.db.get(args.generationEventId);
     if (!event) {
       throw new Error("Summary generation event not found");
+    }
+    if (!(await getActiveUserById(ctx, event.userId))) {
+      throw new Error("Cannot update a summary for an inactive user");
     }
     const attempt = await ctx.db.get(args.selectedBestAttemptId);
     if (!attempt) {
@@ -552,3 +562,146 @@ export const backfillSummaryQualityEvaluations = mutation({
     };
   },
 });
+
+export const redactLegacySummaryGenerationEventContentInternal =
+  internalMutation({
+    args: {
+      cursor: v.optional(v.string()),
+      batchSize: v.optional(v.number()),
+    },
+    handler: async (ctx, args) => {
+      const batchSize = Math.max(1, Math.min(500, args.batchSize ?? 100));
+      const completed = await ctx.db
+        .query("platformAuditEvents")
+        .withIndex("by_category_action_at", (q) =>
+          q
+            .eq("category", "summary_quality")
+            .eq("action", "legacy_event_content_redaction_completed"),
+        )
+        .take(1);
+      if (completed.length > 0) {
+        return { redacted: 0, scanned: 0, done: true };
+      }
+
+      const page = await ctx.db
+        .query("summaryGenerationEvents")
+        .withIndex("by_createdAt")
+        .order("asc")
+        .paginate({
+          numItems: batchSize,
+          cursor: args.cursor ?? null,
+        });
+
+      let redacted = 0;
+      for (const event of page.page) {
+        if (
+          event.modelInput !== undefined ||
+          event.generatedStory !== undefined ||
+          event.generatedHighlights !== undefined ||
+          event.sourcesUsed !== undefined ||
+          event.failureReason !== undefined
+        ) {
+          await ctx.db.patch(event._id, {
+            modelInput: undefined,
+            generatedStory: undefined,
+            generatedHighlights: undefined,
+            sourcesUsed: undefined,
+            failureReason: event.success ? undefined : "generation_failed",
+            privacyRedactedAt: Date.now(),
+          });
+          redacted += 1;
+        }
+      }
+
+      if (page.isDone) {
+        await ctx.db.insert("platformAuditEvents", {
+          category: "summary_quality",
+          action: "legacy_event_content_redaction_completed",
+          actorType: "system",
+          target: "summaryGenerationEvents",
+          details: "Legacy prompt/output content redaction completed",
+          at: Date.now(),
+        });
+      } else {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.summaryQuality.redactLegacySummaryGenerationEventContentInternal,
+          {
+            cursor: page.continueCursor,
+            batchSize,
+          },
+        );
+      }
+
+      return {
+        redacted,
+        scanned: page.page.length,
+        done: page.isDone,
+      };
+    },
+  });
+
+export const removeLegacyAiSummaryAttemptInputHashesInternal =
+  internalMutation({
+    args: {
+      cursor: v.optional(v.string()),
+      batchSize: v.optional(v.number()),
+    },
+    handler: async (ctx, args) => {
+      const batchSize = Math.max(1, Math.min(500, args.batchSize ?? 100));
+      const completed = await ctx.db
+        .query("platformAuditEvents")
+        .withIndex("by_category_action_at", (q) =>
+          q
+            .eq("category", "summary_quality")
+            .eq("action", "legacy_ai_attempt_input_hash_cleanup_completed"),
+        )
+        .take(1);
+      if (completed.length > 0) {
+        return { removed: 0, scanned: 0, done: true };
+      }
+
+      const page = await ctx.db
+        .query("aiSummaryAttempts")
+        .withIndex("by_createdAt")
+        .order("asc")
+        .paginate({
+          numItems: batchSize,
+          cursor: args.cursor ?? null,
+        });
+
+      let removed = 0;
+      for (const attempt of page.page) {
+        if (attempt.inputHash !== undefined) {
+          await ctx.db.patch(attempt._id, { inputHash: undefined });
+          removed += 1;
+        }
+      }
+
+      if (page.isDone) {
+        await ctx.db.insert("platformAuditEvents", {
+          category: "summary_quality",
+          action: "legacy_ai_attempt_input_hash_cleanup_completed",
+          actorType: "system",
+          target: "aiSummaryAttempts",
+          details: "Legacy inputHash cleanup completed",
+          at: Date.now(),
+        });
+      } else {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.summaryQuality.removeLegacyAiSummaryAttemptInputHashesInternal,
+          {
+            cursor: page.continueCursor,
+            batchSize,
+          },
+        );
+      }
+
+      return {
+        removed,
+        scanned: page.page.length,
+        done: page.isDone,
+      };
+    },
+  });

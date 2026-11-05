@@ -170,6 +170,104 @@ describe("oauth mobile handoff behavior", () => {
     ).toBeNull();
   });
 
+  it("rejects a pending handoff after account deletion is requested", async () => {
+    const db = seededDb();
+    const begin = handler<{ provider: string }, { handoffCode: string }>(
+      integrationsModule.beginOAuthMobileHandoff,
+    );
+    const consume = handler<
+      { code: string },
+      { userId: Id<"user">; provider: string } | null
+    >(integrationsModule.consumeOAuthMobileHandoffInternal);
+
+    const { handoffCode } = await begin(createAuthCtx(db, "clerk_member_001"), {
+      provider: "spotify",
+    });
+    await db.patch(USER_ID, { accountStatus: "deletion_requested" });
+
+    expect(await consume(createAuthCtx(db, null), { code: handoffCode })).toBe(
+      null,
+    );
+    expect(db.getTable("oauthMobileHandoffs")).toHaveLength(1);
+    expect(
+      (db.getTable("oauthMobileHandoffs")[0] as unknown as {
+        consumedAt?: number;
+      }).consumedAt,
+    ).toBeUndefined();
+  });
+
+  it("does not persist OAuth credentials while account deletion is active", async () => {
+    const db = seededDb();
+    const connect = handler<
+      {
+        userId: Id<"user">;
+        provider: string;
+        accessToken: string;
+        refreshToken?: string;
+      },
+      unknown
+    >(integrationsModule.connectIntegrationWithOAuthTokensInternal);
+    await db.patch(USER_ID, { accountStatus: "deletion_requested" });
+
+    await expect(
+      connect(createAuthCtx(db, null), {
+        userId: USER_ID,
+        provider: "spotify",
+        accessToken: "synthetic_access_token",
+        refreshToken: "synthetic_refresh_token",
+      }),
+    ).rejects.toThrow("Cannot connect an integration while account deletion is active.");
+
+    expect(db.getTable("integrations")).toHaveLength(0);
+    expect(db.getTable("integrationSecrets")).toHaveLength(0);
+  });
+
+  it("does not persist OAuth credentials for a user with an active deletion job", async () => {
+    const db = seededDb();
+    const connect = handler<
+      {
+        userId: Id<"user">;
+        provider: string;
+        accessToken: string;
+      },
+      unknown
+    >(integrationsModule.connectIntegrationWithOAuthTokensInternal);
+    await db.insert("userDeletionJobs", {
+      userId: USER_ID,
+      clerkUserId: "clerk_member_001",
+      status: "processing",
+      stage: "integrationSecrets",
+      processedBatches: 1,
+      checkpoints: 1,
+      progress: {
+        deletedMemories: 0,
+        deletedSummaries: 0,
+        deletedDays: 0,
+        deletedIntegrations: 0,
+        deletedPreferences: 0,
+        deletedAuditLogs: 0,
+        deletedMemoryMedia: 0,
+        deletedIntegrationDailyData: 0,
+        deletedIntegrationSecrets: 0,
+        deletedIntegrationSyncRuns: 0,
+        deletedSummaryGenerationQuotas: 0,
+      },
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    await expect(
+      connect(createAuthCtx(db, null), {
+        userId: USER_ID,
+        provider: "spotify",
+        accessToken: "synthetic_access_token",
+      }),
+    ).rejects.toThrow("Cannot connect an integration while account deletion is active.");
+
+    expect(db.getTable("integrations")).toHaveLength(0);
+    expect(db.getTable("integrationSecrets")).toHaveLength(0);
+  });
+
   it("purges expired handoff rows and leaves fresh ones", async () => {
     const db = seededDb();
     const begin = handler<{ provider: string }, { handoffCode: string }>(

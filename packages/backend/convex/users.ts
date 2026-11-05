@@ -28,6 +28,7 @@ import {
   findLatestUserDeletionJobByClerkUserId,
   findLatestUserDeletionJobByUserId,
 } from "./userDeletionJobQueries";
+import { enqueueUserIntegrationRevocations } from "./integrations";
 
 const DEFAULT_USER_DELETION_BATCH_SIZE = 128;
 const DEFAULT_ADMIN_USERS_PAGE_LIMIT = 50;
@@ -172,8 +173,11 @@ function emptyUserDeletionProgress(): UserDeletionProgress {
     deletedIntegrationHealthEvents: 0,
     deletedExportJobs: 0,
     deletedRestoreJobs: 0,
+    deletedAiSummaryAttempts: 0,
     deletedSummaryGenerationEvents: 0,
     deletedSummaryQualityEvaluations: 0,
+    deletedDailyFeatureVectors: 0,
+    deletedNextBestDayRecommendations: 0,
     deletedSummaryGenerationQuotas: 0,
   };
 }
@@ -223,12 +227,21 @@ function mergeUserDeletionProgress(
       safeProgressCount(base.deletedExportJobs) + delta.deletedExportJobs,
     deletedRestoreJobs:
       safeProgressCount(base.deletedRestoreJobs) + delta.deletedRestoreJobs,
+    deletedAiSummaryAttempts:
+      safeProgressCount(base.deletedAiSummaryAttempts) +
+      delta.deletedAiSummaryAttempts,
     deletedSummaryGenerationEvents:
       safeProgressCount(base.deletedSummaryGenerationEvents) +
       delta.deletedSummaryGenerationEvents,
     deletedSummaryQualityEvaluations:
       safeProgressCount(base.deletedSummaryQualityEvaluations) +
       delta.deletedSummaryQualityEvaluations,
+    deletedDailyFeatureVectors:
+      safeProgressCount(base.deletedDailyFeatureVectors) +
+      delta.deletedDailyFeatureVectors,
+    deletedNextBestDayRecommendations:
+      safeProgressCount(base.deletedNextBestDayRecommendations) +
+      delta.deletedNextBestDayRecommendations,
     deletedSummaryGenerationQuotas:
       safeProgressCount(base.deletedSummaryGenerationQuotas) +
       delta.deletedSummaryGenerationQuotas,
@@ -333,6 +346,8 @@ async function enqueueUserDeletionJob(
       stage: existing.stage,
     };
   }
+
+  await enqueueUserIntegrationRevocations(ctx, args.userId);
 
   const now = Date.now();
   const initialStage = USER_CASCADE_DELETION_STAGES[0];
@@ -556,11 +571,7 @@ export const runUserDeletionCascadeJobStepInternal = internalMutation({
         const userProfileImageStorageId = (userAtFinalize as any)
           .profileImageStorageId as string | undefined;
         if (typeof userProfileImageStorageId === "string") {
-          try {
-            await ctx.storage.delete(userProfileImageStorageId as any);
-          } catch {
-            // Ignore profile image cleanup failures during final user delete.
-          }
+          await ctx.storage.delete(userProfileImageStorageId as any);
         }
 
         const keepTombstoneUntilClerkDeleted =

@@ -23,10 +23,18 @@ export default function PrivacyPage() {
               required to operate the app.
             </p>
             <p>
-              DayLog can collect optional foreground location signals only when
-              you explicitly enable location tracking in mobile settings and
-              keep the app open. DayLog does not collect background location
-              traces or call-log data.
+              On mobile, you can opt in to foreground location context and
+              controlled background location context. Background tracking
+              requires explicit in-app consent, the relevant settings, OS
+              permissions, and availability under DayLog&apos;s runtime policy.
+              DayLog derives day-level movement and stay context from location
+              samples; background tracking can collect this context while the
+              app is closed.
+            </p>
+            <p>
+              On supported Android devices, you can separately opt in to call
+              activity context. DayLog uses call counts and total duration; it
+              does not send call audio or contact content.
             </p>
           </section>
 
@@ -37,6 +45,17 @@ export default function PrivacyPage() {
             <p>
               We use your data to provide daily reflection features, generate
               summaries, and operate integrations you explicitly connect.
+            </p>
+            <p>
+              When AI summaries or insights are generated, relevant diary text
+              and day-level context may be processed by OpenAI to produce the
+              requested result. This can include memory text, day notes or
+              ratings, and signals from integrations you connected. AI
+              generation inputs and outputs are also recorded in DayLog&apos;s
+              backend for quality evaluation. OpenAI&apos;s applicable data
+              handling and retention depend on the account configuration and
+              applicable terms; DayLog does not promise a specific
+              third-party retention period here.
             </p>
           </section>
 

@@ -12,7 +12,7 @@ const USER_ID = "user_001" as Id<"user">;
 const OTHER_USER_ID = "user_002" as Id<"user">;
 
 describe("cascade cleanup behavior", () => {
-  it("deletes memory media and tolerates missing storage blobs", async () => {
+  it("retains memory media when storage deletion fails and retries cleanup", async () => {
     const memoryId = "memory_001" as Id<"memories">;
 
     const db = createInMemoryDb({
@@ -41,17 +41,25 @@ describe("cascade cleanup behavior", () => {
       .mockRejectedValueOnce(new Error("already removed"))
       .mockResolvedValue(undefined);
 
-    const deletedCount = await deleteMemoryMediaByMemoryId(
-      {
-        db,
-        storage: {
-          delete: storageDelete,
-        },
-      } as never,
-      memoryId,
+    const ctx = {
+      db,
+      storage: {
+        delete: storageDelete,
+      },
+    } as never;
+
+    await expect(deleteMemoryMediaByMemoryId(ctx, memoryId)).rejects.toThrow(
+      "already removed",
     );
+    expect(db.getTable("memoryMedia").map((row) => row._id)).toEqual([
+      "media_001",
+      "media_002",
+    ]);
+
+    const deletedCount = await deleteMemoryMediaByMemoryId(ctx, memoryId);
 
     expect(deletedCount).toBe(1);
+    expect(storageDelete).toHaveBeenCalledTimes(2);
     expect(storageDelete).toHaveBeenCalledWith("storage_missing");
     expect(db.getTable("memoryMedia").map((row) => row._id)).toEqual([
       "media_002",
@@ -272,6 +280,112 @@ describe("cascade cleanup behavior", () => {
           updatedAt: 1,
         },
       ],
+      aiSummaryAttempts: [
+        {
+          _id: "attempt_user_001",
+          _creationTime: 13,
+          userId: USER_ID,
+          dayKey: "2026-04-01",
+          attemptChainId: "chain_user_001",
+          generationEventId: "event_user_001",
+          attemptNumber: 1,
+          strategy: "default",
+          evaluationFlags: [],
+          createdAt: 1,
+        },
+        {
+          _id: "attempt_other_001",
+          _creationTime: 14,
+          userId: OTHER_USER_ID,
+          dayKey: "2026-04-01",
+          attemptChainId: "chain_other_001",
+          generationEventId: "event_other_001",
+          attemptNumber: 1,
+          strategy: "default",
+          evaluationFlags: [],
+          createdAt: 1,
+        },
+      ],
+      dailyFeatureVectors: [
+        {
+          _id: "feature_user_001",
+          _creationTime: 15,
+          userId: USER_ID,
+          dayKey: "2026-04-01",
+          vectorVersion: 1,
+          features: {
+            memoryCount: 1,
+            noteCount: 0,
+            peopleTagCount: 0,
+            highlightCount: 0,
+            integrationProviderCount: 0,
+          },
+          sourceDays: 1,
+          generatedAt: 1,
+          updatedAt: 1,
+        },
+        {
+          _id: "feature_other_001",
+          _creationTime: 16,
+          userId: OTHER_USER_ID,
+          dayKey: "2026-04-01",
+          vectorVersion: 1,
+          features: {
+            memoryCount: 1,
+            noteCount: 0,
+            peopleTagCount: 0,
+            highlightCount: 0,
+            integrationProviderCount: 0,
+          },
+          sourceDays: 1,
+          generatedAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      nextBestDayRecommendations: [
+        {
+          _id: "recommendation_user_001",
+          _creationTime: 17,
+          userId: USER_ID,
+          targetDayKey: "2026-04-02",
+          generatedAt: 1,
+          basedOnDays: 1,
+          confidence: 0.5,
+          recommendationType: "stabilize",
+          recommendations: [],
+          rationale: [],
+          trend: {
+            ratingTrend: "flat",
+            memoryTrend: "flat",
+            stepsTrend: "flat",
+            sleepTrend: "flat",
+            screenTimeTrend: "flat",
+            spendingTrend: "flat",
+            socialTrend: "flat",
+          },
+        },
+        {
+          _id: "recommendation_other_001",
+          _creationTime: 18,
+          userId: OTHER_USER_ID,
+          targetDayKey: "2026-04-02",
+          generatedAt: 1,
+          basedOnDays: 1,
+          confidence: 0.5,
+          recommendationType: "stabilize",
+          recommendations: [],
+          rationale: [],
+          trend: {
+            ratingTrend: "flat",
+            memoryTrend: "flat",
+            stepsTrend: "flat",
+            sleepTrend: "flat",
+            screenTimeTrend: "flat",
+            spendingTrend: "flat",
+            socialTrend: "flat",
+          },
+        },
+      ],
     });
 
     const storageDelete = vi.fn(async () => undefined);
@@ -309,6 +423,9 @@ describe("cascade cleanup behavior", () => {
       deletedSummaryGenerationQuotas: 1,
       deletedSummaryGenerationQuotaReservations: 0,
       deletedOAuthMobileHandoffs: 0,
+      deletedAiSummaryAttempts: 1,
+      deletedDailyFeatureVectors: 1,
+      deletedNextBestDayRecommendations: 1,
     });
 
     expect(storageDelete).toHaveBeenCalledWith("storage_user_001");
@@ -316,5 +433,61 @@ describe("cascade cleanup behavior", () => {
     expect(db.getTable("memories").map((row) => row._id)).toEqual([
       "memory_other_001",
     ]);
+    expect(db.getTable("aiSummaryAttempts").map((row) => row._id)).toEqual([
+      "attempt_other_001",
+    ]);
+    expect(db.getTable("dailyFeatureVectors").map((row) => row._id)).toEqual([
+      "feature_other_001",
+    ]);
+    expect(
+      db.getTable("nextBestDayRecommendations").map((row) => row._id),
+    ).toEqual(["recommendation_other_001"]);
+  });
+
+  it("keeps an export artifact referenced when account cleanup fails and retries", async () => {
+    const now = Date.parse("2026-04-10T12:00:00.000Z");
+    const db = createInMemoryDb({
+      exportJobs: [
+        {
+          _id: "export_001",
+          _creationTime: 1,
+          userId: USER_ID,
+          status: "ready",
+          format: "json",
+          includeLocationSignals: false,
+          requestedAt: now,
+          updatedAt: now,
+          artifactStorageId: "storage_export_001",
+        },
+      ],
+    });
+    const storageDelete = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("storage temporarily unavailable"))
+      .mockResolvedValue(undefined);
+    const ctx = {
+      db,
+      storage: {
+        delete: storageDelete,
+      },
+    } as never;
+    const input = {
+      userId: USER_ID,
+      clerkUserId: "clerk_target_001",
+    };
+
+    await expect(deleteUserCascadeData(ctx, input)).rejects.toThrow(
+      "storage temporarily unavailable",
+    );
+    expect(db.getTable("exportJobs")).toHaveLength(1);
+    expect(db.getTable("exportJobs")[0]?.artifactStorageId).toBe(
+      "storage_export_001",
+    );
+
+    const deleted = await deleteUserCascadeData(ctx, input);
+
+    expect(deleted.deletedExportJobs).toBe(1);
+    expect(db.getTable("exportJobs")).toHaveLength(0);
+    expect(storageDelete).toHaveBeenCalledTimes(2);
   });
 });

@@ -39,6 +39,7 @@ type TableName =
   | "daySummaries"
   | "auditLogs"
   | "integrations"
+  | "integrationRevocationJobs"
   | "integrationSecrets"
   | "integrationSyncRuns"
   | "integrationDailyData"
@@ -49,7 +50,10 @@ type TableName =
   | "observabilityIngestRateLimits"
   | "observabilityIngestRateLimitMetrics"
   | "summaryGenerationEvents"
+  | "aiSummaryAttempts"
   | "summaryQualityEvaluations"
+  | "dailyFeatureVectors"
+  | "nextBestDayRecommendations"
   | "dataRetentionPolicies"
   | "dataRetentionRuns"
   | "platformAuditEvents"
@@ -135,6 +139,17 @@ const INDEX_FIELDS: Record<TableName, Record<string, string[]>> = {
     by_status: ["status"],
     by_provider: ["provider"],
     by_status_provider: ["status", "provider"],
+    by_remoteRevocationStatus_nextAttemptAt: [
+      "remoteRevocationStatus",
+      "remoteRevocationNextAttemptAt",
+    ],
+  },
+  integrationRevocationJobs: {
+    by_integration_createdAt: ["integrationId", "createdAt"],
+    by_status_nextAttemptAt: ["status", "nextAttemptAt"],
+    by_status_updatedAt: ["status", "updatedAt"],
+    by_user_tokenRef: ["userId", "tokenRef"],
+    by_updatedAt: ["updatedAt"],
   },
   integrationSecrets: {
     by_tokenRef: ["tokenRef"],
@@ -188,11 +203,26 @@ const INDEX_FIELDS: Record<TableName, Record<string, string[]>> = {
     by_user_day_createdAt: ["userId", "dayKey", "createdAt"],
     by_success_createdAt: ["success", "createdAt"],
   },
+  aiSummaryAttempts: {
+    by_attemptChainId_attemptNumber: ["attemptChainId", "attemptNumber"],
+    by_user_day_createdAt: ["userId", "dayKey", "createdAt"],
+    by_createdAt: ["createdAt"],
+  },
   summaryQualityEvaluations: {
     by_evaluatedAt: ["evaluatedAt"],
     by_lowQuality_evaluatedAt: ["lowQuality", "evaluatedAt"],
     by_generationEventId: ["generationEventId"],
     by_user_day_evaluatedAt: ["userId", "dayKey", "evaluatedAt"],
+  },
+  dailyFeatureVectors: {
+    by_user_day: ["userId", "dayKey"],
+    by_user_generatedAt: ["userId", "generatedAt"],
+    by_generatedAt: ["generatedAt"],
+  },
+  nextBestDayRecommendations: {
+    by_user_targetDay: ["userId", "targetDayKey"],
+    by_user_generatedAt: ["userId", "generatedAt"],
+    by_generatedAt: ["generatedAt"],
   },
   dataRetentionPolicies: {
     by_key: ["key"],
@@ -203,6 +233,7 @@ const INDEX_FIELDS: Record<TableName, Record<string, string[]>> = {
   },
   platformAuditEvents: {
     by_category_at: ["category", "at"],
+    by_category_action_at: ["category", "action", "at"],
     by_actor_at: ["actorType", "at"],
     by_at: ["at"],
     by_actorUserId_at: ["actorUserId", "at"],
@@ -452,6 +483,9 @@ export class InMemoryDb {
       daySummaries: [...(seed?.daySummaries ?? [])],
       auditLogs: [...(seed?.auditLogs ?? [])],
       integrations: [...(seed?.integrations ?? [])],
+      integrationRevocationJobs: [
+        ...(seed?.integrationRevocationJobs ?? []),
+      ],
       integrationSecrets: [...(seed?.integrationSecrets ?? [])],
       integrationSyncRuns: [...(seed?.integrationSyncRuns ?? [])],
       integrationDailyData: [...(seed?.integrationDailyData ?? [])],
@@ -466,7 +500,12 @@ export class InMemoryDb {
         ...(seed?.observabilityIngestRateLimitMetrics ?? []),
       ],
       summaryGenerationEvents: [...(seed?.summaryGenerationEvents ?? [])],
+      aiSummaryAttempts: [...(seed?.aiSummaryAttempts ?? [])],
       summaryQualityEvaluations: [...(seed?.summaryQualityEvaluations ?? [])],
+      dailyFeatureVectors: [...(seed?.dailyFeatureVectors ?? [])],
+      nextBestDayRecommendations: [
+        ...(seed?.nextBestDayRecommendations ?? []),
+      ],
       dataRetentionPolicies: [...(seed?.dataRetentionPolicies ?? [])],
       dataRetentionRuns: [...(seed?.dataRetentionRuns ?? [])],
       platformAuditEvents: [...(seed?.platformAuditEvents ?? [])],

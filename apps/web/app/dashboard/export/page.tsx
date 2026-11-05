@@ -748,13 +748,14 @@ export default function ExportPage() {
             </span>
           </label>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={() => void handleValidateRestore()}
               disabled={!restoreFile || restoreInProgress}
+              className="w-full sm:w-auto"
             >
               <ShieldCheck className="h-4 w-4" />
               {isValidatingRestore ? "Validating..." : "Validate backup"}
@@ -764,6 +765,7 @@ export default function ExportPage() {
               size="sm"
               onClick={() => void handleRestore()}
               disabled={!restoreFile || restoreInProgress}
+              className="w-full sm:w-auto"
             >
               {isRestoring ? "Restoring..." : "Restore selected datasets"}
             </Button>

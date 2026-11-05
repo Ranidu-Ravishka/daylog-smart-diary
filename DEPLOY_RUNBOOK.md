@@ -62,7 +62,10 @@ Convex deployment environment:
 - `RETENTION_SYNC_RUNS_DAYS`
 - `RETENTION_LOCATION_SIGNALS_DAYS`
 - `RETENTION_SUMMARY_EVENTS_DAYS`
+- `RETENTION_AI_SUMMARY_ATTEMPTS_DAYS`
 - `RETENTION_SUMMARY_QUALITY_DAYS`
+- `RETENTION_DAILY_FEATURE_VECTORS_DAYS`
+- `RETENTION_NEXT_BEST_DAY_RECOMMENDATIONS_DAYS`
 - `RETENTION_SUMMARY_QUOTAS_DAYS`
 - `RETENTION_INFO_EVENTS_DAYS`
 - `RETENTION_HEALTH_EVENTS_DAYS`
@@ -92,7 +95,10 @@ RETENTION_INTEGRATION_DATA_DAYS=180
 RETENTION_SYNC_RUNS_DAYS=120
 RETENTION_LOCATION_SIGNALS_DAYS=30
 RETENTION_SUMMARY_EVENTS_DAYS=90
+RETENTION_AI_SUMMARY_ATTEMPTS_DAYS=90
 RETENTION_SUMMARY_QUALITY_DAYS=90
+RETENTION_DAILY_FEATURE_VECTORS_DAYS=180
+RETENTION_NEXT_BEST_DAY_RECOMMENDATIONS_DAYS=180
 RETENTION_SUMMARY_QUOTAS_DAYS=365
 RETENTION_INFO_EVENTS_DAYS=90
 RETENTION_HEALTH_EVENTS_DAYS=180
@@ -113,7 +119,10 @@ RETENTION_INTEGRATION_DATA_DAYS=90
 RETENTION_SYNC_RUNS_DAYS=60
 RETENTION_LOCATION_SIGNALS_DAYS=14
 RETENTION_SUMMARY_EVENTS_DAYS=30
+RETENTION_AI_SUMMARY_ATTEMPTS_DAYS=45
 RETENTION_SUMMARY_QUALITY_DAYS=45
+RETENTION_DAILY_FEATURE_VECTORS_DAYS=90
+RETENTION_NEXT_BEST_DAY_RECOMMENDATIONS_DAYS=90
 RETENTION_SUMMARY_QUOTAS_DAYS=120
 RETENTION_INFO_EVENTS_DAYS=45
 RETENTION_HEALTH_EVENTS_DAYS=90
@@ -134,7 +143,10 @@ RETENTION_INTEGRATION_DATA_DAYS=45
 RETENTION_SYNC_RUNS_DAYS=30
 RETENTION_LOCATION_SIGNALS_DAYS=7
 RETENTION_SUMMARY_EVENTS_DAYS=14
+RETENTION_AI_SUMMARY_ATTEMPTS_DAYS=21
 RETENTION_SUMMARY_QUALITY_DAYS=21
+RETENTION_DAILY_FEATURE_VECTORS_DAYS=45
+RETENTION_NEXT_BEST_DAY_RECOMMENDATIONS_DAYS=45
 RETENTION_SUMMARY_QUOTAS_DAYS=45
 RETENTION_INFO_EVENTS_DAYS=21
 RETENTION_HEALTH_EVENTS_DAYS=45
@@ -319,6 +331,32 @@ Admin bootstrap:
 2. Sign in as listed Clerk user.
 3. Call mutation `users:bootstrapMakeMeAdmin`.
 
+### 6.1 OAuth revocation operations
+
+- `integrations:disconnectIntegration` disables local use immediately. Google Calendar/Fit and Gmail Summary revocation is asynchronous; the encrypted token remains available only while the job is pending or processing.
+- A 15-minute Convex cron retries due jobs and recovers interrupted processing attempts. Confirm the cron is active after backend deployment.
+- A terminal `failed` status means remote revocation was **not confirmed**. Do not report the provider grant revoked. Ask the user to revoke DayLog access in the provider account and reconnect only if needed.
+- Spotify revocation is unsupported by this implementation. Local tokens are removed immediately; instruct users to revoke DayLog access from Spotify's account settings.
+- Review revocation failures and retryable backlog using approved, access-controlled Convex operational tooling. Never copy or expose token values in logs, tickets, or support communications. Terminal job metadata is removed after 30 days.
+
+### 6.2 Export cleanup and account deletion
+
+- Scheduled retention cleanup runs every six hours. If storage deletion fails, the export job and artifact ID are retained with a generic error code, attempt count and next-attempt timestamp; the next scheduled cleanup retries it.
+- Account deletion fails visibly if storage cleanup fails. Resolve the storage outage and retry the failed deletion through the existing account-deletion flow; do not mark it complete manually while data remains.
+- These mechanisms retry artifacts still referenced by database rows. There is no source-verified global object-storage inventory, so previously orphaned artifacts without database references need a separately approved provider inventory/reconciliation procedure. Never delete objects based on client-supplied IDs.
+- A completed active-database deletion does not prove erasure from backups or external providers. Do not promise immediate backup erasure.
+
+### 6.3 Backup, recovery and retention evidence
+
+The repository does not establish production backup frequency, storage location, encryption, operator access, retention duration, restore-test results, or backup erasure behavior. Before public release, the service owner must document and verify those settings with the actual Convex/storage provider. Keep separate evidence for:
+
+1. Deletion from active application records.
+2. Deletion from object storage.
+3. Expiration from retained backups under the configured schedule.
+4. Any legal/operational retention exceptions.
+
+Do not claim immediate or completed backup erasure unless the provider's control and audit evidence supports that claim. Test recovery only in an isolated environment.
+
 ## 7) Rollback Guidance
 
 If release issues occur:
@@ -339,3 +377,6 @@ All of the following must be true before final release sign-off:
 3. Integrations connect/sync in target environment.
 4. CI required checks are green.
 5. No debug `console.log` usage remains in production-critical code paths.
+6. Google revocation retry monitoring and Spotify user instructions are operationally assigned.
+7. Storage cleanup retry procedures and backup/recovery/retention evidence are reviewed.
+8. Legacy AI quality-event redaction has completed in the target environment.

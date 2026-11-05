@@ -28,8 +28,11 @@ export type UserCascadeDeleteCounts = {
   deletedIntegrationHealthEvents: number;
   deletedExportJobs: number;
   deletedRestoreJobs: number;
+  deletedAiSummaryAttempts: number;
   deletedSummaryGenerationEvents: number;
   deletedSummaryQualityEvaluations: number;
+  deletedDailyFeatureVectors: number;
+  deletedNextBestDayRecommendations: number;
   deletedSummaryGenerationQuotas: number;
   deletedSummaryGenerationQuotaReservations: number;
   deletedOAuthMobileHandoffs: number;
@@ -55,7 +58,10 @@ export const USER_CASCADE_DELETION_STAGES = [
   "exportJobs",
   "restoreJobs",
   "summaryQualityEvaluations",
+  "aiSummaryAttempts",
   "summaryGenerationEvents",
+  "dailyFeatureVectors",
+  "nextBestDayRecommendations",
   "integrationHealthEvents",
   "userPreferences",
   "auditLogs",
@@ -101,8 +107,11 @@ function emptyUserCascadeDeleteProgress(): UserCascadeDeleteProgress {
     deletedIntegrationHealthEvents: 0,
     deletedExportJobs: 0,
     deletedRestoreJobs: 0,
+    deletedAiSummaryAttempts: 0,
     deletedSummaryGenerationEvents: 0,
     deletedSummaryQualityEvaluations: 0,
+    deletedDailyFeatureVectors: 0,
+    deletedNextBestDayRecommendations: 0,
     deletedSummaryGenerationQuotas: 0,
     deletedSummaryGenerationQuotaReservations: 0,
     deletedOAuthMobileHandoffs: 0,
@@ -134,12 +143,19 @@ function mergeUserCascadeDeleteProgress(
       delta.deletedIntegrationHealthEvents,
     deletedExportJobs: base.deletedExportJobs + delta.deletedExportJobs,
     deletedRestoreJobs: base.deletedRestoreJobs + delta.deletedRestoreJobs,
+    deletedAiSummaryAttempts:
+      base.deletedAiSummaryAttempts + delta.deletedAiSummaryAttempts,
     deletedSummaryGenerationEvents:
       base.deletedSummaryGenerationEvents +
       delta.deletedSummaryGenerationEvents,
     deletedSummaryQualityEvaluations:
       base.deletedSummaryQualityEvaluations +
       delta.deletedSummaryQualityEvaluations,
+    deletedDailyFeatureVectors:
+      base.deletedDailyFeatureVectors + delta.deletedDailyFeatureVectors,
+    deletedNextBestDayRecommendations:
+      base.deletedNextBestDayRecommendations +
+      delta.deletedNextBestDayRecommendations,
     deletedSummaryGenerationQuotas:
       base.deletedSummaryGenerationQuotas +
       delta.deletedSummaryGenerationQuotas,
@@ -169,8 +185,12 @@ function toUserCascadeDeleteCounts(
     deletedIntegrationHealthEvents: progress.deletedIntegrationHealthEvents,
     deletedExportJobs: progress.deletedExportJobs,
     deletedRestoreJobs: progress.deletedRestoreJobs,
+    deletedAiSummaryAttempts: progress.deletedAiSummaryAttempts,
     deletedSummaryGenerationEvents: progress.deletedSummaryGenerationEvents,
     deletedSummaryQualityEvaluations: progress.deletedSummaryQualityEvaluations,
+    deletedDailyFeatureVectors: progress.deletedDailyFeatureVectors,
+    deletedNextBestDayRecommendations:
+      progress.deletedNextBestDayRecommendations,
     deletedSummaryGenerationQuotas: progress.deletedSummaryGenerationQuotas,
     deletedSummaryGenerationQuotaReservations:
       progress.deletedSummaryGenerationQuotaReservations,
@@ -204,11 +224,7 @@ async function safeDeleteStorageBlob(
   ctx: CascadeCtx,
   storageId: string,
 ): Promise<void> {
-  try {
-    await ctx.storage.delete(storageId as Id<"_storage">);
-  } catch {
-    // Storage blob may already be gone — continue cleanup.
-  }
+  await ctx.storage.delete(storageId as Id<"_storage">);
 }
 
 export async function deleteMemoryMediaByMemoryId(
@@ -409,6 +425,20 @@ async function deleteIntegrationSecretsByUserBatch(
 
   let deleted = 0;
   for (const secret of page.page) {
+    const activeRevocations = await ctx.db
+      .query("integrationRevocationJobs")
+      .withIndex("by_user_tokenRef", (q) =>
+        q.eq("userId", userId).eq("tokenRef", secret.tokenRef),
+      )
+      .take(10);
+    if (
+      activeRevocations.some(
+        (job) => job.status === "pending" || job.status === "processing",
+      )
+    ) {
+      continue;
+    }
+
     await ctx.db.delete(secret._id);
     deleted += 1;
   }
@@ -548,6 +578,87 @@ async function deleteSummaryGenerationEventsByUserBatch(
   let deleted = 0;
   for (const event of page.page) {
     await ctx.db.delete(event._id);
+    deleted += 1;
+  }
+
+  return {
+    deleted,
+    isDone: page.isDone,
+    nextCursor: page.isDone ? null : page.continueCursor,
+  };
+}
+
+async function deleteAiSummaryAttemptsByUserBatch(
+  ctx: CascadeCtx,
+  userId: Id<"user">,
+  cursor: string | null,
+  batchSize: number,
+): Promise<BatchDeleteResult> {
+  const page = await ctx.db
+    .query("aiSummaryAttempts")
+    .withIndex("by_user_day_createdAt", (q) => q.eq("userId", userId))
+    .paginate({
+      numItems: batchSize,
+      cursor,
+    });
+
+  let deleted = 0;
+  for (const attempt of page.page) {
+    await ctx.db.delete(attempt._id);
+    deleted += 1;
+  }
+
+  return {
+    deleted,
+    isDone: page.isDone,
+    nextCursor: page.isDone ? null : page.continueCursor,
+  };
+}
+
+async function deleteDailyFeatureVectorsByUserBatch(
+  ctx: CascadeCtx,
+  userId: Id<"user">,
+  cursor: string | null,
+  batchSize: number,
+): Promise<BatchDeleteResult> {
+  const page = await ctx.db
+    .query("dailyFeatureVectors")
+    .withIndex("by_user_day", (q) => q.eq("userId", userId))
+    .paginate({
+      numItems: batchSize,
+      cursor,
+    });
+
+  let deleted = 0;
+  for (const vector of page.page) {
+    await ctx.db.delete(vector._id);
+    deleted += 1;
+  }
+
+  return {
+    deleted,
+    isDone: page.isDone,
+    nextCursor: page.isDone ? null : page.continueCursor,
+  };
+}
+
+async function deleteNextBestDayRecommendationsByUserBatch(
+  ctx: CascadeCtx,
+  userId: Id<"user">,
+  cursor: string | null,
+  batchSize: number,
+): Promise<BatchDeleteResult> {
+  const page = await ctx.db
+    .query("nextBestDayRecommendations")
+    .withIndex("by_user_targetDay", (q) => q.eq("userId", userId))
+    .paginate({
+      numItems: batchSize,
+      cursor,
+    });
+
+  let deleted = 0;
+  for (const recommendation of page.page) {
+    await ctx.db.delete(recommendation._id);
     deleted += 1;
   }
 
@@ -866,6 +977,16 @@ export async function runUserCascadeDeletionStageBatch(
       deleted.deletedSummaryQualityEvaluations = result.deleted;
       break;
     }
+    case "aiSummaryAttempts": {
+      result = await deleteAiSummaryAttemptsByUserBatch(
+        ctx,
+        input.userId,
+        input.cursor,
+        batchSize,
+      );
+      deleted.deletedAiSummaryAttempts = result.deleted;
+      break;
+    }
     case "summaryGenerationEvents": {
       result = await deleteSummaryGenerationEventsByUserBatch(
         ctx,
@@ -874,6 +995,26 @@ export async function runUserCascadeDeletionStageBatch(
         batchSize,
       );
       deleted.deletedSummaryGenerationEvents = result.deleted;
+      break;
+    }
+    case "dailyFeatureVectors": {
+      result = await deleteDailyFeatureVectorsByUserBatch(
+        ctx,
+        input.userId,
+        input.cursor,
+        batchSize,
+      );
+      deleted.deletedDailyFeatureVectors = result.deleted;
+      break;
+    }
+    case "nextBestDayRecommendations": {
+      result = await deleteNextBestDayRecommendationsByUserBatch(
+        ctx,
+        input.userId,
+        input.cursor,
+        batchSize,
+      );
+      deleted.deletedNextBestDayRecommendations = result.deleted;
       break;
     }
     case "integrationHealthEvents": {
