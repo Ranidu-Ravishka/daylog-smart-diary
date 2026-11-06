@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  constantTimeStringEquals,
   decryptIntegrationSecret,
+  decryptSecret,
   encryptIntegrationSecret,
+  encryptSecret,
+  getActiveKey,
   getActiveIntegrationSecretKeyId,
   IntegrationSecretCryptoError,
 } from "./integrationSecretsCrypto";
@@ -98,5 +102,60 @@ describe("integration secret envelope encryption", () => {
     ).rejects.toMatchObject({
       code: "MISSING_KEY_ID",
     } satisfies Partial<IntegrationSecretCryptoError>);
+  });
+
+  it("rejects empty or malformed secret payloads", async () => {
+    const context = {
+      userId: "user_invalid",
+      provider: "google_calendar",
+      tokenRef: "tokref_invalid",
+    };
+
+    await expect(encryptIntegrationSecret("", context)).rejects.toMatchObject({
+      code: "ENCRYPTION_FAILED",
+    });
+    await expect(
+      decryptIntegrationSecret({} as never, context),
+    ).rejects.toMatchObject({
+      code: "INVALID_ENVELOPE",
+    });
+    expect(constantTimeStringEquals("same", "same")).toBe(true);
+    expect(constantTimeStringEquals("same", "different")).toBe(false);
+  });
+
+  it("supports direct DEK encryption and authenticates the context", async () => {
+    const key = new Uint8Array(32).fill(9);
+    const context = {
+      userId: "user_direct",
+      provider: "spotify",
+      tokenRef: "tokref_direct",
+    };
+    const encrypted = await encryptSecret("direct-secret", key, context);
+
+    await expect(
+      decryptSecret(
+        encrypted.encryptedValue,
+        encrypted.valueIv,
+        key,
+        context,
+      ),
+    ).resolves.toBe("direct-secret");
+    await expect(
+      decryptSecret(encrypted.encryptedValue, encrypted.valueIv, key, {
+        ...context,
+        userId: "another-user",
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("uses a positive configured key version and falls back for invalid values", () => {
+    setKeyring("key-v1", {
+      "key-v1": Buffer.alloc(32, 1).toString("base64url"),
+    });
+    process.env.INTEGRATION_SECRETS_KEY_VERSION = "4";
+    expect(getActiveKey()).toEqual({ keyId: "key-v1", keyVersion: 4 });
+
+    process.env.INTEGRATION_SECRETS_KEY_VERSION = "0";
+    expect(getActiveKey()).toEqual({ keyId: "key-v1", keyVersion: 1 });
   });
 });

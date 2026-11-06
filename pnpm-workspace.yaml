@@ -1,6 +1,8 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+pmOnFail: ignore
 overrides:
   "@fastify/otel>@opentelemetry/instrumentation": "0.214.0"
   "@prisma/instrumentation>@opentelemetry/instrumentation": "0.214.0"
