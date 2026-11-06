@@ -9,8 +9,8 @@ This guide lists **environment variables by surface** and how to validate them. 
 
 ## Prerequisites
 
-- **Node.js**: minimum **18** (`package.json` `engines`). **Node 20** matches CI (`.github/workflows/backend-validation.yml`).
-- **pnpm**: **11.x** (`package.json` `packageManager`: `pnpm@11.1.1`).
+- **Node.js**: minimum **22.13** (`package.json` `engines`). **Node 22** matches CI (`.github/workflows/backend-validation.yml`).
+- **pnpm**: **12.16.1** (`packageManager`).
 
 ## Copy example env files
 
@@ -80,6 +80,13 @@ Set these on the **Convex** deployment used by the apps.
 - `EXPORT_SIGNING_SECRET` — dedicated secret for export/restore signing (do not reuse webhook secret).
 - `OPENAI_API_KEY` — `sk-...` for summaries.
 - `SUMMARY_DAILY_GENERATION_LIMIT` — numeric cap (example in [../CONVEX_SETUP.md](../CONVEX_SETUP.md)).
+- `AI_INPUT_COST_PER_1K_USD` — estimated input cost used for internal telemetry (default `0.005`).
+- `AI_OUTPUT_COST_PER_1K_USD` — estimated output cost used for internal telemetry (default `0.015`).
+- `AI_GATEWAY_BASE_URL` / `AI_GATEWAY_API_KEY` — optional backend-only gateway configuration.
+
+Ask Your Day and personal insights use the same backend OpenAI credentials. The web
+client never receives these values. Configure OpenAI organization/project spend
+limits and alerts separately; the application ledger is not an OpenAI billing limit.
 
 ### OAuth server-side (refresh and sync)
 

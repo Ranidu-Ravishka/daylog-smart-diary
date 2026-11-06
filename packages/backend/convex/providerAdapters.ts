@@ -556,6 +556,7 @@ export type SummaryModelOutput = {
     spendingTotal?: number;
   };
   sourcesUsed: string[];
+  usage?: OpenAiUsage;
 };
 
 type SummaryModelAdapterInput = {
@@ -724,13 +725,20 @@ export type OpenAiChatJsonRequest = {
   messages: readonly OpenAiChatMessage[];
   responseFormat: unknown;
   operation: string;
+  maxOutputTokens?: number;
   emptyContentMessage?: string;
   invalidJsonMessage?: string;
 };
 
-export async function callOpenAiChatJson<T>(
+export type OpenAiUsage = {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+};
+
+export async function callOpenAiChatJsonWithUsage<T>(
   request: OpenAiChatJsonRequest,
-): Promise<T> {
+): Promise<{ data: T; usage?: OpenAiUsage }> {
   const endpoint = `${normalizeOpenAiBaseUrl(request.baseUrl)}/chat/completions`;
   const candidateKeys = resolveOpenAiCandidateKeys(
     request.apiKey,
@@ -741,6 +749,11 @@ export async function callOpenAiChatJson<T>(
   const executeOnce = async (keyForAttempt: string) =>
     executeWithProviderRetry<{
       choices?: Array<{ message?: { content?: string } }>;
+      usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        total_tokens?: number;
+      };
     }>({
       maxAttempts: 3,
       baseBackoffMs: 400,
@@ -755,6 +768,9 @@ export async function callOpenAiChatJson<T>(
           body: JSON.stringify({
             model: request.model,
             temperature: request.temperature ?? 0.3,
+            ...(request.maxOutputTokens
+              ? { max_tokens: request.maxOutputTokens }
+              : {}),
             response_format: request.responseFormat,
             messages: request.messages,
           }),
@@ -784,6 +800,11 @@ export async function callOpenAiChatJson<T>(
 
   let responseJson: {
     choices?: Array<{ message?: { content?: string } }>;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+    };
   } | null = null;
   let lastError: unknown = null;
 
@@ -858,7 +879,22 @@ export async function callOpenAiChatJson<T>(
     });
   }
 
-  return parsed as T;
+  const usage = responseJson.usage
+    ? {
+        promptTokens: responseJson.usage.prompt_tokens,
+        completionTokens: responseJson.usage.completion_tokens,
+        totalTokens: responseJson.usage.total_tokens,
+      }
+    : undefined;
+
+  return { data: parsed as T, usage };
+}
+
+export async function callOpenAiChatJson<T>(
+  request: OpenAiChatJsonRequest,
+): Promise<T> {
+  const result = await callOpenAiChatJsonWithUsage<T>(request);
+  return result.data;
 }
 
 const SUMMARY_RESPONSE_FORMAT = {
@@ -907,7 +943,7 @@ const openAiSummaryAdapter: SummaryModelAdapter = {
     baseUrl,
     strategyGuidance,
   }) => {
-    const parsed = await callOpenAiChatJson<unknown>({
+    const parsed = await callOpenAiChatJsonWithUsage<unknown>({
       apiKey,
       apiKeys,
       baseUrl,
@@ -933,7 +969,10 @@ const openAiSummaryAdapter: SummaryModelAdapter = {
       ],
     });
 
-    return normalizeSummaryModelOutput(parsed);
+    return {
+      ...normalizeSummaryModelOutput(parsed.data),
+      usage: parsed.usage,
+    };
   },
 };
 

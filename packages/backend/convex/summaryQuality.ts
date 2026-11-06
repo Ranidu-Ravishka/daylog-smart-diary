@@ -250,6 +250,12 @@ export const recordSummaryGenerationEvaluationInternal = internalMutation({
     failureReason: v.optional(v.string()),
     summaryId: v.optional(v.id("daySummaries")),
     attemptChainId: v.optional(v.string()),
+    promptTokens: v.optional(v.number()),
+    completionTokens: v.optional(v.number()),
+    totalTokens: v.optional(v.number()),
+    usageSource: v.optional(
+      v.union(v.literal("provider"), v.literal("estimated")),
+    ),
   },
   handler: async (ctx, args) => {
     validateDayKey(args.dayKey);
@@ -272,6 +278,23 @@ export const recordSummaryGenerationEvaluationInternal = internalMutation({
       attemptChainId: args.attemptChainId,
       createdAt: now,
     });
+
+    if (args.promptTokens !== undefined || args.completionTokens !== undefined) {
+      await ctx.db.insert("aiUsageRecords", {
+        userId: args.userId,
+        operation: "summary_generation",
+        provider: "openai",
+        model: args.modelName,
+        status: args.success ? "succeeded" : "failed",
+        promptTokens: args.promptTokens,
+        completionTokens: args.completionTokens,
+        totalTokens:
+          args.totalTokens ??
+          (args.promptTokens ?? 0) + (args.completionTokens ?? 0),
+        usageSource: args.usageSource ?? "estimated",
+        createdAt: now,
+      });
+    }
 
     if (!args.success || !args.generatedStory) {
       await ctx.db.insert("platformAuditEvents", {

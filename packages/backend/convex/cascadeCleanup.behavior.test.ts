@@ -164,6 +164,7 @@ describe("cascade cleanup behavior", () => {
           title: "target",
           happenedAt: 1,
           dayKey: "2026-04-01",
+          thumbnailStorageId: "storage_thumbnail_user_001",
         },
         {
           _id: "memory_other_001",
@@ -244,6 +245,29 @@ describe("cascade cleanup behavior", () => {
           dayKey: "2026-04-01",
           status: "success",
           startedAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      integrationRevocationJobs: [
+        {
+          _id: "revocation_user_001",
+          _creationTime: 9.5,
+          userId: USER_ID,
+          provider: "spotify",
+          tokenRef: "tokref_user_001",
+          status: "unsupported",
+          attempts: 0,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          _id: "revocation_other_001",
+          _creationTime: 9.6,
+          userId: OTHER_USER_ID,
+          provider: "spotify",
+          status: "failed",
+          attempts: 1,
+          createdAt: 1,
           updatedAt: 1,
         },
       ],
@@ -414,6 +438,7 @@ describe("cascade cleanup behavior", () => {
       deletedMemoryMedia: 1,
       deletedIntegrationDailyData: 1,
       deletedIntegrationSecrets: 1,
+      deletedIntegrationRevocationJobs: 1,
       deletedIntegrationSyncRuns: 1,
       deletedIntegrationHealthEvents: 0,
       deletedExportJobs: 0,
@@ -429,12 +454,16 @@ describe("cascade cleanup behavior", () => {
     });
 
     expect(storageDelete).toHaveBeenCalledWith("storage_user_001");
+    expect(storageDelete).toHaveBeenCalledWith("storage_thumbnail_user_001");
     expect(db.getTable("summaryGenerationQuotas")).toHaveLength(0);
     expect(db.getTable("memories").map((row) => row._id)).toEqual([
       "memory_other_001",
     ]);
     expect(db.getTable("aiSummaryAttempts").map((row) => row._id)).toEqual([
       "attempt_other_001",
+    ]);
+    expect(db.getTable("integrationRevocationJobs").map((row) => row._id)).toEqual([
+      "revocation_other_001",
     ]);
     expect(db.getTable("dailyFeatureVectors").map((row) => row._id)).toEqual([
       "feature_other_001",

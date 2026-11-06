@@ -11,7 +11,7 @@ import type { Id } from "./_generated/dataModel";
 import { getActiveUserById, requireUser } from "./authz";
 import { validateDayKey } from "./validators";
 import { logInfo, logWarn } from "./observability";
-import { callOpenAiChatJson } from "./providerAdapters";
+import { callOpenAiChatJsonWithUsage } from "./providerAdapters";
 import { convexServerEnv } from "./env";
 
 const getSummaryGenerationIdentityRef = makeFunctionReference<"query">(
@@ -27,6 +27,9 @@ const listMyIntegrationDailyDataForSummaryGenerationRef =
   makeFunctionReference<"query">(
     "integrations:listMyIntegrationDailyDataForDayForSummaryGeneration",
   );
+const recordAiUsageInternalRef = makeFunctionReference<"mutation">(
+  "aiUsage:recordAiUsageInternal",
+);
 
 type TrendDirection = "up" | "down" | "flat";
 type RecommendationType = "stabilize" | "momentum" | "recovery";
@@ -1157,13 +1160,19 @@ export const generateInsightNarrative = action({
       resolveInsightNarrativeKeys();
 
     let parsed: unknown;
+    let usage: {
+      promptTokens?: number;
+      completionTokens?: number;
+      totalTokens?: number;
+    } | undefined;
     try {
-      parsed = await callOpenAiChatJson<unknown>({
+      const response = await callOpenAiChatJsonWithUsage<unknown>({
         apiKey: primaryKey,
         apiKeys: candidateKeys,
         baseUrl,
         operation: "insight_narrative",
         model: "gpt-4o",
+        maxOutputTokens: 300,
         temperature: 0.25,
         responseFormat: INSIGHT_NARRATIVE_RESPONSE_FORMAT,
         emptyContentMessage: "Insight narrative output was empty.",
@@ -1182,6 +1191,8 @@ export const generateInsightNarrative = action({
           },
         ],
       });
+      parsed = response.data;
+      usage = response.usage;
     } catch (error) {
       logWarn("personal_insight.narrative_generation_failed", {
         userId: user.userId,
@@ -1223,6 +1234,22 @@ export const generateInsightNarrative = action({
       trend,
       features: latestVector,
     };
+
+    const promptTokens =
+      usage?.promptTokens ?? Math.max(1, Math.ceil(modelInput.length / 4));
+    const completionTokens =
+      usage?.completionTokens ??
+      Math.max(1, Math.ceil(result.narrative.length / 4));
+    await ctx.runMutation(recordAiUsageInternalRef, {
+      userId: user.userId,
+      operation: "personal_insight",
+      model: "gpt-4o",
+      status: "succeeded",
+      promptTokens,
+      completionTokens,
+      totalTokens: usage?.totalTokens ?? promptTokens + completionTokens,
+      usageSource: usage ? "provider" : "estimated",
+    });
 
     evictExpiredInsightNarrativeCache(nowMs);
     insightNarrativeCache.set(cacheKey, {

@@ -16,7 +16,7 @@
     "build:ci": "CI=1 expo export --platform web"
   },
   "dependencies": {
-    "@clerk/clerk-expo": "^2.19.11",
+    "@clerk/clerk-expo": "^2.20.1",
     "@expo-google-fonts/plus-jakarta-sans": "^0.4.2",
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -83,7 +83,9 @@
   "turbo": {
     "tasks": {
       "build": {
-        "outputs": ["dist/**"]
+        "outputs": [
+          "dist/**"
+        ]
       }
     }
   }

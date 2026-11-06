@@ -89,8 +89,8 @@ docs/           # Architecture, testing, design system, etc.
 
 ## Prerequisites
 
-- **Node.js** ≥ 18 (`package.json` engines). **Node 20** matches GitHub Actions.
-- **pnpm** 11.x (`packageManager` field in `package.json`).
+- **Node.js** ≥ 22.13 (`package.json` engines). **Node 22** matches GitHub Actions.
+- **pnpm** 12.16.1 (`packageManager` field in `package.json`).
 
 ---
 

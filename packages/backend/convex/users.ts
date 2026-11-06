@@ -169,6 +169,7 @@ function emptyUserDeletionProgress(): UserDeletionProgress {
     deletedMemoryMedia: 0,
     deletedIntegrationDailyData: 0,
     deletedIntegrationSecrets: 0,
+    deletedIntegrationRevocationJobs: 0,
     deletedIntegrationSyncRuns: 0,
     deletedIntegrationHealthEvents: 0,
     deletedExportJobs: 0,
@@ -179,6 +180,8 @@ function emptyUserDeletionProgress(): UserDeletionProgress {
     deletedDailyFeatureVectors: 0,
     deletedNextBestDayRecommendations: 0,
     deletedSummaryGenerationQuotas: 0,
+    deletedSummaryGenerationQuotaReservations: 0,
+    deletedOAuthMobileHandoffs: 0,
   };
 }
 
@@ -217,6 +220,9 @@ function mergeUserDeletionProgress(
     deletedIntegrationSecrets:
       safeProgressCount(base.deletedIntegrationSecrets) +
       delta.deletedIntegrationSecrets,
+    deletedIntegrationRevocationJobs:
+      safeProgressCount(base.deletedIntegrationRevocationJobs) +
+      delta.deletedIntegrationRevocationJobs,
     deletedIntegrationSyncRuns:
       safeProgressCount(base.deletedIntegrationSyncRuns) +
       delta.deletedIntegrationSyncRuns,
@@ -245,6 +251,12 @@ function mergeUserDeletionProgress(
     deletedSummaryGenerationQuotas:
       safeProgressCount(base.deletedSummaryGenerationQuotas) +
       delta.deletedSummaryGenerationQuotas,
+    deletedSummaryGenerationQuotaReservations:
+      safeProgressCount(base.deletedSummaryGenerationQuotaReservations) +
+      delta.deletedSummaryGenerationQuotaReservations,
+    deletedOAuthMobileHandoffs:
+      safeProgressCount(base.deletedOAuthMobileHandoffs) +
+      delta.deletedOAuthMobileHandoffs,
   };
 }
 

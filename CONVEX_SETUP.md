@@ -15,8 +15,8 @@ For full project onboarding, start with [README.md](README.md). Deeper env refer
 
 ## 1) Prerequisites
 
-- Node.js `>=18`
-- pnpm **11.x** (see root `package.json` `packageManager`)
+- Node.js `>=22.13`
+- pnpm **12.16.1** (see root `package.json` `packageManager`)
 - Convex account
 - Clerk app configured for DayLog
 
@@ -26,6 +26,13 @@ From repository root:
 
 ```bash
 pnpm install
+```
+
+If the local pnpm shim cannot provision the pinned version, use the
+reproducible fallback without changing the lockfile:
+
+```bash
+npm exec --yes --package=pnpm@12.16.1 -- pnpm install --frozen-lockfile
 ```
 
 ## 3) Start Convex Dev

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { DashboardDatePicker } from "@/components/DashboardDatePicker";
 import { MemoryForm } from "@/components/MemoryForm";
 import { DashboardAiSummarySection } from "@/components/dashboard/dashboard-ai-summary-section";
+import { DashboardAskYourDay } from "@/components/dashboard/dashboard-ask-your-day";
 import { DashboardDataSourcesSection } from "@/components/dashboard/dashboard-data-sources-section";
 import { DashboardDayMetaSections } from "@/components/dashboard/dashboard-day-meta-sections";
 import { DashboardLoadingSkeleton } from "@/components/dashboard/dashboard-skeletons";
@@ -68,6 +69,8 @@ export default function DashboardPage() {
         metricItems={metricItems}
         onGenerateSummary={handleGenerateSummary}
       />
+
+      <DashboardAskYourDay />
 
       <DashboardDataSourcesSection
         integrationDailyData={integrationDailyData}

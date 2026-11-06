@@ -5,7 +5,7 @@
 > Audience: Web engineers  
 > Standard: [../../CONTRIBUTING.md](../../CONTRIBUTING.md)
 
-User-facing **Next.js 16** app: memories, summaries, account settings, and **OAuth callback routes** for integrations.
+User-facing **Next.js 16** app: memories, summaries, Ask Your Day, account settings, and **OAuth callback routes** for integrations.
 
 **Monorepo onboarding:** [../../README.md](../../README.md)  
 **Architecture:** [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md)
@@ -83,6 +83,7 @@ Example: `${NEXT_PUBLIC_APP_URL}/api/integrations/oauth/spotify/callback`.
 
 - `pnpm --filter web test` — Vitest (OAuth abuse / callback coverage).
 - `pnpm --filter web test:e2e` — Playwright; first run may need `pnpm --filter web test:e2e:install`.
+- Latest web launch-readiness evidence: [route and viewport results](qa/launch-readiness.md), [structured results](qa/viewport-results.json), and [screenshots](qa/screenshots/).
 
 See [../../docs/TESTING.md](../../docs/TESTING.md).
 

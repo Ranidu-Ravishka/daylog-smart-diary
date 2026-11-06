@@ -16,7 +16,7 @@ import {
   usePaginatedQuery,
   useQuery,
 } from "convex/react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { PageContainerWide } from "@/components/page-container";
 import { Button } from "@/components/ui/button";
@@ -89,9 +89,9 @@ export default function RetentionPage() {
   const [policyNextCursor, setPolicyNextCursor] = useState<string | null>(null);
   const [isLoadingMorePolicies, setIsLoadingMorePolicies] = useState(false);
   const [policyLoadError, setPolicyLoadError] = useState<string | null>(null);
-  const [policyDrafts, setPolicyDrafts] = useState<Record<string, PolicyDraft>>(
-    {},
-  );
+  const [policyDraftOverrides, setPolicyDraftOverrides] = useState<
+    Record<string, PolicyDraft>
+  >({});
   const [busyPolicyKey, setBusyPolicyKey] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -129,22 +129,18 @@ export default function RetentionPage() {
   const upsertPolicy = useMutation(api.retention.upsertRetentionPolicy);
   const runCleanup = useMutation(api.retention.runRetentionCleanupNow);
 
-  useEffect(() => {
-    if (policies.length === 0) return;
-
-    setPolicyDrafts((previous) => {
-      const next = { ...previous };
-      for (const policy of policies) {
-        if (next[policy.key]) continue;
-        next[policy.key] = {
+  const policyDrafts = useMemo(() => {
+    const next: Record<string, PolicyDraft> = {};
+    for (const policy of policies) {
+      next[policy.key] =
+        policyDraftOverrides[policy.key] ?? {
           retentionDays: String(policy.retentionDays),
           enabled: policy.enabled,
           sensitive: policy.sensitive,
         };
-      }
-      return next;
-    });
-  }, [policies]);
+    }
+    return next;
+  }, [policies, policyDraftOverrides]);
 
   const sortedPolicies = useMemo(() => {
     return [...(policies ?? [])].sort((a, b) => a.key.localeCompare(b.key));
@@ -331,7 +327,7 @@ export default function RetentionPage() {
                               String(policy.retentionDays)
                             }
                             onChange={(event) =>
-                              setPolicyDrafts((previous) => ({
+                              setPolicyDraftOverrides((previous) => ({
                                 ...previous,
                                 [policy.key]: {
                                   ...(previous[policy.key] ?? {
@@ -360,7 +356,7 @@ export default function RetentionPage() {
                               type="checkbox"
                               checked={draft?.enabled ?? policy.enabled}
                               onChange={(event) =>
-                                setPolicyDrafts((previous) => ({
+                                setPolicyDraftOverrides((previous) => ({
                                   ...previous,
                                   [policy.key]: {
                                     ...(previous[policy.key] ?? {

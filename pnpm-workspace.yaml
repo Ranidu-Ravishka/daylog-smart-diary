@@ -4,11 +4,62 @@ packages:
 overrides:
   "@fastify/otel>@opentelemetry/instrumentation": "0.214.0"
   "@prisma/instrumentation>@opentelemetry/instrumentation": "0.214.0"
+  "@xmldom/xmldom@0.8": "0.8.15"
+  "@xmldom/xmldom": "0.8.15"
+  "@opentelemetry/core": "2.8.0"
+  "@opentelemetry/instrumentation-pg": "0.73.0"
+  "@opentelemetry/instrumentation-mysql2": "0.67.0"
+  "@opentelemetry/instrumentation-knex": "0.65.0"
+  "@opentelemetry/instrumentation-mysql": "0.67.0"
+  "@opentelemetry/instrumentation-mongoose": "0.67.0"
+  "@opentelemetry/instrumentation-tedious": "0.40.0"
+  "svix>uuid": "11.1.1"
+  "xcode>uuid": "11.1.1"
+  "jayson>uuid": "11.1.1"
+  "jayson>stream-json": "3.7.0"
+  "@clerk/clerk-react": "5.61.11"
+  "@clerk/shared": "3.48.0"
+  "@babel/core": "7.29.6"
+  brace-expansion@1: "1.1.21"
+  brace-expansion@2: "2.1.7"
+  brace-expansion@5: "5.0.12"
+  browserslist: "4.28.7"
+  compression: "1.8.2"
+  fast-uri: "3.1.9"
+  fast-xml-parser: "5.7.0"
+  fast-xml-builder: "1.1.7"
+  decode-uri-component: "0.5.1"
+  image-size: "2.0.3"
+  glob: "14.0.2"
+  minimatch@10: "11.0.1"
+  zod: "4.6.6"
+  js-cookie: "3.0.7"
+  js-yaml@3: "3.15.2"
+  js-yaml@4: "4.3.2"
+  lodash: "4.18.1"
+  minimatch@3: "3.1.4"
+  minimatch@9: "11.0.1"
+  nanoid: "3.3.18"
+  node-forge: "1.4.1"
+  picomatch@2: "2.3.2"
+  picomatch@3: "3.0.2"
+  postcss: "8.5.23"
+  preact: "10.28.2"
+  shell-quote: "1.11.0"
+  source-map-js: "1.2.2"
+  tar: "7.5.21"
+  undici: "6.29.1"
+  ws@6: "6.2.4"
+  ws@7: "7.5.11"
+  ws@8: "8.21.0"
+  yaml@1: "1.10.3"
+  yaml@2: "2.8.3"
   import-in-the-middle: "^3.0.0"
 allowBuilds:
   '@clerk/shared': false
   '@tailwindcss/oxide': true
   '@sentry/cli': false
+  bufferutil: false
   browser-tabs-lock: false
   core-js: false
   esbuild: false
@@ -16,3 +67,4 @@ allowBuilds:
   playwright: true
   sharp: false
   unrs-resolver: false
+  utf-8-validate: false

@@ -875,6 +875,12 @@ export const generateSummaryForDay = action({
           attemptModelInput,
           strategy,
         );
+        const promptTokens =
+          generated.usage?.promptTokens ??
+          Math.max(1, Math.ceil(textEncoder.encode(attemptModelInput).length / 4));
+        const completionTokens =
+          generated.usage?.completionTokens ??
+          Math.max(1, Math.ceil(textEncoder.encode(generated.story).length / 4));
         const mergedSourcesUsed = Array.from(
           new Set([
             ...generated.sourcesUsed,
@@ -896,6 +902,11 @@ export const generateSummaryForDay = action({
             generatedHighlights: generated.highlights,
             sourcesUsed: mergedSourcesUsed,
             attemptChainId,
+            promptTokens,
+            completionTokens,
+            totalTokens:
+              generated.usage?.totalTokens ?? promptTokens + completionTokens,
+            usageSource: generated.usage ? "provider" : "estimated",
           },
         );
 

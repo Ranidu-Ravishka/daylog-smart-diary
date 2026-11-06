@@ -22,6 +22,8 @@ import type * as admin_services_adminSummariesQueryService from "../admin/servic
 import type * as admin_services_auditLogsService from "../admin/services/auditLogsService.js";
 import type * as admin_utilities_adminRecordMappers from "../admin/utilities/adminRecordMappers.js";
 import type * as admin_utilities_adminUserPatch from "../admin/utilities/adminUserPatch.js";
+import type * as aiBrain from "../aiBrain.js";
+import type * as aiUsage from "../aiUsage.js";
 import type * as authz from "../authz.js";
 import type * as cascadeCleanup from "../cascadeCleanup.js";
 import type * as content from "../content.js";
@@ -88,6 +90,8 @@ declare const fullApi: ApiFromModules<{
   "admin/services/auditLogsService": typeof admin_services_auditLogsService;
   "admin/utilities/adminRecordMappers": typeof admin_utilities_adminRecordMappers;
   "admin/utilities/adminUserPatch": typeof admin_utilities_adminUserPatch;
+  aiBrain: typeof aiBrain;
+  aiUsage: typeof aiUsage;
   authz: typeof authz;
   cascadeCleanup: typeof cascadeCleanup;
   content: typeof content;

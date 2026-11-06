@@ -50,6 +50,7 @@ type TableName =
   | "observabilityIngestRateLimits"
   | "observabilityIngestRateLimitMetrics"
   | "summaryGenerationEvents"
+  | "aiUsageRecords"
   | "aiSummaryAttempts"
   | "summaryQualityEvaluations"
   | "dailyFeatureVectors"
@@ -100,6 +101,10 @@ const INDEX_FIELDS: Record<TableName, Record<string, string[]>> = {
   summaryGenerationQuotas: {
     by_user_day: ["userId", "quotaDayKey"],
     by_quotaDayKey: ["quotaDayKey"],
+  },
+  aiUsageRecords: {
+    by_user_createdAt: ["userId", "createdAt"],
+    by_createdAt: ["createdAt"],
   },
   summaryGenerationQuotaReservations: {
     by_userId: ["userId"],
@@ -500,6 +505,7 @@ export class InMemoryDb {
         ...(seed?.observabilityIngestRateLimitMetrics ?? []),
       ],
       summaryGenerationEvents: [...(seed?.summaryGenerationEvents ?? [])],
+      aiUsageRecords: [...(seed?.aiUsageRecords ?? [])],
       aiSummaryAttempts: [...(seed?.aiSummaryAttempts ?? [])],
       summaryQualityEvaluations: [...(seed?.summaryQualityEvaluations ?? [])],
       dailyFeatureVectors: [...(seed?.dailyFeatureVectors ?? [])],

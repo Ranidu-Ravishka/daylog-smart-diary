@@ -131,6 +131,7 @@ const userDeletionStageValidator = v.union(
   v.literal("integrations"),
   v.literal("integrationDailyData"),
   v.literal("integrationSecrets"),
+  v.literal("integrationRevocationJobs"),
   v.literal("integrationSyncRuns"),
   v.literal("exportJobs"),
   v.literal("restoreJobs"),
@@ -145,6 +146,7 @@ const userDeletionStageValidator = v.union(
   v.literal("platformAuditEvents"),
   v.literal("summaryGenerationQuotas"),
   v.literal("summaryGenerationQuotaReservations"),
+  v.literal("aiUsageRecords"),
   v.literal("oauthMobileHandoffs"),
 );
 
@@ -159,12 +161,14 @@ const userDeletionProgressValidator = v.object({
   deletedMemoryMedia: v.number(),
   deletedIntegrationDailyData: v.number(),
   deletedIntegrationSecrets: v.number(),
+  deletedIntegrationRevocationJobs: v.optional(v.number()),
   deletedIntegrationSyncRuns: v.number(),
   deletedIntegrationHealthEvents: v.optional(v.number()),
   deletedExportJobs: v.optional(v.number()),
   deletedRestoreJobs: v.optional(v.number()),
   deletedAiSummaryAttempts: v.optional(v.number()),
   deletedSummaryGenerationEvents: v.optional(v.number()),
+  deletedAiUsageRecords: v.optional(v.number()),
   deletedSummaryQualityEvaluations: v.optional(v.number()),
   deletedDailyFeatureVectors: v.optional(v.number()),
   deletedNextBestDayRecommendations: v.optional(v.number()),
@@ -825,6 +829,7 @@ export default defineSchema(
         integrationSyncRuns: v.optional(v.number()),
         locationSignals: v.number(),
         summaryGenerationEvents: v.number(),
+        aiUsageRecords: v.optional(v.number()),
         aiSummaryAttempts: v.optional(v.number()),
         summaryQualityEvaluations: v.optional(v.number()),
         dailyFeatureVectors: v.optional(v.number()),
@@ -893,6 +898,26 @@ export default defineSchema(
       .index("by_user_day_createdAt", ["userId", "dayKey", "createdAt"])
       .index("by_success_createdAt", ["success", "createdAt"])
       .index("by_attemptChainId_createdAt", ["attemptChainId", "createdAt"]),
+
+    aiUsageRecords: defineTable({
+      userId: v.id("user"),
+      operation: v.union(
+        v.literal("summary_generation"),
+        v.literal("personal_insight"),
+        v.literal("ask_your_day"),
+      ),
+      provider: v.literal("openai"),
+      model: v.string(),
+      status: v.union(v.literal("succeeded"), v.literal("failed")),
+      promptTokens: v.optional(v.number()),
+      completionTokens: v.optional(v.number()),
+      totalTokens: v.optional(v.number()),
+      estimatedCostUsd: v.optional(v.number()),
+      usageSource: v.union(v.literal("provider"), v.literal("estimated")),
+      createdAt: v.number(),
+    })
+      .index("by_user_createdAt", ["userId", "createdAt"])
+      .index("by_createdAt", ["createdAt"]),
 
     aiSummaryAttempts: defineTable({
       userId: v.id("user"),

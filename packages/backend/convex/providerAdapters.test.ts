@@ -4,6 +4,7 @@ import {
   executeWithProviderRetry,
   resolveSummaryModelAdapter,
   isRetryableProviderAdapterError,
+  callOpenAiChatJsonWithUsage,
 } from "./providerAdapters";
 
 afterEach(() => {
@@ -103,5 +104,46 @@ describe("provider adapter unit behavior", () => {
     expect(() => resolveSummaryModelAdapter("anthropic")).toThrow(
       "Unsupported summary model provider: anthropic",
     );
+  });
+
+  it("returns provider usage without exposing credentials", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({ ok: true }),
+              },
+            },
+          ],
+          usage: {
+            prompt_tokens: 12,
+            completion_tokens: 7,
+            total_tokens: 19,
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await callOpenAiChatJsonWithUsage({
+      apiKey: "sk-test-secret",
+      model: "gpt-4o",
+      operation: "test",
+      responseFormat: { type: "json_object" },
+      messages: [{ role: "user", content: "synthetic" }],
+    });
+
+    expect(result).toEqual({
+      data: { ok: true },
+      usage: { promptTokens: 12, completionTokens: 7, totalTokens: 19 },
+    });
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      headers: {
+        Authorization: "Bearer sk-test-secret",
+      },
+    });
   });
 });

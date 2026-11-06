@@ -4,7 +4,7 @@ import AdminGuard from "@/components/admin-guard";
 import { api } from "@repo/backend/convex";
 import { makeFunctionReference } from "convex/server";
 import { useConvex, useConvexAuth, useMutation, useQuery } from "convex/react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { PageContainer } from "@/components/page-container";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -120,7 +120,9 @@ export default function FeatureFlagsPage() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, FlagDraft>>({});
+  const [draftOverrides, setDraftOverrides] = useState<
+    Record<string, FlagDraft>
+  >({});
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -143,18 +145,13 @@ export default function FeatureFlagsPage() {
 
   const upsertFeatureFlag = useMutation(upsertFeatureFlagRef);
 
-  useEffect(() => {
-    if (flags.length === 0) return;
-
-    setDrafts((previous) => {
-      const next = { ...previous };
-      for (const flag of flags) {
-        if (next[flag.key]) continue;
-        next[flag.key] = toDraft(flag);
-      }
-      return next;
-    });
-  }, [flags]);
+  const drafts = useMemo(() => {
+    const next: Record<string, FlagDraft> = {};
+    for (const flag of flags) {
+      next[flag.key] = draftOverrides[flag.key] ?? toDraft(flag);
+    }
+    return next;
+  }, [draftOverrides, flags]);
 
   const sortedFlags = useMemo(
     () =>
@@ -165,7 +162,7 @@ export default function FeatureFlagsPage() {
   );
 
   const updateDraft = (key: string, next: FlagDraft) => {
-    setDrafts((previous) => ({
+    setDraftOverrides((previous) => ({
       ...previous,
       [key]: next,
     }));

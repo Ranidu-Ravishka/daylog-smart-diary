@@ -19,6 +19,7 @@ const POLICY_KEYS: RetentionPolicyKey[] = [
   "integrationSyncRuns",
   "locationSignals",
   "summaryGenerationEvents",
+  "aiUsageRecords",
   "aiSummaryAttempts",
   "summaryQualityEvaluations",
   "dailyFeatureVectors",
@@ -53,6 +54,7 @@ type RetentionDeleteCounts = {
   integrationSyncRuns: number;
   locationSignals: number;
   summaryGenerationEvents: number;
+  aiUsageRecords: number;
   aiSummaryAttempts: number;
   summaryQualityEvaluations: number;
   dailyFeatureVectors: number;
@@ -372,6 +374,25 @@ async function purgeAiSummaryAttempts(
   return staleAttempts.length;
 }
 
+async function purgeAiUsageRecords(
+  ctx: Pick<MutationCtx, "db">,
+  cutoff: number,
+  maxDeletes: number,
+  dryRun: boolean,
+): Promise<number> {
+  const staleRecords = await ctx.db
+    .query("aiUsageRecords")
+    .withIndex("by_createdAt", (q) => q.lt("createdAt", cutoff))
+    .order("asc")
+    .take(maxDeletes);
+
+  if (dryRun) return staleRecords.length;
+  for (const record of staleRecords) {
+    await ctx.db.delete(record._id);
+  }
+  return staleRecords.length;
+}
+
 async function purgeDailyFeatureVectors(
   ctx: Pick<MutationCtx, "db">,
   cutoff: number,
@@ -655,6 +676,7 @@ async function runRetentionCleanupInternal(
     integrationSyncRuns: 0,
     locationSignals: 0,
     summaryGenerationEvents: 0,
+    aiUsageRecords: 0,
     aiSummaryAttempts: 0,
     summaryQualityEvaluations: 0,
     dailyFeatureVectors: 0,
@@ -668,6 +690,11 @@ async function runRetentionCleanupInternal(
     exportArtifactFailures: 0,
     restoreJobs: 0,
     userDeletionJobs: 0,
+  };
+  const omitEmptyAiUsageCount = () => {
+    if (deletedCounts.aiUsageRecords !== 0) return deletedCounts;
+    const { aiUsageRecords: _unused, ...withoutAiUsage } = deletedCounts;
+    return withoutAiUsage;
   };
 
   try {
@@ -800,6 +827,15 @@ async function runRetentionCleanupInternal(
         );
     }
 
+    if (effectivePolicies.aiUsageRecords.enabled) {
+      deletedCounts.aiUsageRecords = await purgeAiUsageRecords(
+        ctx,
+        retentionCutoff(startedAt, effectivePolicies.aiUsageRecords.retentionDays),
+        args.maxDeletesPerPolicy,
+        args.dryRun,
+      );
+    }
+
     if (effectivePolicies.summaryGenerationQuotas.enabled) {
       deletedCounts.summaryGenerationQuotas =
         await purgeSummaryGenerationQuotas(
@@ -897,7 +933,7 @@ async function runRetentionCleanupInternal(
       startedAt,
       finishedAt,
       policySnapshot: summarizePolicies(effectivePolicies),
-      deletedCounts,
+      deletedCounts: omitEmptyAiUsageCount(),
       actorUserId: args.actorUserId,
     });
 
@@ -909,7 +945,7 @@ async function runRetentionCleanupInternal(
       target: String(runId),
       details: safeDetailsJson({
         trigger: args.trigger,
-        deletedCounts,
+        deletedCounts: omitEmptyAiUsageCount(),
       }),
       at: finishedAt,
     });
@@ -920,7 +956,7 @@ async function runRetentionCleanupInternal(
       dryRun: args.dryRun,
       startedAt,
       finishedAt,
-      deletedCounts,
+      deletedCounts: omitEmptyAiUsageCount(),
       policies: summarizePolicies(effectivePolicies),
     };
   } catch (error) {

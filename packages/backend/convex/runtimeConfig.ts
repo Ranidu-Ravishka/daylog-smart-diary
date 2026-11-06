@@ -9,6 +9,7 @@ const RETENTION_DAY_SUMMARIES_DAYS_ENV = "RETENTION_DAY_SUMMARIES_DAYS";
 const RETENTION_INTEGRATION_DATA_DAYS_ENV = "RETENTION_INTEGRATION_DATA_DAYS";
 const RETENTION_LOCATION_SIGNALS_DAYS_ENV = "RETENTION_LOCATION_SIGNALS_DAYS";
 const RETENTION_SUMMARY_EVENTS_DAYS_ENV = "RETENTION_SUMMARY_EVENTS_DAYS";
+const RETENTION_AI_USAGE_DAYS_ENV = "RETENTION_AI_USAGE_DAYS";
 const RETENTION_AI_SUMMARY_ATTEMPTS_DAYS_ENV =
   "RETENTION_AI_SUMMARY_ATTEMPTS_DAYS";
 const RETENTION_INFO_EVENTS_DAYS_ENV = "RETENTION_INFO_EVENTS_DAYS";
@@ -141,6 +142,7 @@ export type RetentionPolicyKey =
   | "integrationSyncRuns"
   | "locationSignals"
   | "summaryGenerationEvents"
+  | "aiUsageRecords"
   | "aiSummaryAttempts"
   | "summaryQualityEvaluations"
   | "dailyFeatureVectors"
@@ -227,6 +229,16 @@ export function getRetentionPolicyDefaults(): Record<
       retentionDays: parseBoundedInt({
         envName: RETENTION_SUMMARY_EVENTS_DAYS_ENV,
         fallback: 60,
+        min: 1,
+        max: 3650,
+      }),
+      sensitive: false,
+      enabled: true,
+    },
+    aiUsageRecords: {
+      retentionDays: parseBoundedInt({
+        envName: RETENTION_AI_USAGE_DAYS_ENV,
+        fallback: 180,
         min: 1,
         max: 3650,
       }),

@@ -24,12 +24,14 @@ export type UserCascadeDeleteCounts = {
   deletedMemoryMedia: number;
   deletedIntegrationDailyData: number;
   deletedIntegrationSecrets: number;
+  deletedIntegrationRevocationJobs: number;
   deletedIntegrationSyncRuns: number;
   deletedIntegrationHealthEvents: number;
   deletedExportJobs: number;
   deletedRestoreJobs: number;
   deletedAiSummaryAttempts: number;
   deletedSummaryGenerationEvents: number;
+  deletedAiUsageRecords?: number;
   deletedSummaryQualityEvaluations: number;
   deletedDailyFeatureVectors: number;
   deletedNextBestDayRecommendations: number;
@@ -54,12 +56,14 @@ export const USER_CASCADE_DELETION_STAGES = [
   "integrations",
   "integrationDailyData",
   "integrationSecrets",
+  "integrationRevocationJobs",
   "integrationSyncRuns",
   "exportJobs",
   "restoreJobs",
   "summaryQualityEvaluations",
   "aiSummaryAttempts",
   "summaryGenerationEvents",
+  "aiUsageRecords",
   "dailyFeatureVectors",
   "nextBestDayRecommendations",
   "integrationHealthEvents",
@@ -103,12 +107,14 @@ function emptyUserCascadeDeleteProgress(): UserCascadeDeleteProgress {
     deletedMemoryMedia: 0,
     deletedIntegrationDailyData: 0,
     deletedIntegrationSecrets: 0,
+    deletedIntegrationRevocationJobs: 0,
     deletedIntegrationSyncRuns: 0,
     deletedIntegrationHealthEvents: 0,
     deletedExportJobs: 0,
     deletedRestoreJobs: 0,
     deletedAiSummaryAttempts: 0,
     deletedSummaryGenerationEvents: 0,
+    deletedAiUsageRecords: 0,
     deletedSummaryQualityEvaluations: 0,
     deletedDailyFeatureVectors: 0,
     deletedNextBestDayRecommendations: 0,
@@ -136,6 +142,9 @@ function mergeUserCascadeDeleteProgress(
       base.deletedIntegrationDailyData + delta.deletedIntegrationDailyData,
     deletedIntegrationSecrets:
       base.deletedIntegrationSecrets + delta.deletedIntegrationSecrets,
+    deletedIntegrationRevocationJobs:
+      base.deletedIntegrationRevocationJobs +
+      delta.deletedIntegrationRevocationJobs,
     deletedIntegrationSyncRuns:
       base.deletedIntegrationSyncRuns + delta.deletedIntegrationSyncRuns,
     deletedIntegrationHealthEvents:
@@ -148,6 +157,8 @@ function mergeUserCascadeDeleteProgress(
     deletedSummaryGenerationEvents:
       base.deletedSummaryGenerationEvents +
       delta.deletedSummaryGenerationEvents,
+    deletedAiUsageRecords:
+      (base.deletedAiUsageRecords ?? 0) + (delta.deletedAiUsageRecords ?? 0),
     deletedSummaryQualityEvaluations:
       base.deletedSummaryQualityEvaluations +
       delta.deletedSummaryQualityEvaluations,
@@ -181,12 +192,16 @@ function toUserCascadeDeleteCounts(
     deletedMemoryMedia: progress.deletedMemoryMedia,
     deletedIntegrationDailyData: progress.deletedIntegrationDailyData,
     deletedIntegrationSecrets: progress.deletedIntegrationSecrets,
+    deletedIntegrationRevocationJobs: progress.deletedIntegrationRevocationJobs,
     deletedIntegrationSyncRuns: progress.deletedIntegrationSyncRuns,
     deletedIntegrationHealthEvents: progress.deletedIntegrationHealthEvents,
     deletedExportJobs: progress.deletedExportJobs,
     deletedRestoreJobs: progress.deletedRestoreJobs,
     deletedAiSummaryAttempts: progress.deletedAiSummaryAttempts,
     deletedSummaryGenerationEvents: progress.deletedSummaryGenerationEvents,
+    ...((progress.deletedAiUsageRecords ?? 0) > 0
+      ? { deletedAiUsageRecords: progress.deletedAiUsageRecords }
+      : {}),
     deletedSummaryQualityEvaluations: progress.deletedSummaryQualityEvaluations,
     deletedDailyFeatureVectors: progress.deletedDailyFeatureVectors,
     deletedNextBestDayRecommendations:
@@ -262,6 +277,17 @@ async function deleteMemoryMediaByUserBatch(
 
   let deleted = 0;
   for (const mediaDoc of page.page) {
+    const memory = await ctx.db.get(mediaDoc.memoryId);
+    if (
+      memory?.thumbnailStorageId &&
+      memory.thumbnailStorageId !== mediaDoc.storageId
+    ) {
+      await safeDeleteStorageBlob(ctx, memory.thumbnailStorageId);
+      await ctx.db.patch(memory._id, { thumbnailStorageId: undefined });
+    } else if (memory?.thumbnailStorageId === mediaDoc.storageId) {
+      await ctx.db.patch(memory._id, { thumbnailStorageId: undefined });
+    }
+
     await safeDeleteStorageBlob(ctx, mediaDoc.storageId);
     await ctx.db.delete(mediaDoc._id);
     deleted += 1;
@@ -290,6 +316,9 @@ async function deleteMemoriesByUserBatch(
 
   let deleted = 0;
   for (const memory of page.page) {
+    if (memory.thumbnailStorageId) {
+      await safeDeleteStorageBlob(ctx, memory.thumbnailStorageId);
+    }
     await ctx.db.delete(memory._id);
     deleted += 1;
   }
@@ -477,6 +506,37 @@ async function deleteIntegrationSyncRunsByUserBatch(
   };
 }
 
+async function deleteIntegrationRevocationJobsByUserBatch(
+  ctx: CascadeCtx,
+  userId: Id<"user">,
+  cursor: string | null,
+  batchSize: number,
+): Promise<BatchDeleteResult> {
+  const page = await ctx.db
+    .query("integrationRevocationJobs")
+    .withIndex("by_user_tokenRef", (q) => q.eq("userId", userId))
+    .paginate({
+      numItems: batchSize,
+      cursor,
+    });
+
+  let deleted = 0;
+  for (const job of page.page) {
+    if (job.status === "pending" || job.status === "processing") {
+      continue;
+    }
+
+    await ctx.db.delete(job._id);
+    deleted += 1;
+  }
+
+  return {
+    deleted,
+    isDone: page.isDone,
+    nextCursor: page.isDone ? null : page.continueCursor,
+  };
+}
+
 async function deleteExportJobsByUserBatch(
   ctx: CascadeCtx,
   userId: Id<"user">,
@@ -610,6 +670,31 @@ async function deleteAiSummaryAttemptsByUserBatch(
 
   return {
     deleted,
+    isDone: page.isDone,
+    nextCursor: page.isDone ? null : page.continueCursor,
+  };
+}
+
+async function deleteAiUsageRecordsByUserBatch(
+  ctx: CascadeCtx,
+  userId: Id<"user">,
+  cursor: string | null,
+  batchSize: number,
+): Promise<BatchDeleteResult> {
+  const page = await ctx.db
+    .query("aiUsageRecords")
+    .withIndex("by_user_createdAt", (q) => q.eq("userId", userId))
+    .paginate({
+      numItems: batchSize,
+      cursor,
+    });
+
+  for (const record of page.page) {
+    await ctx.db.delete(record._id);
+  }
+
+  return {
+    deleted: page.page.length,
     isDone: page.isDone,
     nextCursor: page.isDone ? null : page.continueCursor,
   };
@@ -937,6 +1022,16 @@ export async function runUserCascadeDeletionStageBatch(
       deleted.deletedIntegrationSecrets = result.deleted;
       break;
     }
+    case "integrationRevocationJobs": {
+      result = await deleteIntegrationRevocationJobsByUserBatch(
+        ctx,
+        input.userId,
+        input.cursor,
+        batchSize,
+      );
+      deleted.deletedIntegrationRevocationJobs = result.deleted;
+      break;
+    }
     case "integrationSyncRuns": {
       result = await deleteIntegrationSyncRunsByUserBatch(
         ctx,
@@ -995,6 +1090,16 @@ export async function runUserCascadeDeletionStageBatch(
         batchSize,
       );
       deleted.deletedSummaryGenerationEvents = result.deleted;
+      break;
+    }
+    case "aiUsageRecords": {
+      result = await deleteAiUsageRecordsByUserBatch(
+        ctx,
+        input.userId,
+        input.cursor,
+        batchSize,
+      );
+      deleted.deletedAiUsageRecords = result.deleted;
       break;
     }
     case "dailyFeatureVectors": {
