@@ -64,7 +64,7 @@ jobs:
     # Block build/lint/typecheck until branch protection verification passes.
     needs:
       - branch-protection-verification
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       # Dummy Convex URL so ConvexReactClient doesn't fail during Next.js build in CI
       NEXT_PUBLIC_CONVEX_URL: "https://dummy.convex.invalid"
@@ -218,7 +218,7 @@ jobs:
           key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Install Playwright (Chromium)
-        run: pnpm --filter web exec playwright install chromium --with-deps
+        run: pnpm --filter web exec playwright install --with-deps chromium
 
       - name: Web Playwright E2E (OAuth proxy)
         run: pnpm --filter web test:e2e
